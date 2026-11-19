@@ -92,6 +92,7 @@ name = "app"
 version = "0.1.0"
 dependencies = [
  "log",
+ "mam-archive",
  "mam-chapter",
  "mam-database",
  "mam-interface",
@@ -2021,14 +2022,19 @@ dependencies = [
 name = "mam-archive"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "flate2",
  "mam-core",
+ "mam-database",
  "mam-storage",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 1.0.69",
+ "tokio",
  "uuid",
  "walkdir",
+ "zip",
 ]
 
 [[package]]
@@ -2079,6 +2085,7 @@ dependencies = [
 name = "mam-interface"
 version = "0.1.0"
 dependencies = [
+ "mam-archive",
  "mam-chapter",
  "mam-core",
  "mam-database",
