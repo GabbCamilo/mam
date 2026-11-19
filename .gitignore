@@ -1,0 +1,38 @@
+# Build artifacts
+backend/target/
+**/target/
+
+# Node.js
+node_modules/
+**/node_modules/
+
+# Frontend build
+backend/dist/
+**/dist/
+
+# Rust
+*.rs.bak
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+Logs/
+
+# Temporary
+tmp/
+temp/
+*.tmp

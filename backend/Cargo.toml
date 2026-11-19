@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "core",
+    "library",
+    "chapter",
+    "storage",
+    "archive",
+    "transfer",
+    "ai-engine",
+    "interface",
+    "src-tauri",
+]
+
+[profile.dev]
+opt-level = 1
+debug = true
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = false
+codegen-units = 4

@@ -1,0 +1,19 @@
+[package]
+name = "mam-transfer"
+description = "MAM Transfer Manager — cópia integral, sincronização, transferência seletiva"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }
+thiserror = "1"
+walkdir = "2"
+mam-core = { path = "../core" }
+mam-storage = { path = "../storage" }
+
+[dev-dependencies]
+serde_json = "1"
