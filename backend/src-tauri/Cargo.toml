@@ -24,3 +24,4 @@ log = "0.4"
 tauri = { version = "2.12.7" }
 tauri-plugin-log = "2"
 mam-interface = { path = "../interface" }
+mam-database = { path = "../database" }

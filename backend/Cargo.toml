@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "core",
+    "database",
     "library",
     "chapter",
     "storage",
