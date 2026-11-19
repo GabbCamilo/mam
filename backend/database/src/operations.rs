@@ -199,7 +199,7 @@ impl Database {
         &self,
         tipo: String,
         alvo_caminho: Option<String>,
-        detalhes: Option<serde_json::Value>,
+        detalhes: Option<String>,
         usuario: Option<String>,
     ) -> DbResult<Uuid> {
         let id = Uuid::new_v4();
@@ -211,11 +211,67 @@ impl Database {
                 id.to_string(),
                 tipo,
                 alvo_caminho,
-                detalhes.map(|d| d.to_string()),
+                detalhes,
                 usuario,
             ],
         )?;
         Ok(id)
+    }
+
+    // ── Busca de obra por título ──
+
+    pub async fn buscar_obra_por_titulo(&self, titulo: &str) -> DbResult<Option<Obra>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, titulo, caminho_relativo, origem, data_arquivamento, estado_integridade, metadados_complementares FROM obras WHERE titulo = ?1"
+        )?;
+        let mut rows = stmt.query_map(params![titulo], |row| {
+            Ok(Obra {
+                id: ObraId::from_string(row.get(0)?),
+                titulo: row.get(1)?,
+                caminho_relativo: CaminhoRelativo::from_str(row.get(2)?),
+                origem: row.get(3)?,
+                data_arquivamento: DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or(Utc::now()),
+                estado_integridade: EstadoIntegridade::from_str(&row.get::<_, String>(5)?),
+                metadados_complementares: row.get(6)?,
+            })
+        })?;
+        let obra = rows.next().transpose()?;
+        Ok(obra)
+    }
+
+    // ── Criação de volume ──
+
+    pub async fn criar_volume(
+        &self,
+        id: VolumeId,
+        obra_id: ObraId,
+        titulo: String,
+        caminho_relativo: CaminhoRelativo,
+    ) -> DbResult<Volume> {
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO volumes (id, obra_id, numero, caminho_relativo, titulo)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                id.to_string(),
+                obra_id.to_string(),
+                0, // número será atualizado posteriormente
+                caminho_relativo.as_str(),
+                titulo,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(Volume {
+            id,
+            obra_id,
+            numero: 0,
+            caminho_relativo,
+            titulo: Some(titulo),
+        })
     }
 }
 

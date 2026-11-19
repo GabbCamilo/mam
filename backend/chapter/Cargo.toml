@@ -1,16 +1,22 @@
 [package]
 name = "mam-chapter"
-description = "MAM Chapter Manager — detecção de capítulos e páginas"
+description = "MAM Chapter Manager — detecção e parsing de capítulos CBZ"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+walkdir = "2"
+zip = "0.6"
+sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
-walkdir = "2"
+chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
+tokio = { version = "1", features = ["rt"] }
 mam-core = { path = "../core" }
+mam-database = { path = "../database" }
+mam-storage = { path = "../storage" }
 
 [dev-dependencies]
 serde_json = "1"
