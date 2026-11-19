@@ -9,10 +9,11 @@
 //! O macro #[command] é aplicado no src-tauri via wrappers.
 
 use std::sync::Arc;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use mam_database::Database;
 use mam_chapter::ChapterManager;
+use mam_archive::ArchiveManager;
 
 /// Retorna o status do banco de dados.
 pub async fn db_health() -> String {
@@ -61,6 +62,57 @@ pub async fn chapter_listar_por_obra(
 /// Retorna o caminho da raiz da biblioteca configurada.
 pub async fn library_raiz() -> Result<String, String> {
     Ok(PathBuf::from("MAM_LIBRARY").to_string_lossy().to_string())
+}
+
+/// Cria um arquivo CBZ a partir de um diretório de imagens.
+pub async fn archive_criar_cbz(
+    archive_manager: Arc<ArchiveManager>,
+    imagens_dir: String,
+    caminho_destino: String,
+) -> Result<String, String> {
+    let imagens_path = Path::new(&imagens_dir);
+    let destino_path = Path::new(&caminho_destino);
+
+    let resultado = archive_manager
+        .criar_cbz_de_imagens(imagens_path, destino_path)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(format!(
+        "CBZ criado: {} ({} páginas, hash: {})",
+        resultado.caminho_destino,
+        resultado.quantidade_paginas,
+        &resultado.hash_sha256[..8]
+    ))
+}
+
+/// Lê um arquivo CBZ existente e retorna informações das páginas.
+pub async fn archive_ler_cbz(
+    archive_manager: Arc<ArchiveManager>,
+    caminho_cbz: String,
+) -> Result<String, String> {
+    let cbz = archive_manager
+        .ler_cbz(Path::new(&caminho_cbz))
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(format!(
+        "CBZ: {} - {} páginas, {} ausentes",
+        cbz.caminho,
+        cbz.quantidade_paginas,
+        cbz.paginas_ausentes.len()
+    ))
+}
+
+/// Valida a integridade de um arquivo CBZ.
+pub async fn archive_validar_cbz(
+    archive_manager: Arc<ArchiveManager>,
+    caminho_cbz: String,
+) -> Result<bool, String> {
+    archive_manager
+        .validar_cbz(Path::new(&caminho_cbz))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
