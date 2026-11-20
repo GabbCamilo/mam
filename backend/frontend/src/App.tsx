@@ -4,11 +4,13 @@ import {
   CapituloBuscaResultado,
   DetalhesObra,
   DiferencaBibliotecas,
+  ExtratorInfo,
   FonteInfo,
   ModeloInfo,
   Obra,
   ObraBuscaResultado,
   RelatorioTransferencia,
+  ResultadoImportacao,
   StatusOperacao,
   mamApi,
 } from './api'
@@ -42,6 +44,13 @@ function App() {
   const [capitulosFonte, setCapitulosFonte] = useState<CapituloBuscaResultado[]>([])
   const [selecionadosIds, setSelecionadosIds] = useState<string[]>([])
   const [statusArquivamento, setStatusArquivamento] = useState<StatusOperacao | null>(null)
+  const [extratores, setExtratores] = useState<ExtratorInfo[]>([])
+  const [extObraTitulo, setExtObraTitulo] = useState('')
+  const [extNumeroCap, setExtNumeroCap] = useState('1')
+  const [extUrl, setExtUrl] = useState('')
+  const [extHtml, setExtHtml] = useState('')
+  const [extUrlsTexto, setExtUrlsTexto] = useState('')
+  const [resultadoImportacao, setResultadoImportacao] = useState<ResultadoImportacao | null>(null)
 
   async function carregarObras() {
     try {
@@ -147,10 +156,40 @@ function App() {
 
   async function handleCarregarFontes() {
     try {
-      const lista = await mamApi.sourceListarFontes()
+      const [lista, listaExt] = await Promise.all([
+        mamApi.sourceListarFontes(),
+        mamApi.sourceListarExtratores(),
+      ])
       setFontes(lista)
+      setExtratores(listaExt)
     } catch (err) {
       setMensagem(`Erro ao listar fontes: ${String(err)}`)
+    }
+  }
+
+  async function handleImportarExtrator(e: React.FormEvent) {
+    e.preventDefault()
+    if (!extObraTitulo.trim()) return
+    const urls_ordenadas = extUrlsTexto
+      .split(/\r?\n/)
+      .map((u) => u.trim())
+      .filter((u) => u.length > 0)
+
+    try {
+      const res = await mamApi.sourceImportarExtrator({
+        obra_titulo: extObraTitulo.trim(),
+        numero_capitulo: Number.parseInt(extNumeroCap, 10) || 1,
+        url: extUrl.trim() || null,
+        html: extHtml.trim() || null,
+        urls_ordenadas,
+      })
+      setResultadoImportacao(res)
+      setMensagem(
+        `Importado via '${res.extrator_usado}': ${res.caminho_relativo} (${res.quantidade_paginas} págs).`,
+      )
+      await carregarObras()
+    } catch (err) {
+      setMensagem(`Erro na importação modular: ${String(err)}`)
     }
   }
 
@@ -395,6 +434,55 @@ function App() {
               )}
             </div>
           </div>
+
+          <hr style={{ margin: '1rem 0' }} />
+          <h3>Importar por Link Direto / HTML / Lista Ordenada (Extratores Modulares)</h3>
+          <p style={{ color: '#555', margin: 0 }}>
+            Extratores registrados: {extratores.map((e) => e.id).join(', ') || 'carregando...'}
+          </p>
+          <form onSubmit={handleImportarExtrator} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <input
+                placeholder="Título da obra (ex: Medaka Box)"
+                value={extObraTitulo}
+                onChange={(e) => setExtObraTitulo(e.target.value)}
+                style={{ minWidth: 220 }}
+              />
+              <input
+                type="number"
+                placeholder="Nº Cap."
+                value={extNumeroCap}
+                onChange={(e) => setExtNumeroCap(e.target.value)}
+                style={{ width: 90 }}
+              />
+              <input
+                placeholder="Link do capítulo/obra (mangadex.org, mangafire.to, etc.)"
+                value={extUrl}
+                onChange={(e) => setExtUrl(e.target.value)}
+                style={{ minWidth: 320 }}
+              />
+            </div>
+            <textarea
+              placeholder="Lista ordenada de URLs de páginas (uma por linha, opcional)"
+              value={extUrlsTexto}
+              onChange={(e) => setExtUrlsTexto(e.target.value)}
+              rows={3}
+            />
+            <textarea
+              placeholder="HTML da página do capítulo (opcional — útil para MangaFire/sites dinâmicos)"
+              value={extHtml}
+              onChange={(e) => setExtHtml(e.target.value)}
+              rows={3}
+            />
+            <div>
+              <button type="submit">Importar e Gerar CBZ na Biblioteca</button>
+            </div>
+          </form>
+          {resultadoImportacao && (
+            <pre style={{ background: '#f4f4f6', padding: '0.75rem', borderRadius: 6 }}>
+              {JSON.stringify(resultadoImportacao, null, 2)}
+            </pre>
+          )}
         </section>
       )}
 

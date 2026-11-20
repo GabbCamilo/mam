@@ -1,0 +1,74 @@
+//! Extrator modular para páginas do MangaFire (`mangafire.to`) via HTML ou lista ordenada de URLs.
+//! Não implementa contorno de anti-bot, DRM ou paywall.
+
+use async_trait::async_trait;
+
+use crate::SourceError;
+use crate::extractors::{EntradaImportacao, ExtratorSite, extrair_urls_imagens_html};
+
+/// Extrator modular para links `mangafire.to/...`.
+pub struct MangaFireExtractor {
+    client: reqwest::Client,
+}
+
+impl MangaFireExtractor {
+    pub fn nova() -> Self {
+        let client = reqwest::Client::builder()
+            .user_agent("MAM-MangaArchiveManager/0.1.0")
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        Self { client }
+    }
+}
+
+impl Default for MangaFireExtractor {
+    fn default() -> Self {
+        Self::nova()
+    }
+}
+
+#[async_trait]
+impl ExtratorSite for MangaFireExtractor {
+    fn id(&self) -> &str {
+        "mangafire"
+    }
+
+    fn descricao(&self) -> &str {
+        "MangaFire (HTML do capítulo ou lista ordenada de URLs)"
+    }
+
+    fn suporta_url(&self, url: &str) -> bool {
+        url.to_lowercase().contains("mangafire.to")
+    }
+
+    async fn extrair_paginas(&self, entrada: &EntradaImportacao) -> Result<Vec<String>, SourceError> {
+        if !entrada.urls_ordenadas.is_empty() {
+            return Ok(entrada.urls_ordenadas.clone());
+        }
+
+        if let Some(html) = entrada.html.as_deref().filter(|h| !h.trim().is_empty()) {
+            let paginas = extrair_urls_imagens_html(html);
+            if paginas.is_empty() {
+                return Err(SourceError::Operacao(
+                    "Nenhuma URL de imagem encontrada no HTML fornecido do MangaFire".to_string(),
+                ));
+            }
+            return Ok(paginas);
+        }
+
+        if let Some(url) = entrada.url.as_deref().filter(|u| !u.trim().is_empty()) {
+            let resp = self.client.get(url).send().await?;
+            if resp.status().is_success() {
+                let html = resp.text().await?;
+                let paginas = extrair_urls_imagens_html(&html);
+                if !paginas.is_empty() {
+                    return Ok(paginas);
+                }
+            }
+        }
+
+        Err(SourceError::Operacao(
+            "O MangaFire requer HTML da página do capítulo ou lista ordenada de URLs de imagem (sem contorno anti-bot)".to_string(),
+        ))
+    }
+}

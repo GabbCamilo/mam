@@ -120,6 +120,28 @@ export interface ResultadoIA {
   estado_revisao: string
 }
 
+export interface ExtratorInfo {
+  id: string
+  descricao: string
+}
+
+export interface EntradaImportacao {
+  obra_titulo: string
+  numero_capitulo: number
+  url?: string | null
+  html?: string | null
+  urls_ordenadas: string[]
+}
+
+export interface ResultadoImportacao {
+  extrator_usado: string
+  obra_titulo: string
+  numero_capitulo: number
+  caminho_relativo: string
+  quantidade_paginas: number
+  hash_sha256: string
+}
+
 export const mamApi = {
   healthCheck: () => invoke<string>('health_check'),
   libraryRaiz: () => invoke<string>('library_raiz'),
@@ -180,4 +202,7 @@ export const mamApi = {
     invoke<ResultadoIA[]>('ai_listar_resultados_capitulo', { capituloId }),
   aiRevisarResultado: (resultadoId: string, resultadoJsonRevisado: string) =>
     invoke<void>('ai_revisar_resultado', { resultadoId, resultadoJsonRevisado }),
+  sourceListarExtratores: () => invoke<ExtratorInfo[]>('source_listar_extratores'),
+  sourceImportarExtrator: (entrada: EntradaImportacao) =>
+    invoke<ResultadoImportacao>('source_importar_extrator', { entrada }),
 }

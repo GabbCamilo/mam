@@ -32,7 +32,12 @@ use mam_interface::{
     ai_listar_modelos as if_ai_listar_modelos,
     ai_listar_resultados_capitulo as if_ai_listar_resultados_capitulo,
     ai_revisar_resultado as if_ai_revisar_resultado,
+    CachePaginas,
+    source_listar_extratores as if_source_listar_extratores,
+    source_importar_extrator as if_source_importar_extrator,
 };
+use mam_source_integration::extractors::{EntradaImportacao, ExtratorInfo, ResultadoImportacao};
+use mam_storage::CacheL1Lru;
 use mam_ai_engine::{AiEngineManager, ModeloInfo};
 use mam_transfer::{DiferencaBibliotecas, RelatorioTransferencia, TransferManager};
 use mam_source_integration::SourceIntegrationManager;
@@ -206,12 +211,14 @@ async fn source_status_operacao(
 async fn reader_obter_pagina(
     archive_manager: tauri::State<'_, Arc<ArchiveManager>>,
     library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    cache: tauri::State<'_, Arc<CachePaginas>>,
     caminho_cbz: String,
     indice: usize,
 ) -> Result<PaginaExtraida, String> {
     if_reader_obter_pagina(
         archive_manager.inner().clone(),
         library_manager.inner().clone(),
+        cache.inner().clone(),
         caminho_cbz,
         indice,
     )
@@ -340,6 +347,20 @@ async fn ai_revisar_resultado(
     if_ai_revisar_resultado(db.inner().clone(), resultado_id, resultado_json_revisado).await
 }
 
+#[tauri::command]
+async fn source_listar_extratores() -> Result<Vec<ExtratorInfo>, String> {
+    if_source_listar_extratores().await
+}
+
+#[tauri::command]
+async fn source_importar_extrator(
+    db: tauri::State<'_, Arc<Database>>,
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    entrada: EntradaImportacao,
+) -> Result<ResultadoImportacao, String> {
+    if_source_importar_extrator(db.inner().clone(), library_manager.inner().clone(), entrada).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -379,6 +400,8 @@ pub fn run() {
       ai_listar_modelos,
       ai_listar_resultados_capitulo,
       ai_revisar_resultado,
+      source_listar_extratores,
+      source_importar_extrator,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {
@@ -407,6 +430,10 @@ pub fn run() {
 
       let db_arc = Arc::new(db);
       app.manage(db_arc.clone());
+
+      // Inicializa o Cache L1 LRU de páginas em memória (64 páginas)
+      let cache_paginas: Arc<CachePaginas> = Arc::new(tokio::sync::Mutex::new(CacheL1Lru::nova(64)));
+      app.manage(cache_paginas);
 
       // Inicializa o ChapterManager como estado
       let chapter_manager = ChapterManager::nova(db_arc.clone(), raiz_biblioteca.clone());

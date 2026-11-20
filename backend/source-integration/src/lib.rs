@@ -18,6 +18,7 @@ use crate::duplicatas::EstatisticasDuplicatas;
 
 use serde::{Deserialize, Serialize};
 
+pub mod extractors;
 pub mod fonte;
 pub mod mangadex;
 mod busca;
@@ -353,7 +354,7 @@ impl SourceIntegrationManager {
     }
 }
 
-fn sanitizar_nome(s: &str) -> String {
+pub fn sanitizar_nome(s: &str) -> String {
     let limpo: String = s
         .chars()
         .map(|c| match c {

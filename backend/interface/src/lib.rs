@@ -16,6 +16,11 @@ use mam_chapter::ChapterManager;
 use mam_archive::{ArchiveManager, PaginaExtraida};
 use mam_source_integration::SourceIntegrationManager;
 use mam_source_integration::{FonteInfo, ObraBuscaResultado, CapituloBuscaResultado, StatusOperacao};
+use mam_source_integration::extractors::{EntradaImportacao, ExtratorInfo, RegistroExtratores, ResultadoImportacao};
+use mam_storage::CacheL1Lru;
+
+/// Cache L1 LRU em memória para páginas extraídas sob demanda.
+pub type CachePaginas = tokio::sync::Mutex<CacheL1Lru<String, PaginaExtraida>>;
 use mam_core::{CapituloId, ObraId};
 use mam_database::models::{Obra, ResultadoIA, Volume};
 use mam_library::{DetalhesObra, LibraryManager};
@@ -257,13 +262,22 @@ pub struct MarcadorPagina {
     pub nota: String,
 }
 
-/// Lê uma página específica de um arquivo CBZ sob demanda (resolvendo caminho relativo à biblioteca).
+/// Lê uma página específica de um arquivo CBZ sob demanda, utilizando Cache L1 LRU em memória.
 pub async fn reader_obter_pagina(
     archive_manager: Arc<ArchiveManager>,
     library_manager: Arc<LibraryManager>,
+    cache: Arc<CachePaginas>,
     caminho_cbz: String,
     indice: usize,
 ) -> Result<PaginaExtraida, String> {
+    let chave_cache = format!("{}#{}", caminho_cbz, indice);
+    {
+        let mut guard = cache.lock().await;
+        if let Some(pagina) = guard.obter(&chave_cache) {
+            return Ok(pagina.clone());
+        }
+    }
+
     let path = Path::new(&caminho_cbz);
     let caminho_resolvido = if path.is_relative() {
         library_manager.raiz().join(path)
@@ -271,10 +285,17 @@ pub async fn reader_obter_pagina(
         path.to_path_buf()
     };
 
-    archive_manager
+    let extraida = archive_manager
         .ler_pagina(&caminho_resolvido, indice)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    {
+        let mut guard = cache.lock().await;
+        guard.inserir(chave_cache, extraida.clone());
+    }
+
+    Ok(extraida)
 }
 
 /// Salva a última página lida de um capítulo no banco local.
@@ -459,6 +480,23 @@ pub async fn ai_revisar_resultado(
         .map_err(|e| e.to_string())
 }
 
+/// Lista os extratores modulares disponíveis (MangaDex, MangaFire, Genérico, etc.).
+pub async fn source_listar_extratores() -> Result<Vec<ExtratorInfo>, String> {
+    Ok(RegistroExtratores::padrao().listar())
+}
+
+/// Importa um capítulo usando o extrator modular adequado (URL, HTML ou lista ordenada de URLs).
+pub async fn source_importar_extrator(
+    db: Arc<Database>,
+    library_manager: Arc<LibraryManager>,
+    entrada: EntradaImportacao,
+) -> Result<ResultadoImportacao, String> {
+    RegistroExtratores::padrao()
+        .importar_capitulo(&db, library_manager.raiz(), &entrada)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -540,11 +578,19 @@ mod tests {
         let caminho_cap_rel = detalhes.capitulos_avulsos[0].caminho_relativo.as_str().to_string();
         assert_eq!(caminho_cap_rel, rel_cap);
 
-        let pagina = reader_obter_pagina(arch_b, lib_b, caminho_cap_rel, 0)
+        let cache_b = Arc::new(tokio::sync::Mutex::new(CacheL1Lru::nova(16)));
+        let pagina = reader_obter_pagina(arch_b.clone(), lib_b.clone(), cache_b.clone(), caminho_cap_rel.clone(), 0)
             .await
             .expect("ler pagina do CBZ no PC B usando caminho relativo");
         assert_eq!(pagina.nome, "001.jpg");
         assert_eq!(pagina.total_paginas, 1);
+
+        // Remove o arquivo do disco para provar que a 2ª leitura vem do Cache L1 LRU
+        let _ = fs::remove_file(ssd_pc_b.join(&caminho_cap_rel));
+        let pagina_cache = reader_obter_pagina(arch_b, lib_b, cache_b, caminho_cap_rel, 0)
+            .await
+            .expect("ler pagina do cache L1 LRU");
+        assert_eq!(pagina_cache.nome, "001.jpg");
 
         let progresso = reader_obter_progresso(db_b, cap.id.to_string())
             .await
