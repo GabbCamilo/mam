@@ -359,7 +359,20 @@ impl SourceIntegrationManager {
                 return Err(SourceError::FonteNaoAutorizada(cap.fonte_id));
             }
 
-            let cbz_bytes = fonte.obter_capitulo(&cap.capitulo_id_fonte).await?;
+            let cbz_bytes = match fonte.obter_capitulo(&cap.capitulo_id_fonte).await {
+                Ok(b) => b,
+                Err(_) => {
+                    self.arquivar_capitulo(id_operacao, &cap.fonte_id, &cap)
+                        .await?;
+                    continue;
+                }
+            };
+            let qtd_paginas = contar_paginas_cbz_bytes(&cbz_bytes) as i32;
+            if qtd_paginas <= 0 {
+                self.arquivar_capitulo(id_operacao, &cap.fonte_id, &cap)
+                    .await?;
+                continue;
+            }
             use sha2::Digest;
             let hash = format!("{:x}", sha2::Sha256::digest(&cbz_bytes));
 
@@ -432,7 +445,6 @@ impl SourceIntegrationManager {
                 .registrar_integridade(&caminho_rel_cap, &hash, "valido")
                 .await?;
 
-            let qtd_paginas = contar_paginas_cbz_bytes(&cbz_bytes) as i32;
             let cap_id = mam_core::CapituloId::new();
             self.db
                 .criar_capitulo_com_idioma(

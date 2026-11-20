@@ -166,6 +166,7 @@ impl Fonte for MangaDexFonte {
             .query(&[
                 ("limit", "100"),
                 ("order[chapter]", "asc"),
+                ("includeExternalUrl", "0"),
                 ("translatedLanguage[]", "pt-br"),
                 ("translatedLanguage[]", "en"),
             ])
@@ -227,6 +228,13 @@ impl Fonte for MangaDexFonte {
             .json()
             .await
             .map_err(|e| FonteError::Desconhecido(e.to_string()))?;
+
+        if at_home.chapter.data.is_empty() {
+            return Err(FonteError::Desconhecido(
+                "Capítulo sem páginas disponíveis na fonte (link externo ou indisponível)."
+                    .to_string(),
+            ));
+        }
 
         let mut buffer = Cursor::new(Vec::new());
         {
