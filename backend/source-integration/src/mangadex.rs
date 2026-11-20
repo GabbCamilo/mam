@@ -169,6 +169,7 @@ impl Fonte for MangaDexFonte {
                 ("includeExternalUrl", "0"),
                 ("translatedLanguage[]", "pt-br"),
                 ("translatedLanguage[]", "en"),
+                ("translatedLanguage[]", "ja"),
             ])
             .send()
             .await

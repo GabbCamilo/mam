@@ -378,6 +378,12 @@ body,
   gap: 0.75rem;
   padding: 1rem;
   overflow: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.mam-reader-viewport::-webkit-scrollbar {
+  display: none;
 }
 
 .mam-modal-backdrop {
