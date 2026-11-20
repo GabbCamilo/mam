@@ -32,7 +32,9 @@ export function CbzReader({
   const [paginasLongStrip, setPaginasLongStrip] = useState<PaginaExtraida[]>([])
   const [modo, setModo] = useState<ModoLeitura>('horizontal')
   const [ajuste, setAjuste] = useState<AjusteTela>('fit-width')
-  const [zoom, setZoom] = useState(100)
+  const [zoom, setZoom] = useState(30)
+  const [telaCheia, setTelaCheia] = useState(false)
+  const [paginaHover, setPaginaHover] = useState<number | null>(null)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const [marcadores, setMarcadores] = useState<MarcadorPagina[]>([])
   const [erro, setErro] = useState<string | null>(null)
@@ -145,6 +147,36 @@ export function CbzReader({
   const totalPaginas = paginaPrincipal?.total_paginas ?? capitulo.quantidade_paginas
   const passo = modo === 'dupla' ? 2 : 1
 
+  async function alternarTelaCheia() {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen()
+      } else {
+        await document.exitFullscreen()
+      }
+    } catch {
+      // Ignora se bloqueado pelo ambiente
+    }
+  }
+
+  useEffect(() => {
+    function onFullscreenChange() {
+      setTelaCheia(Boolean(document.fullscreenElement))
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'F11') {
+        e.preventDefault()
+        alternarTelaCheia()
+      }
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [])
+
   function avancarPagina() {
     if (totalPaginas > 0 && indiceAtual + passo < totalPaginas) {
       setIndiceAtual((prev) => prev + passo)
@@ -218,6 +250,13 @@ export function CbzReader({
         <div className="mam-toolbar-row">
           <button className="mam-btn" onClick={() => setModalLayoutAberto(true)}>
             ⚙ Layout
+          </button>
+          <button
+            className={`mam-btn ${telaCheia ? 'mam-btn-active' : ''}`}
+            onClick={alternarTelaCheia}
+            title="Tela Cheia (F11)"
+          >
+            {telaCheia ? '⤢ Sair Tela Cheia' : '⛶ Tela Cheia'}
           </button>
           <button className="mam-btn" onClick={handleAdicionarMarcador}>
             🔖 Marcar
@@ -418,7 +457,7 @@ export function CbzReader({
                 : 0.5
 
             const delta = e.deltaY < 0 ? 10 : -10
-            setZoom((z) => Math.min(250, Math.max(50, z + delta)))
+            setZoom((z) => Math.min(200, Math.max(10, z + delta)))
 
             requestAnimationFrame(() => {
               if (!vp) return
@@ -581,6 +620,74 @@ export function CbzReader({
         )}
       </div>
 
+      {totalPaginas > 0 && (
+        <div
+          onMouseLeave={() => setPaginaHover(null)}
+          style={{
+            position: 'fixed',
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: 28,
+            zIndex: 1050,
+            display: 'flex',
+            alignItems: 'flex-end',
+            userSelect: 'none',
+          }}
+        >
+          {Array.from({ length: totalPaginas }, (_, idx) => {
+            const lida = idx <= indiceAtual
+            const hovered = paginaHover === idx
+            return (
+              <div
+                key={idx}
+                onMouseEnter={() => setPaginaHover(idx)}
+                onClick={() => setIndiceAtual(idx)}
+                style={{
+                  flex: 1,
+                  height: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'flex-end',
+                  alignItems: 'center',
+                  cursor: 'pointer',
+                  position: 'relative',
+                }}
+              >
+                {hovered && (
+                  <div
+                    style={{
+                      width: '100%',
+                      padding: '2px 0 3px',
+                      textAlign: 'center',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      color: '#f8fafc',
+                      background:
+                        'linear-gradient(to top, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.15))',
+                    }}
+                  >
+                    {idx + 1}
+                  </div>
+                )}
+                <div
+                  style={{
+                    width: '100%',
+                    height: hovered ? 3 : 2,
+                    background: lida
+                      ? '#ef4444'
+                      : hovered
+                        ? 'rgba(248, 250, 252, 0.85)'
+                        : 'rgba(148, 163, 184, 0.35)',
+                    borderRight: idx < totalPaginas - 1 ? '1px solid rgba(15, 23, 42, 0.7)' : 'none',
+                  }}
+                />
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {/* Modal flutuante de Layout (inspirado na referência) */}
       {modalLayoutAberto && (
         <div className="mam-modal-backdrop" onClick={() => setModalLayoutAberto(false)}>
@@ -595,21 +702,30 @@ export function CbzReader({
             <div className="mam-layout-cards">
               <button
                 className={`mam-layout-card ${modo === 'horizontal' ? 'active' : ''}`}
-                onClick={() => setModo('horizontal')}
+                onClick={() => {
+                  setModo('horizontal')
+                  setZoom(30)
+                }}
               >
                 <span>▯</span>
                 <span>Single</span>
               </button>
               <button
                 className={`mam-layout-card ${modo === 'dupla' ? 'active' : ''}`}
-                onClick={() => setModo('dupla')}
+                onClick={() => {
+                  setModo('dupla')
+                  setZoom(110)
+                }}
               >
                 <span>▯▯</span>
                 <span>Double</span>
               </button>
               <button
                 className={`mam-layout-card ${modo === 'vertical' ? 'active' : ''}`}
-                onClick={() => setModo('vertical')}
+                onClick={() => {
+                  setModo('vertical')
+                  setZoom(100)
+                }}
               >
                 <span>☰</span>
                 <span>Long strip</span>
@@ -619,14 +735,19 @@ export function CbzReader({
             <div>
               <small style={{ color: '#94a3b8' }}>ZOOM</small>
               <div className="mam-stepper" style={{ marginTop: '0.35rem' }}>
-                <button className="mam-btn" onClick={() => setZoom((z) => Math.max(40, z - 10))}>
+                <button className="mam-btn" onClick={() => setZoom((z) => Math.max(10, z - 10))}>
                   −
                 </button>
                 <span>{zoom}%</span>
                 <button className="mam-btn" onClick={() => setZoom((z) => Math.min(200, z + 10))}>
                   +
                 </button>
-                <button className="mam-btn" onClick={() => setZoom(100)}>
+                <button
+                  className="mam-btn"
+                  onClick={() =>
+                    setZoom(modo === 'horizontal' ? 30 : modo === 'dupla' ? 110 : 100)
+                  }
+                >
                   Reset
                 </button>
               </div>

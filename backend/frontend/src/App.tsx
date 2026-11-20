@@ -897,7 +897,7 @@ function App() {
                           className={`mam-segmented-btn ${subAbaObra === 'capitulos' ? 'active' : ''}`}
                           onClick={() => setSubAbaObra('capitulos')}
                         >
-                          Capítulos ({todosCapitulosObra.length})
+                          Capítulos ({capitulosFiltrados.length})
                         </button>
                         <button
                           className={`mam-segmented-btn ${subAbaObra === 'volumes' ? 'active' : ''}`}
