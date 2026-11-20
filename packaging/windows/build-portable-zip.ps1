@@ -50,6 +50,12 @@ New-Item -ItemType Directory -Path (Join-Path $StageDir "ai-engine") -Force | Ou
 New-Item -ItemType Directory -Path (Join-Path $StageDir "models") -Force | Out-Null
 
 Copy-Item $ExePath (Join-Path $StageDir "app.exe") -Force
+$WebViewDll = Join-Path (Split-Path $ExePath -Parent) "WebView2Loader.dll"
+if (Test-Path $WebViewDll) {
+    Copy-Item $WebViewDll (Join-Path $StageDir "WebView2Loader.dll") -Force
+} else {
+    Write-Warning "WebView2Loader.dll não encontrado em $(Split-Path $ExePath -Parent)."
+}
 Copy-Item (Join-Path $AiEngineDir "mam_ai_engine") (Join-Path $StageDir "ai-engine\mam_ai_engine") -Recurse -Force
 Copy-Item (Join-Path $AiEngineDir "requirements.txt") (Join-Path $StageDir "ai-engine\requirements.txt") -Force
 
