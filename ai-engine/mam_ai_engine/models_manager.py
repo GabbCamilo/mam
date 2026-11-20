@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 from typing import Any
 
 
 SUPPORTED_EXTENSIONS = {".onnx", ".pt", ".pth", ".bin", ".safetensors"}
+
+
+def calcular_sha256_arquivo(caminho: Path) -> str:
+    """Calcula SHA-256 em streaming para validação de integridade do modelo."""
+    hasher = hashlib.sha256()
+    with caminho.open("rb") as f:
+        for bloco in iter(lambda: f.read(65536), b""):
+            hasher.update(bloco)
+    return hasher.hexdigest()
 
 
 def listar_modelos_locais(diretorios: list[str] | None = None) -> list[dict[str, Any]]:
@@ -56,6 +66,8 @@ def inspecionar_modelo(caminho_modelo: str) -> dict[str, Any]:
         "formato": alvo.suffix.lower().lstrip("."),
         "caminho": str(alvo),
         "tamanho_bytes": alvo.stat().st_size,
+        "sha256": calcular_sha256_arquivo(alvo),
+        "prioridade_runtime": "onnxruntime" if alvo.suffix.lower() == ".onnx" else "pytorch",
         "disponivel": True,
     }
 

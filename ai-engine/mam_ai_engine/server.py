@@ -11,6 +11,7 @@ from .pipeline import (
     detectar_baloes,
     detectar_provedores_inferencia,
     executar_ocr,
+    processar_pagina_completa,
     traduzir_regioes,
 )
 from .protocol import (
@@ -38,6 +39,7 @@ def handle_request(req: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         "ocr": executar_ocr,
         "detect_bubbles": detectar_baloes,
         "translate": traduzir_regioes,
+        "process_page": processar_pagina_completa,
         "models_list": lambda p: listar_modelos_locais(p.get("diretorios")),
         "models_inspect": lambda p: inspecionar_modelo(str(p.get("caminho_modelo", ""))),
     }

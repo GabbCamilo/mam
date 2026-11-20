@@ -55,6 +55,25 @@ class AiEngineServerTests(unittest.TestCase):
         self.assertTrue(should_exit)
         self.assertTrue(resp["result"]["encerrado"])
 
+    def test_process_page_le_dimensoes_reais_e_status_onnx(self) -> None:
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            img_path = Path(tmp) / "pagina.png"
+            Image.new("RGB", (120, 240), color=(255, 255, 255)).save(img_path)
+
+            req, _ = parse_request(
+                f'{{"jsonrpc":"2.0","id":6,"method":"process_page","params":{{"caminho_imagem":"{str(img_path).replace(chr(92), "/")}","idioma_origem":"ja","idioma_destino":"pt-BR"}}}}'
+            )
+            assert req is not None
+            resp, _ = handle_request(req)
+            res = resp["result"]
+            self.assertEqual(res["estado_revisao"], "nao_revisado")
+            self.assertTrue(res["dimensoes_imagem"]["disponivel"])
+            self.assertEqual(res["dimensoes_imagem"]["largura"], 120)
+            self.assertEqual(res["dimensoes_imagem"]["altura"], 240)
+            self.assertIn("onnx_status", res)
+
 
 if __name__ == "__main__":
     unittest.main()

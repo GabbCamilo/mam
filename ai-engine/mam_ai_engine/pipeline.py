@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib.util
 from typing import Any
 
+from .onnx_runtime import OnnxSessionAdapter, carregar_imagem_rgb
+
 
 def detectar_provedores_inferencia() -> dict[str, Any]:
     """Detecta runtimes de inferência disponíveis localmente (CPU sempre habilitado)."""
@@ -67,5 +69,37 @@ def traduzir_regioes(params: dict[str, Any]) -> dict[str, Any]:
         "modalidade": modalidade,
         "provedor": detectar_provedores_inferencia()["prioritario"],
         "traducoes": traducoes,
+        "estado_revisao": "nao_revisado",
+    }
+
+
+def processar_pagina_completa(params: dict[str, Any]) -> dict[str, Any]:
+    """Pipeline unificado (`process_page`) com dimensões reais da imagem e regiões normalizadas `[x,y,w,h]`."""
+    caminho_imagem = str(params.get("caminho_imagem", ""))
+    idioma_origem = str(params.get("idioma_origem", "ja"))
+    idioma_destino = str(params.get("idioma_destino", "pt-BR"))
+    caminho_modelo = params.get("caminho_modelo")
+    usar_gpu = bool(params.get("usar_gpu", False))
+
+    dimensoes = carregar_imagem_rgb(caminho_imagem)
+    adaptador = OnnxSessionAdapter(
+        caminho_modelo=str(caminho_modelo) if caminho_modelo else None,
+        usar_gpu_se_disponivel=usar_gpu,
+    )
+    if adaptador.disponivel:
+        adaptador.carregar()
+    else:
+        # Registra motivo explícito sem lançar exceção quando onnxruntime/modelo não estiverem presentes
+        adaptador.carregar()
+
+    return {
+        "tipo": "process_page",
+        "caminho_imagem": caminho_imagem,
+        "idioma_origem": idioma_origem,
+        "idioma_destino": idioma_destino,
+        "provedor": detectar_provedores_inferencia()["prioritario"],
+        "dimensoes_imagem": dimensoes,
+        "onnx_status": adaptador.info_status(),
+        "regioes": [],
         "estado_revisao": "nao_revisado",
     }
