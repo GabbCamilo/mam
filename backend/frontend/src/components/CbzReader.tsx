@@ -28,6 +28,8 @@ export function CbzReader({
   const [erro, setErro] = useState<string | null>(null)
   const [carregando, setCarregando] = useState(false)
   const [mostrarIa, setMostrarIa] = useState(false)
+  const [mostrarSobreposicao, setMostrarSobreposicao] = useState(true)
+  const [processandoIa, setProcessandoIa] = useState(false)
   const [resultadosIa, setResultadosIa] = useState<ResultadoIA[]>([])
   const [textoRevisao, setTextoRevisao] = useState('')
 
@@ -192,6 +194,34 @@ export function CbzReader({
         <button onClick={() => setMostrarIa((v) => !v)}>
           {mostrarIa ? 'Ocultar Camada IA' : 'Camada IA / Revisão'}
         </button>
+        <button onClick={() => setMostrarSobreposicao((v) => !v)}>
+          {mostrarSobreposicao ? 'Sobreposição: ON' : 'Sobreposição: OFF'}
+        </button>
+        <button
+          disabled={processandoIa}
+          onClick={async () => {
+            setProcessandoIa(true)
+            setErro(null)
+            try {
+              await mamApi.aiProcessarESalvarPagina({
+                capituloId: capitulo.id,
+                caminhoCbz: capitulo.caminho_relativo,
+                indice: indiceAtual,
+                idiomaOrigem: 'ja',
+                idiomaDestino: 'pt-BR',
+              })
+              const atualizados = await mamApi.aiListarResultadosCapitulo(capitulo.id)
+              setResultadosIa(atualizados)
+              setMostrarIa(true)
+            } catch (e) {
+              setErro(String(e))
+            } finally {
+              setProcessandoIa(false)
+            }
+          }}
+        >
+          {processandoIa ? 'Processando IA...' : 'Processar Página (IA)'}
+        </button>
       </div>
 
       {mostrarIa && (
@@ -268,11 +298,54 @@ export function CbzReader({
         }}
       >
         {paginaPrincipal && (
-          <img
-            src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
-            alt={paginaPrincipal.nome}
-            style={estiloImagem}
-          />
+          <div style={{ position: 'relative', display: 'inline-block' }}>
+            <img
+              src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
+              alt={paginaPrincipal.nome}
+              style={estiloImagem}
+            />
+            {mostrarSobreposicao &&
+              resultadosIa
+                .filter((r) => r.pagina_numero === indiceAtual)
+                .flatMap((r) => {
+                  try {
+                    const parsed = JSON.parse(r.resultado_json) as {
+                      regioes?: Array<{
+                        bbox?: [number, number, number, number]
+                        texto_traduzido?: string
+                        texto_original?: string
+                      }>
+                    }
+                    return parsed.regioes ?? []
+                  } catch {
+                    return []
+                  }
+                })
+                .map((reg, idx) => {
+                  const [x, y, w, h] = reg.bbox ?? [0, 0, 0.2, 0.1]
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        position: 'absolute',
+                        left: `${x * 100}%`,
+                        top: `${y * 100}%`,
+                        width: `${w * 100}%`,
+                        height: `${h * 100}%`,
+                        background: 'rgba(255, 255, 255, 0.88)',
+                        color: '#111',
+                        padding: '2px 4px',
+                        fontSize: '0.8rem',
+                        borderRadius: 4,
+                        boxSizing: 'border-box',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {reg.texto_traduzido || reg.texto_original || ''}
+                    </div>
+                  )
+                })}
+          </div>
         )}
         {modo === 'dupla' && paginaSecundaria && (
           <img

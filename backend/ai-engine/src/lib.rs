@@ -208,6 +208,26 @@ impl AiEngineManager {
         .await
     }
 
+    /// Executa pipeline completo (`process_page`) retornando dimensões e regiões normalizadas.
+    pub async fn processar_pagina(
+        &self,
+        caminho_imagem: &Path,
+        idioma_origem: &str,
+        idioma_destino: &str,
+        caminho_modelo: Option<&str>,
+    ) -> Result<Value, AiEngineError> {
+        self.chamar(
+            "process_page",
+            json!({
+                "caminho_imagem": caminho_imagem.to_string_lossy(),
+                "idioma_origem": idioma_origem,
+                "idioma_destino": idioma_destino,
+                "caminho_modelo": caminho_modelo,
+            }),
+        )
+        .await
+    }
+
     /// Lista modelos opcionais instalados localmente sem realizar downloads.
     pub async fn listar_modelos(&self, diretorios: Vec<String>) -> Result<Vec<ModeloInfo>, AiEngineError> {
         let val = self

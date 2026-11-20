@@ -202,6 +202,22 @@ export const mamApi = {
     invoke<ResultadoIA[]>('ai_listar_resultados_capitulo', { capituloId }),
   aiRevisarResultado: (resultadoId: string, resultadoJsonRevisado: string) =>
     invoke<void>('ai_revisar_resultado', { resultadoId, resultadoJsonRevisado }),
+  aiProcessarESalvarPagina: (params: {
+    capituloId: string
+    caminhoCbz: string
+    indice: number
+    idiomaOrigem: string
+    idiomaDestino: string
+    caminhoModelo?: string | null
+  }) =>
+    invoke<ResultadoIA>('ai_processar_e_salvar_pagina', {
+      capituloId: params.capituloId,
+      caminhoCbz: params.caminhoCbz,
+      indice: params.indice,
+      idiomaOrigem: params.idiomaOrigem,
+      idiomaDestino: params.idiomaDestino,
+      caminhoModelo: params.caminhoModelo ?? null,
+    }),
   sourceListarExtratores: () => invoke<ExtratorInfo[]>('source_listar_extratores'),
   sourceImportarExtrator: (entrada: EntradaImportacao) =>
     invoke<ResultadoImportacao>('source_importar_extrator', { entrada }),

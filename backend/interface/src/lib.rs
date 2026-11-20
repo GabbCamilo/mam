@@ -480,6 +480,80 @@ pub async fn ai_revisar_resultado(
         .map_err(|e| e.to_string())
 }
 
+/// Processa uma página de um CBZ com o Manga AI Engine e persiste em `resultados_ia` (`nao_revisado`),
+/// utilizando arquivo temporário efêmero e preservando o `.cbz` original intacto.
+#[allow(clippy::too_many_arguments)]
+pub async fn ai_processar_e_salvar_pagina(
+    ai_manager: Arc<AiEngineManager>,
+    archive_manager: Arc<ArchiveManager>,
+    library_manager: Arc<LibraryManager>,
+    cache: Arc<CachePaginas>,
+    db: Arc<Database>,
+    capitulo_id: String,
+    caminho_cbz: String,
+    indice: usize,
+    idioma_origem: String,
+    idioma_destino: String,
+    caminho_modelo: Option<String>,
+) -> Result<ResultadoIA, String> {
+    let pagina = reader_obter_pagina(archive_manager, library_manager, cache, caminho_cbz, indice).await?;
+    let bytes = decodificar_base64(&pagina.dados_base64);
+    let ext = pagina.nome.rsplit('.').next().unwrap_or("jpg");
+    let temp_img = std::env::temp_dir().join(format!("mam_ai_page_{}.{}", uuid::Uuid::new_v4(), ext));
+    std::fs::write(&temp_img, &bytes).map_err(|e| e.to_string())?;
+
+    let resultado_val = ai_manager
+        .processar_pagina(
+            &temp_img,
+            &idioma_origem,
+            &idioma_destino,
+            caminho_modelo.as_deref(),
+        )
+        .await;
+
+    let _ = std::fs::remove_file(&temp_img);
+    let resultado = resultado_val.map_err(|e| e.to_string())?;
+    let provedor = resultado["provedor"].as_str().unwrap_or("cpu-fallback");
+    let resultado_json = serde_json::to_string(&resultado).map_err(|e| e.to_string())?;
+
+    let cap_id = CapituloId::from_string(capitulo_id);
+    db.salvar_resultado_ia(
+        cap_id,
+        indice as i32,
+        provedor,
+        "1.0",
+        "process_page",
+        &resultado_json,
+        Some(&idioma_origem),
+        Some(&idioma_destino),
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+fn decodificar_base64(input: &str) -> Vec<u8> {
+    let mut saida = Vec::with_capacity((input.len() * 3) / 4);
+    let mut buf: u32 = 0;
+    let mut bits: u8 = 0;
+    for b in input.bytes() {
+        let val = match b {
+            b'A'..=b'Z' => b - b'A',
+            b'a'..=b'z' => b - b'a' + 26,
+            b'0'..=b'9' => b - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => continue,
+        };
+        buf = (buf << 6) | (val as u32);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            saida.push(((buf >> bits) & 0xFF) as u8);
+        }
+    }
+    saida
+}
+
 /// Lista os extratores modulares disponíveis (MangaDex, MangaFire, Genérico, etc.).
 pub async fn source_listar_extratores() -> Result<Vec<ExtratorInfo>, String> {
     Ok(RegistroExtratores::padrao().listar())
@@ -592,10 +666,13 @@ mod tests {
             .expect("ler pagina do cache L1 LRU");
         assert_eq!(pagina_cache.nome, "001.jpg");
 
-        let progresso = reader_obter_progresso(db_b, cap.id.to_string())
+        let progresso = reader_obter_progresso(db_b.clone(), cap.id.to_string())
             .await
             .expect("recuperar progresso no PC B");
         assert_eq!(progresso, 0);
+
+        let bytes_decodificados = decodificar_base64(&pagina_cache.dados_base64);
+        assert_eq!(bytes_decodificados, b"FAKEJPGDATA");
 
         let _ = fs::remove_dir_all(&base);
     }
