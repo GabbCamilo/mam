@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use mam_database::Database;
 use mam_chapter::ChapterManager;
-use mam_archive::ArchiveManager;
+use mam_archive::{ArchiveManager, PaginaExtraida};
 use mam_source_integration::SourceIntegrationManager;
 use mam_source_integration::{FonteInfo, ObraBuscaResultado, CapituloBuscaResultado};
 use mam_core::ObraId;
@@ -234,6 +234,113 @@ pub async fn source_arquivar_capitulos(
         .iniciar_operacao_arquivamento(obra_titulo, capitulos)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Marcador salvo pelo leitor em uma página específica.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MarcadorPagina {
+    pub pagina: usize,
+    pub nota: String,
+}
+
+/// Lê uma página específica de um arquivo CBZ sob demanda (resolvendo caminho relativo à biblioteca).
+pub async fn reader_obter_pagina(
+    archive_manager: Arc<ArchiveManager>,
+    library_manager: Arc<LibraryManager>,
+    caminho_cbz: String,
+    indice: usize,
+) -> Result<PaginaExtraida, String> {
+    let path = Path::new(&caminho_cbz);
+    let caminho_resolvido = if path.is_relative() {
+        library_manager.raiz().join(path)
+    } else {
+        path.to_path_buf()
+    };
+
+    archive_manager
+        .ler_pagina(&caminho_resolvido, indice)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Salva a última página lida de um capítulo no banco local.
+pub async fn reader_salvar_progresso(
+    db: Arc<Database>,
+    capitulo_id: String,
+    pagina: usize,
+) -> Result<(), String> {
+    let chave = format!("reader:progresso:{}", capitulo_id);
+    db.salvar_configuracao(&chave, &pagina.to_string())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Recupera a última página lida de um capítulo (ou 0 se ainda não houver registro).
+pub async fn reader_obter_progresso(
+    db: Arc<Database>,
+    capitulo_id: String,
+) -> Result<usize, String> {
+    let chave = format!("reader:progresso:{}", capitulo_id);
+    let valor = db
+        .obter_configuracao(&chave)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(valor.and_then(|v| v.parse::<usize>().ok()).unwrap_or(0))
+}
+
+/// Alterna o estado de favorito de uma obra ou capítulo e retorna o novo estado.
+pub async fn reader_alternar_favorito(
+    db: Arc<Database>,
+    alvo_id: String,
+) -> Result<bool, String> {
+    let chave = format!("reader:favorito:{}", alvo_id);
+    let atual = db
+        .obter_configuracao(&chave)
+        .await
+        .map_err(|e| e.to_string())?
+        .map(|v| v == "true")
+        .unwrap_or(false);
+    let novo = !atual;
+    db.salvar_configuracao(&chave, if novo { "true" } else { "false" })
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(novo)
+}
+
+/// Adiciona um marcador em uma página específica de um capítulo.
+pub async fn reader_adicionar_marcador(
+    db: Arc<Database>,
+    capitulo_id: String,
+    pagina: usize,
+    nota: String,
+) -> Result<(), String> {
+    let chave = format!("reader:marcador:{}:{:06}", capitulo_id, pagina);
+    db.salvar_configuracao(&chave, &nota)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Lista todos os marcadores salvos para um capítulo.
+pub async fn reader_listar_marcadores(
+    db: Arc<Database>,
+    capitulo_id: String,
+) -> Result<Vec<MarcadorPagina>, String> {
+    let prefixo = format!("reader:marcador:{}:", capitulo_id);
+    let itens = db
+        .listar_configuracoes_por_prefixo(&prefixo)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(itens
+        .into_iter()
+        .filter_map(|(chave, nota)| {
+            chave
+                .rsplit(':')
+                .next()
+                .and_then(|p| p.parse::<usize>().ok())
+                .map(|pagina| MarcadorPagina { pagina, nota })
+        })
+        .collect())
 }
 
 #[cfg(test)]

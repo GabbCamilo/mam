@@ -334,6 +334,42 @@ impl Database {
         tx.commit()?;
         Ok(())
     }
+
+    // ── Configurações chave-valor (estado do leitor, favoritos, marcadores) ──
+
+    pub async fn salvar_configuracao(&self, chave: &str, valor: &str) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT OR REPLACE INTO configuracao_biblioteca (chave, valor, atualizado_em)
+             VALUES (?1, ?2, datetime('now'))",
+            params![chave, valor],
+        )?;
+        Ok(())
+    }
+
+    pub async fn obter_configuracao(&self, chave: &str) -> DbResult<Option<String>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT valor FROM configuracao_biblioteca WHERE chave = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![chave], |row| row.get(0))?;
+        Ok(rows.next().transpose()?)
+    }
+
+    pub async fn listar_configuracoes_por_prefixo(
+        &self,
+        prefixo: &str,
+    ) -> DbResult<Vec<(String, String)>> {
+        let conn = self.conn.lock().await;
+        let padrao = format!("{}%", prefixo);
+        let mut stmt = conn.prepare(
+            "SELECT chave, valor FROM configuracao_biblioteca WHERE chave LIKE ?1 ORDER BY chave",
+        )?;
+        let itens = stmt
+            .query_map(params![padrao], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(itens)
+    }
 }
 
 #[cfg(test)]
@@ -404,5 +440,32 @@ mod tests {
         let resultado = db.consultar_integridade(caminho).await.expect("consultar integridade");
         assert!(resultado.is_some());
         assert_eq!(resultado.unwrap().estado, "valido");
+    }
+
+    #[tokio::test]
+    async fn configuracao_progresso_favorito_marcador() {
+        let db = criar_db_teste().await;
+
+        db.salvar_configuracao("reader:progresso:cap-1", "12")
+            .await
+            .expect("salvar progresso");
+        assert_eq!(
+            db.obter_configuracao("reader:progresso:cap-1").await.unwrap(),
+            Some("12".to_string())
+        );
+
+        db.salvar_configuracao("reader:favorito:obra-1", "true")
+            .await
+            .expect("salvar favorito");
+        db.salvar_configuracao("reader:marcador:cap-1:5", "Cena importante")
+            .await
+            .expect("salvar marcador");
+
+        let marcadores = db
+            .listar_configuracoes_por_prefixo("reader:marcador:cap-1:")
+            .await
+            .expect("listar marcadores");
+        assert_eq!(marcadores.len(), 1);
+        assert_eq!(marcadores[0].1, "Cena importante");
     }
 }

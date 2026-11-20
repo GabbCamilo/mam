@@ -12,8 +12,10 @@ use mam_core::CaminhoRelativo;
 use mam_database::Database;
 
 use crate::criacao::criar_cbz;
-use crate::leitura::ler_cbz;
+use crate::leitura::{ler_cbz, ler_pagina_cbz};
 use crate::validacao::validar_cbz;
+
+pub use crate::leitura::PaginaExtraida;
 
 use serde::{Deserialize, Serialize};
 
@@ -121,6 +123,15 @@ impl ArchiveManager {
     ) -> Result<Vec<i32>, ArchiveError> {
         let cbz = ler_cbz(caminho_cbz)?;
         Ok(cbz.paginas_ausentes)
+    }
+
+    /// Lê uma página específica de um CBZ sob demanda em memória.
+    pub async fn ler_pagina(
+        &self,
+        caminho_cbz: &Path,
+        indice: usize,
+    ) -> Result<PaginaExtraida, ArchiveError> {
+        ler_pagina_cbz(caminho_cbz, indice)
     }
 }
 

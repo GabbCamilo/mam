@@ -5,7 +5,7 @@ use tauri::Manager;
 
 use mam_database::Database;
 use mam_chapter::ChapterManager;
-use mam_archive::ArchiveManager;
+use mam_archive::{ArchiveManager, PaginaExtraida};
 use mam_interface::{db_health as if_db_health, db_list_obras as if_db_list_obras};
 use mam_interface::{chapter_detectar as if_chapter_detectar, chapter_listar_por_obra as if_chapter_listar_por_obra};
 use mam_interface::{library_raiz as if_library_raiz, library_criar_obra as if_library_criar_obra, library_listar_obras as if_library_listar_obras, library_obter_detalhes_obra as if_library_obter_detalhes_obra, library_criar_volume as if_library_criar_volume, library_atualizar_metadados as if_library_atualizar_metadados};
@@ -15,6 +15,15 @@ use mam_interface::{archive_criar_cbz as if_archive_criar_cbz, archive_ler_cbz a
 use mam_interface::{source_listar_fontes as if_source_listar_fontes, source_buscar_obras as if_source_buscar_obras};
 use mam_interface::{source_listar_capitulos as if_source_listar_capitulos, source_verificar_duplicatas as if_source_verificar_duplicatas};
 use mam_interface::{source_arquivar_capitulos as if_source_arquivar_capitulos};
+use mam_interface::{
+    MarcadorPagina,
+    reader_obter_pagina as if_reader_obter_pagina,
+    reader_salvar_progresso as if_reader_salvar_progresso,
+    reader_obter_progresso as if_reader_obter_progresso,
+    reader_alternar_favorito as if_reader_alternar_favorito,
+    reader_adicionar_marcador as if_reader_adicionar_marcador,
+    reader_listar_marcadores as if_reader_listar_marcadores,
+};
 use mam_source_integration::SourceIntegrationManager;
 use mam_source_integration::{FonteInfo, ObraBuscaResultado, CapituloBuscaResultado};
 
@@ -164,6 +173,65 @@ async fn source_arquivar_capitulos(
     if_source_arquivar_capitulos(source_manager.inner().clone(), obra_titulo, capitulos).await
 }
 
+#[tauri::command]
+async fn reader_obter_pagina(
+    archive_manager: tauri::State<'_, Arc<ArchiveManager>>,
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    caminho_cbz: String,
+    indice: usize,
+) -> Result<PaginaExtraida, String> {
+    if_reader_obter_pagina(
+        archive_manager.inner().clone(),
+        library_manager.inner().clone(),
+        caminho_cbz,
+        indice,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn reader_salvar_progresso(
+    db: tauri::State<'_, Arc<Database>>,
+    capitulo_id: String,
+    pagina: usize,
+) -> Result<(), String> {
+    if_reader_salvar_progresso(db.inner().clone(), capitulo_id, pagina).await
+}
+
+#[tauri::command]
+async fn reader_obter_progresso(
+    db: tauri::State<'_, Arc<Database>>,
+    capitulo_id: String,
+) -> Result<usize, String> {
+    if_reader_obter_progresso(db.inner().clone(), capitulo_id).await
+}
+
+#[tauri::command]
+async fn reader_alternar_favorito(
+    db: tauri::State<'_, Arc<Database>>,
+    alvo_id: String,
+) -> Result<bool, String> {
+    if_reader_alternar_favorito(db.inner().clone(), alvo_id).await
+}
+
+#[tauri::command]
+async fn reader_adicionar_marcador(
+    db: tauri::State<'_, Arc<Database>>,
+    capitulo_id: String,
+    pagina: usize,
+    nota: String,
+) -> Result<(), String> {
+    if_reader_adicionar_marcador(db.inner().clone(), capitulo_id, pagina, nota).await
+}
+
+#[tauri::command]
+async fn reader_listar_marcadores(
+    db: tauri::State<'_, Arc<Database>>,
+    capitulo_id: String,
+) -> Result<Vec<MarcadorPagina>, String> {
+    if_reader_listar_marcadores(db.inner().clone(), capitulo_id).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -187,6 +255,12 @@ pub fn run() {
       source_listar_capitulos,
       source_verificar_duplicatas,
       source_arquivar_capitulos,
+      reader_obter_pagina,
+      reader_salvar_progresso,
+      reader_obter_progresso,
+      reader_alternar_favorito,
+      reader_adicionar_marcador,
+      reader_listar_marcadores,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {
