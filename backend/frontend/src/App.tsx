@@ -22,6 +22,22 @@ type AbaAtiva = 'biblioteca' | 'fontes' | 'downloads' | 'transferencia' | 'ai'
 type SubAbaObra = 'capitulos' | 'volumes'
 type OrdemBiblioteca = 'nome-asc' | 'nome-desc' | 'caps-desc' | 'caps-asc'
 
+function obterIdiomaCapitulo(cap: Capitulo): string | null {
+  if (cap.idioma && cap.idioma.trim().length > 0) {
+    return cap.idioma.trim()
+  }
+  const partes = cap.caminho_relativo.split('/').filter(Boolean)
+  if (partes.length >= 4) {
+    return partes[2]
+  }
+  return null
+}
+
+function obterDiretorioCapitulo(cap: Capitulo): string {
+  const idx = cap.caminho_relativo.lastIndexOf('/')
+  return idx > 0 ? cap.caminho_relativo.slice(0, idx) : cap.caminho_relativo
+}
+
 function App() {
   const [tema, setTema] = useState<'dark' | 'light'>('dark')
   const [abaAtiva, setAbaAtiva] = useState<AbaAtiva>('biblioteca')
@@ -31,6 +47,7 @@ function App() {
   const [buscaObra, setBuscaObra] = useState('')
   const [ordemBiblioteca, setOrdemBiblioteca] = useState<OrdemBiblioteca>('nome-asc')
   const [buscaCapitulo, setBuscaCapitulo] = useState('')
+  const [filtroIdiomaBiblioteca, setFiltroIdiomaBiblioteca] = useState<string>('TODOS')
   const [ordemCaps, setOrdemCaps] = useState<'desc' | 'asc'>('desc')
   const [detalhes, setDetalhes] = useState<DetalhesObra | null>(null)
   const [capaBiblioteca, setCapaBiblioteca] = useState<PaginaExtraida | null>(null)
@@ -55,6 +72,7 @@ function App() {
   const [capasCache, setCapasCache] = useState<Record<string, string>>({})
   const [obraFonteSelecionada, setObraFonteSelecionada] = useState<ObraBuscaResultado | null>(null)
   const [capitulosFonte, setCapitulosFonte] = useState<CapituloBuscaResultado[]>([])
+  const [filtroIdiomaFonte, setFiltroIdiomaFonte] = useState<string>('TODOS')
   const [selecionadosIds, setSelecionadosIds] = useState<string[]>([])
   const [statusArquivamento, setStatusArquivamento] = useState<StatusOperacao | null>(null)
   const [downloadsLog, setDownloadsLog] = useState<DownloadLogItem[]>([])
@@ -118,6 +136,7 @@ function App() {
   }
 
   async function handleSelecionarObra(obraId: string) {
+    setFiltroIdiomaBiblioteca('TODOS')
     if (detalhes?.obra.id === obraId) {
       setDetalhes(null)
       setCapaBiblioteca(null)
@@ -294,10 +313,12 @@ function App() {
     if (obraFonteSelecionada?.obra_id_fonte === obra.obra_id_fonte) {
       setObraFonteSelecionada(null)
       setCapitulosFonte([])
+      setFiltroIdiomaFonte('TODOS')
       setSelecionadosIds([])
       return
     }
     setObraFonteSelecionada(obra)
+    setFiltroIdiomaFonte('TODOS')
     setSelecionadosIds([])
     try {
       const caps = await mamApi.sourceListarCapitulos(obra.fonte_id, obra.obra_id_fonte)
@@ -307,6 +328,19 @@ function App() {
     }
   }
 
+  const idiomasFonteDisponiveis = Array.from(
+    new Set(
+      capitulosFonte
+        .map((c) => c.idioma?.trim())
+        .filter((lang): lang is string => Boolean(lang)),
+    ),
+  ).sort()
+
+  const capitulosFonteFiltrados =
+    filtroIdiomaFonte === 'TODOS'
+      ? capitulosFonte
+      : capitulosFonte.filter((c) => c.idioma === filtroIdiomaFonte)
+
   function alternarCapituloSelecionado(id: string) {
     setSelecionadosIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
@@ -314,10 +348,13 @@ function App() {
   }
 
   function alternarSelecionarTodosCapitulos() {
-    if (selecionadosIds.length === capitulosFonte.length) {
-      setSelecionadosIds([])
+    const idsVisiveis = capitulosFonteFiltrados.map((c) => c.capitulo_id_fonte)
+    const todosVisiveisSelecionados =
+      idsVisiveis.length > 0 && idsVisiveis.every((id) => selecionadosIds.includes(id))
+    if (todosVisiveisSelecionados) {
+      setSelecionadosIds((prev) => prev.filter((id) => !idsVisiveis.includes(id)))
     } else {
-      setSelecionadosIds(capitulosFonte.map((c) => c.capitulo_id_fonte))
+      setSelecionadosIds((prev) => Array.from(new Set([...prev, ...idsVisiveis])))
     }
   }
 
@@ -345,14 +382,41 @@ function App() {
       )
     : []
 
+  const idiomasBibliotecaDisponiveis = Array.from(
+    new Set(
+      todosCapitulosObra
+        .map((c) => obterIdiomaCapitulo(c))
+        .filter((lang): lang is string => Boolean(lang)),
+    ),
+  ).sort()
+
   const capitulosFiltrados = [...todosCapitulosObra]
-    .filter((c) =>
-      buscaCapitulo.trim()
+    .filter((c) => {
+      const bateBusca = buscaCapitulo.trim()
         ? String(c.numero).includes(buscaCapitulo.trim()) ||
           (c.titulo_original ?? '').toLowerCase().includes(buscaCapitulo.trim().toLowerCase())
-        : true,
-    )
+        : true
+      const bateIdioma =
+        filtroIdiomaBiblioteca === 'TODOS' ||
+        obterIdiomaCapitulo(c) === filtroIdiomaBiblioteca
+      return bateBusca && bateIdioma
+    })
     .sort((a, b) => (ordemCaps === 'desc' ? b.numero - a.numero : a.numero - b.numero))
+
+  const gruposDiretoriosCapitulos = (() => {
+    const grupos = new Map<string, { chave: string; idioma: string | null; capitulos: Capitulo[] }>()
+    for (const cap of capitulosFiltrados) {
+      const dir = obterDiretorioCapitulo(cap)
+      const idioma = obterIdiomaCapitulo(cap)
+      const existente = grupos.get(dir)
+      if (existente) {
+        existente.capitulos.push(cap)
+      } else {
+        grupos.set(dir, { chave: dir, idioma, capitulos: [cap] })
+      }
+    }
+    return Array.from(grupos.values())
+  })()
 
   const obrasFiltradas = [...obrasResumo]
     .filter((item) =>
@@ -378,10 +442,16 @@ function App() {
       : null)
 
   if (capituloAtivo) {
+    const idiomaAtivo = obterIdiomaCapitulo(capituloAtivo)
+    const capitulosMesmoIdioma = todosCapitulosObra.filter(
+      (c) => obterIdiomaCapitulo(c) === idiomaAtivo,
+    )
     return (
       <CbzReader
         capitulo={capituloAtivo}
-        capitulosDisponiveis={todosCapitulosObra}
+        capitulosDisponiveis={
+          capitulosMesmoIdioma.length > 0 ? capitulosMesmoIdioma : todosCapitulosObra
+        }
         volumesDisponiveis={detalhes?.volumes ?? []}
         onSelecionarCapitulo={setCapituloAtivo}
         onFechar={async () => {
@@ -604,6 +674,21 @@ function App() {
                             value={buscaCapitulo}
                             onChange={(e) => setBuscaCapitulo(e.target.value)}
                           />
+                          {idiomasBibliotecaDisponiveis.length > 0 && (
+                            <select
+                              className="mam-select"
+                              aria-label="Filtrar capítulos por idioma"
+                              value={filtroIdiomaBiblioteca}
+                              onChange={(e) => setFiltroIdiomaBiblioteca(e.target.value)}
+                            >
+                              <option value="TODOS">LANG: Todos</option>
+                              {idiomasBibliotecaDisponiveis.map((lang) => (
+                                <option key={lang} value={lang}>
+                                  LANG: {lang}
+                                </option>
+                              ))}
+                            </select>
+                          )}
                           <button
                             className="mam-btn"
                             onClick={() => setOrdemCaps((o) => (o === 'desc' ? 'asc' : 'desc'))}
@@ -615,51 +700,85 @@ function App() {
                         {capitulosFiltrados.length === 0 ? (
                           <p className="mam-section-desc">Nenhum capítulo cadastrado nesta obra.</p>
                         ) : (
-                          capitulosFiltrados.map((cap) => {
-                            const lido = capitulosLidos.includes(cap.id)
-                            return (
-                              <div
-                                key={cap.id}
-                                className="mam-row-card"
-                                onClick={() => setCapituloAtivo(cap)}
-                              >
-                                <div>
-                                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                                    <strong>Cap. {cap.numero}</strong>
-                                    {cap.titulo_original && (
-                                      <span style={{ color: 'var(--text-secondary)' }}>
-                                        • {cap.titulo_original}
-                                      </span>
-                                    )}
-                                    <button
-                                      className="mam-pill-badge"
-                                      style={{
-                                        cursor: 'pointer',
-                                        background: lido ? 'rgba(34, 197, 94, 0.16)' : 'rgba(148, 163, 184, 0.12)',
-                                        color: lido ? 'var(--success)' : 'var(--text-secondary)',
-                                        borderColor: lido ? 'rgba(34, 197, 94, 0.35)' : 'var(--border-subtle)',
-                                      }}
-                                      onClick={(e) => handleAlternarLido(e, cap.id)}
-                                    >
-                                      {lido ? '✓ Lido' : '○ Não lido'}
-                                    </button>
-                                  </div>
-                                  <div className="mam-brand-sub">{cap.caminho_relativo}</div>
-                                </div>
-                                <div className="mam-toolbar-row">
-                                  <span className="mam-pill-badge">{cap.quantidade_paginas} págs</span>
-                                  <button
-                                    className="mam-btn"
-                                    onClick={(e) => handleExcluirCapitulo(e, cap.id)}
-                                    title="Excluir capítulo arquivado"
+                          (filtroIdiomaBiblioteca === 'TODOS' && gruposDiretoriosCapitulos.length > 1
+                            ? gruposDiretoriosCapitulos
+                            : [{ chave: 'unico', idioma: null, capitulos: capitulosFiltrados }]
+                          ).map((grupo, idxGrupo) => (
+                            <div
+                              key={grupo.chave}
+                              style={{
+                                marginTop: idxGrupo > 0 ? '1.4rem' : '0.4rem',
+                                paddingTop: idxGrupo > 0 ? '1.1rem' : 0,
+                                borderTop: idxGrupo > 0 ? '1px solid var(--border-subtle)' : 'none',
+                              }}
+                            >
+                              {gruposDiretoriosCapitulos.length > 1 &&
+                                filtroIdiomaBiblioteca === 'TODOS' && (
+                                  <div
+                                    style={{
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      alignItems: 'center',
+                                      marginBottom: '0.5rem',
+                                    }}
                                   >
-                                    🗑
-                                  </button>
-                                  <button className="mam-btn mam-btn-primary">Ler</button>
-                                </div>
-                              </div>
-                            )
-                          })
+                                    <span className="mam-pill-badge">
+                                      📁 {grupo.idioma ?? 'Sem idioma'} • {grupo.chave}
+                                    </span>
+                                    <span className="mam-brand-sub">
+                                      {grupo.capitulos.length} capítulo(s)
+                                    </span>
+                                  </div>
+                                )}
+                              {grupo.capitulos.map((cap) => {
+                                const lido = capitulosLidos.includes(cap.id)
+                                const idiomaCap = obterIdiomaCapitulo(cap)
+                                return (
+                                  <div
+                                    key={cap.id}
+                                    className="mam-row-card"
+                                    onClick={() => setCapituloAtivo(cap)}
+                                  >
+                                    <div>
+                                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                        {idiomaCap && <span className="mam-pill-badge">{idiomaCap}</span>}
+                                        <strong>Cap. {cap.numero}</strong>
+                                        {cap.titulo_original && (
+                                          <span style={{ color: 'var(--text-secondary)' }}>
+                                            • {cap.titulo_original}
+                                          </span>
+                                        )}
+                                        <button
+                                          className="mam-pill-badge"
+                                          style={{
+                                            cursor: 'pointer',
+                                            background: lido ? 'rgba(34, 197, 94, 0.16)' : 'rgba(148, 163, 184, 0.12)',
+                                            color: lido ? 'var(--success)' : 'var(--text-secondary)',
+                                            borderColor: lido ? 'rgba(34, 197, 94, 0.35)' : 'var(--border-subtle)',
+                                          }}
+                                          onClick={(e) => handleAlternarLido(e, cap.id)}
+                                        >
+                                          {lido ? '✓ Lido' : '○ Não lido'}
+                                        </button>
+                                      </div>
+                                      <div className="mam-brand-sub">{cap.caminho_relativo}</div>
+                                    </div>
+                                    <div className="mam-toolbar-row">
+                                      <span className="mam-pill-badge">{cap.quantidade_paginas} págs</span>
+                                      <button
+                                        className="mam-btn"
+                                        onClick={(e) => handleExcluirCapitulo(e, cap.id)}
+                                        title="Excluir capítulo arquivado"
+                                      >
+                                        🗑
+                                      </button>
+                                      <button className="mam-btn mam-btn-primary">Ler</button>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          ))
                         )}
                       </>
                     ) : (
@@ -783,8 +902,27 @@ function App() {
                         <strong>{obraFonteSelecionada.titulo}</strong>
                       </div>
                       <div className="mam-toolbar-row">
+                        {idiomasFonteDisponiveis.length > 0 && (
+                          <select
+                            className="mam-select"
+                            aria-label="Filtrar capítulos da fonte por idioma"
+                            value={filtroIdiomaFonte}
+                            onChange={(e) => setFiltroIdiomaFonte(e.target.value)}
+                          >
+                            <option value="TODOS">LANG: Todos ({capitulosFonte.length})</option>
+                            {idiomasFonteDisponiveis.map((lang) => (
+                              <option key={lang} value={lang}>
+                                LANG: {lang} (
+                                {capitulosFonte.filter((c) => c.idioma === lang).length})
+                              </option>
+                            ))}
+                          </select>
+                        )}
                         <button className="mam-btn" onClick={alternarSelecionarTodosCapitulos}>
-                          {selecionadosIds.length === capitulosFonte.length && capitulosFonte.length > 0
+                          {capitulosFonteFiltrados.length > 0 &&
+                          capitulosFonteFiltrados.every((c) =>
+                            selecionadosIds.includes(c.capitulo_id_fonte),
+                          )
                             ? 'Desmarcar Todas'
                             : 'Selecionar Todas'}
                         </button>
@@ -803,7 +941,7 @@ function App() {
                         {statusArquivamento.total_capitulos} ({statusArquivamento.percentual}%)
                       </div>
                     )}
-                    {capitulosFonte.map((c) => (
+                    {capitulosFonteFiltrados.map((c) => (
                       <label key={c.capitulo_id_fonte} className="mam-row-card">
                         <span style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                           <input

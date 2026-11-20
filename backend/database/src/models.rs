@@ -44,6 +44,8 @@ pub struct Capitulo {
     pub titulo_original: Option<String>,
     pub caminho_relativo: CaminhoRelativo,
     pub quantidade_paginas: i32,
+    #[serde(default)]
+    pub idioma: Option<String>,
     pub data_arquivamento: DateTime<Utc>,
     pub estado_integridade: EstadoIntegridade,
 }

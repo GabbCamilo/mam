@@ -12,6 +12,10 @@ const MIGRACOES: &[(i32, &str)] = &[
         1,
         include_str!("migrations/001_initial.sql"),
     ),
+    (
+        2,
+        include_str!("migrations/002_capitulos_idioma.sql"),
+    ),
 ];
 
 /// Executa todas as migrações pendentes.

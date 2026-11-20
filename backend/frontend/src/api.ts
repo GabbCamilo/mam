@@ -26,6 +26,7 @@ export interface Capitulo {
   titulo_original?: string | null
   caminho_relativo: string
   quantidade_paginas: number
+  idioma?: string | null
   data_arquivamento: string
   estado_integridade: string
 }

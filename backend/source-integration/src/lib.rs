@@ -331,7 +331,16 @@ impl SourceIntegrationManager {
             let cbz_bytes = fonte.obter_capitulo(&cap.capitulo_id_fonte).await?;
             let numero = cap.numero.unwrap_or(0);
             let nome_arquivo = format!("Capitulo_{:04}.cbz", numero);
-            let caminho_rel_cap = format!("{}/{}", caminho_rel_obra, nome_arquivo);
+            let idioma_limpo = cap
+                .idioma
+                .as_deref()
+                .map(|s| sanitizar_nome(s))
+                .filter(|s| !s.is_empty());
+            let pasta_destino_rel = match &idioma_limpo {
+                Some(lang) => format!("{}/{}", caminho_rel_obra, lang),
+                None => caminho_rel_obra.clone(),
+            };
+            let caminho_rel_cap = format!("{}/{}", pasta_destino_rel, nome_arquivo);
             let caminho_abs = raiz_biblioteca.join(&caminho_rel_cap);
 
             if let Some(pai) = caminho_abs.parent() {
@@ -356,7 +365,7 @@ impl SourceIntegrationManager {
 
             let qtd_paginas = contar_paginas_cbz_bytes(&cbz_bytes) as i32;
             self.db
-                .criar_capitulo(
+                .criar_capitulo_com_idioma(
                     mam_core::CapituloId::new(),
                     None,
                     obra.id,
@@ -364,12 +373,16 @@ impl SourceIntegrationManager {
                     cap.titulo.clone(),
                     mam_core::CaminhoRelativo::from_str(caminho_rel_cap.clone()),
                     qtd_paginas,
+                    cap.idioma.clone(),
                 )
                 .await?;
 
             let detalhes = serde_json::json!({
-                "nome": format!("{} — Cap. {}", obra_titulo, numero),
-                "pasta": caminho_rel_obra,
+                "nome": match &cap.idioma {
+                    Some(lang) if !lang.trim().is_empty() => format!("{} — Cap. {} [{}]", obra_titulo, numero, lang),
+                    _ => format!("{} — Cap. {}", obra_titulo, numero),
+                },
+                "pasta": pasta_destino_rel,
                 "arquivo": nome_arquivo,
                 "paginas": qtd_paginas,
             })
@@ -560,15 +573,26 @@ mod tests {
         let sm = SourceIntegrationManager::nova(db.clone());
         sm.registrar_fonte(Arc::new(FonteMock)).await.unwrap();
 
-        let caps = vec![CapituloBuscaResultado {
-            fonte_id: "mock".to_string(),
-            obra_id_fonte: "obra-1".to_string(),
-            capitulo_id_fonte: "cap-1".to_string(),
-            numero: Some(1),
-            titulo: Some("Capítulo 1".to_string()),
-            url: None,
-            idioma: Some("PT".to_string()),
-        }];
+        let caps = vec![
+            CapituloBuscaResultado {
+                fonte_id: "mock".to_string(),
+                obra_id_fonte: "obra-1".to_string(),
+                capitulo_id_fonte: "cap-1-pt".to_string(),
+                numero: Some(1),
+                titulo: Some("Capítulo 1".to_string()),
+                url: None,
+                idioma: Some("PT".to_string()),
+            },
+            CapituloBuscaResultado {
+                fonte_id: "mock".to_string(),
+                obra_id_fonte: "obra-1".to_string(),
+                capitulo_id_fonte: "cap-1-eng".to_string(),
+                numero: Some(1),
+                titulo: Some("Chapter 1".to_string()),
+                url: None,
+                idioma: Some("ENG".to_string()),
+            },
+        ];
 
         let op_id = sm
             .arquivar_para_biblioteca(&base, "Obra Web".to_string(), caps)
@@ -578,8 +602,16 @@ mod tests {
         let status = sm.status_operacao(&op_id).await.unwrap().unwrap();
         assert!(status.concluida);
         assert_eq!(status.percentual, 100.0);
-        assert!(base.join("Manga/Obra Web/Capitulo_0001.cbz").exists());
-        assert!(sm.capitulo_ja_arquivado("Manga/Obra Web/Capitulo_0001.cbz").await.unwrap());
+        assert!(base.join("Manga/Obra Web/PT/Capitulo_0001.cbz").exists());
+        assert!(base.join("Manga/Obra Web/ENG/Capitulo_0001.cbz").exists());
+        assert!(sm.capitulo_ja_arquivado("Manga/Obra Web/PT/Capitulo_0001.cbz").await.unwrap());
+        assert!(sm.capitulo_ja_arquivado("Manga/Obra Web/ENG/Capitulo_0001.cbz").await.unwrap());
+
+        let obra = db.buscar_obra_por_titulo("Obra Web").await.unwrap().unwrap();
+        let caps_db = db.listar_capitulos_obra(obra.id).await.unwrap();
+        assert_eq!(caps_db.len(), 2);
+        assert!(caps_db.iter().any(|c| c.idioma.as_deref() == Some("PT")));
+        assert!(caps_db.iter().any(|c| c.idioma.as_deref() == Some("ENG")));
 
         let _ = std::fs::remove_dir_all(&base);
     }

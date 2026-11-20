@@ -102,11 +102,35 @@ impl Database {
         caminho_relativo: CaminhoRelativo,
         quantidade_paginas: i32,
     ) -> DbResult<Capitulo> {
+        self.criar_capitulo_com_idioma(
+            id,
+            volume_id,
+            obra_id,
+            numero,
+            titulo_original,
+            caminho_relativo,
+            quantidade_paginas,
+            None,
+        )
+        .await
+    }
+
+    pub async fn criar_capitulo_com_idioma(
+        &self,
+        id: CapituloId,
+        volume_id: Option<VolumeId>,
+        obra_id: ObraId,
+        numero: i32,
+        titulo_original: Option<String>,
+        caminho_relativo: CaminhoRelativo,
+        quantidade_paginas: i32,
+        idioma: Option<String>,
+    ) -> DbResult<Capitulo> {
         let mut conn = self.conn.lock().await;
         let tx = conn.transaction()?;
         tx.execute(
-            "INSERT INTO capitulos (id, volume_id, obra_id, numero, titulo_original, caminho_relativo, quantidade_paginas, data_arquivamento, estado_integridade)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'), ?8)",
+            "INSERT INTO capitulos (id, volume_id, obra_id, numero, titulo_original, caminho_relativo, quantidade_paginas, idioma, data_arquivamento, estado_integridade)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), ?9)",
             params![
                 id.to_string(),
                 volume_id.map(|v| v.to_string()),
@@ -115,6 +139,7 @@ impl Database {
                 titulo_original,
                 caminho_relativo.as_str(),
                 quantidade_paginas,
+                idioma,
                 EstadoIntegridade::Desconhecido.as_str(),
             ],
         )?;
@@ -127,6 +152,7 @@ impl Database {
             titulo_original,
             caminho_relativo,
             quantidade_paginas,
+            idioma,
             data_arquivamento: Utc::now(),
             estado_integridade: EstadoIntegridade::Desconhecido,
         })
@@ -135,7 +161,7 @@ impl Database {
     pub async fn listar_capitulos_obra(&self, obra_id: ObraId) -> DbResult<Vec<Capitulo>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
-            "SELECT id, volume_id, obra_id, numero, titulo_original, caminho_relativo, quantidade_paginas, data_arquivamento, estado_integridade FROM capitulos WHERE obra_id = ?1 ORDER BY numero"
+            "SELECT id, volume_id, obra_id, numero, titulo_original, caminho_relativo, quantidade_paginas, idioma, data_arquivamento, estado_integridade FROM capitulos WHERE obra_id = ?1 ORDER BY numero"
         )?;
         let capitulos = stmt.query_map(params![obra_id.to_string()], |row| {
             Ok(Capitulo {
@@ -146,10 +172,11 @@ impl Database {
                 titulo_original: row.get(4)?,
                 caminho_relativo: CaminhoRelativo::from_str(row.get(5)?),
                 quantidade_paginas: row.get(6)?,
-                data_arquivamento: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
+                idioma: row.get(7)?,
+                data_arquivamento: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
                     .map(|dt| dt.with_timezone(&Utc))
                     .unwrap_or(Utc::now()),
-                estado_integridade: EstadoIntegridade::from_str(&row.get::<_, String>(8)?),
+                estado_integridade: EstadoIntegridade::from_str(&row.get::<_, String>(9)?),
             })
         })?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(capitulos)

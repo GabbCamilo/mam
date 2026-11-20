@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS capitulos (
     titulo_original TEXT,
     caminho_relativo TEXT NOT NULL,
     quantidade_paginas INTEGER NOT NULL DEFAULT 0,
+    idioma TEXT,
     data_arquivamento TEXT NOT NULL DEFAULT (datetime('now')),
     estado_integridade TEXT NOT NULL DEFAULT 'desconhecido',
     FOREIGN KEY (obra_id) REFERENCES obras(id) ON DELETE CASCADE,
