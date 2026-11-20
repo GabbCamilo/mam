@@ -18,6 +18,7 @@ mam-archive = { path = "../archive" }
 mam-source-integration = { path = "../source-integration" }
 mam-library = { path = "../library" }
 mam-transfer = { path = "../transfer" }
+mam-ai-engine = { path = "../ai-engine" }
 
 [dev-dependencies]
 serde_json = "1"

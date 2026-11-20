@@ -27,7 +27,11 @@ use mam_interface::{
     transfer_seletiva as if_transfer_seletiva,
     sync_comparar_bibliotecas as if_sync_comparar_bibliotecas,
     sync_sincronizar_bibliotecas as if_sync_sincronizar_bibliotecas,
+    ai_health as if_ai_health,
+    ai_processar_pagina as if_ai_processar_pagina,
+    ai_listar_modelos as if_ai_listar_modelos,
 };
+use mam_ai_engine::{AiEngineManager, ModeloInfo};
 use mam_transfer::{DiferencaBibliotecas, RelatorioTransferencia, TransferManager};
 use mam_source_integration::SourceIntegrationManager;
 use mam_source_integration::{FonteInfo, ObraBuscaResultado, CapituloBuscaResultado};
@@ -275,6 +279,30 @@ async fn sync_sincronizar_bibliotecas(
     if_sync_sincronizar_bibliotecas(transfer_manager.inner().clone(), origem, destino, permitir_sobrescrita).await
 }
 
+#[tauri::command]
+async fn ai_health(
+    ai_manager: tauri::State<'_, Arc<AiEngineManager>>,
+) -> Result<serde_json::Value, String> {
+    if_ai_health(ai_manager.inner().clone()).await
+}
+
+#[tauri::command]
+async fn ai_processar_pagina(
+    ai_manager: tauri::State<'_, Arc<AiEngineManager>>,
+    caminho_imagem: String,
+    idioma_origem: String,
+) -> Result<serde_json::Value, String> {
+    if_ai_processar_pagina(ai_manager.inner().clone(), caminho_imagem, idioma_origem).await
+}
+
+#[tauri::command]
+async fn ai_listar_modelos(
+    ai_manager: tauri::State<'_, Arc<AiEngineManager>>,
+    diretorios: Vec<String>,
+) -> Result<Vec<ModeloInfo>, String> {
+    if_ai_listar_modelos(ai_manager.inner().clone(), diretorios).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -308,6 +336,9 @@ pub fn run() {
       transfer_seletiva,
       sync_comparar_bibliotecas,
       sync_sincronizar_bibliotecas,
+      ai_health,
+      ai_processar_pagina,
+      ai_listar_modelos,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {
@@ -355,6 +386,10 @@ pub fn run() {
       // Inicializa o TransferManager como estado
       let transfer_manager = TransferManager::nova();
       app.manage(Arc::new(transfer_manager));
+
+      // Inicializa o AiEngineManager como estado
+      let ai_manager = AiEngineManager::nova("python", AiEngineManager::detectar_diretorio_padrao());
+      app.manage(Arc::new(ai_manager));
 
       Ok(())
     })

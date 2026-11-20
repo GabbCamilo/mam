@@ -92,6 +92,7 @@ name = "app"
 version = "0.1.0"
 dependencies = [
  "log",
+ "mam-ai-engine",
  "mam-archive",
  "mam-chapter",
  "mam-database",
@@ -2157,14 +2158,10 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 name = "mam-ai-engine"
 version = "0.1.0"
 dependencies = [
- "mam-core",
  "serde",
  "serde_json",
- "serde_with",
  "thiserror 1.0.69",
  "tokio",
- "tokio-util",
- "uuid",
 ]
 
 [[package]]
@@ -2234,6 +2231,7 @@ dependencies = [
 name = "mam-interface"
 version = "0.1.0"
 dependencies = [
+ "mam-ai-engine",
  "mam-archive",
  "mam-chapter",
  "mam-core",

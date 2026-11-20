@@ -20,6 +20,7 @@ use mam_core::ObraId;
 use mam_database::models::{Obra, Volume};
 use mam_library::{DetalhesObra, LibraryManager};
 use mam_transfer::{DiferencaBibliotecas, RelatorioTransferencia, TransferManager};
+use mam_ai_engine::{AiEngineManager, ModeloInfo};
 
 /// Retorna o status do banco de dados.
 pub async fn db_health() -> String {
@@ -390,6 +391,36 @@ pub async fn sync_sincronizar_bibliotecas(
 ) -> Result<RelatorioTransferencia, String> {
     transfer_manager
         .sincronizar_bibliotecas(Path::new(&origem), Path::new(&destino), permitir_sobrescrita)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Verifica saúde e provedores do Manga AI Engine.
+pub async fn ai_health(
+    ai_manager: Arc<AiEngineManager>,
+) -> Result<serde_json::Value, String> {
+    ai_manager.ping().await.map_err(|e| e.to_string())
+}
+
+/// Executa processamento OCR local em uma página sem alterar o CBZ original.
+pub async fn ai_processar_pagina(
+    ai_manager: Arc<AiEngineManager>,
+    caminho_imagem: String,
+    idioma_origem: String,
+) -> Result<serde_json::Value, String> {
+    ai_manager
+        .processar_ocr(Path::new(&caminho_imagem), &idioma_origem)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Lista modelos opcionais instalados localmente sem downloads automáticos.
+pub async fn ai_listar_modelos(
+    ai_manager: Arc<AiEngineManager>,
+    diretorios: Vec<String>,
+) -> Result<Vec<ModeloInfo>, String> {
+    ai_manager
+        .listar_modelos(diretorios)
         .await
         .map_err(|e| e.to_string())
 }
