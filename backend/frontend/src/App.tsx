@@ -75,6 +75,8 @@ function App() {
   const [filtroIdiomaFonte, setFiltroIdiomaFonte] = useState<string>('TODOS')
   const [selecionadosIds, setSelecionadosIds] = useState<string[]>([])
   const [statusArquivamento, setStatusArquivamento] = useState<StatusOperacao | null>(null)
+  const [operacoesDownload, setOperacoesDownload] = useState<StatusOperacao[]>([])
+  const [popupDownload, setPopupDownload] = useState<{ obra: string; total: number } | null>(null)
   const [downloadsLog, setDownloadsLog] = useState<DownloadLogItem[]>([])
 
   const [modalImportarUrlAberto, setModalImportarUrlAberto] = useState(false)
@@ -358,19 +360,53 @@ function App() {
     }
   }
 
+  useEffect(() => {
+    if (!popupDownload) return
+    const timer = setTimeout(() => setPopupDownload(null), 6500)
+    return () => clearTimeout(timer)
+  }, [popupDownload])
+
+  const temDownloadAtivo = operacoesDownload.some((op) => !op.concluida)
+
+  useEffect(() => {
+    if (!temDownloadAtivo) return
+    const interval = setInterval(async () => {
+      try {
+        const [ops, logs] = await Promise.all([
+          mamApi.sourceListarOperacoes(),
+          mamApi.sourceListarHistoricoDownloads(),
+        ])
+        setOperacoesDownload(ops)
+        setDownloadsLog(logs)
+        if (ops.length > 0 && ops.every((op) => op.concluida)) {
+          await carregarObras()
+        }
+      } catch {
+        // Silencioso durante polling de progresso
+      }
+    }, 900)
+    return () => clearInterval(interval)
+  }, [temDownloadAtivo])
+
   async function handleArquivarSelecionados() {
     if (!obraFonteSelecionada || selecionadosIds.length === 0) return
     const escolhidos = capitulosFonte.filter((c) => selecionadosIds.includes(c.capitulo_id_fonte))
     try {
-      const opId = await mamApi.sourceArquivarCapitulos(
+      const opId = await mamApi.sourceIniciarArquivamento(
         obraFonteSelecionada.titulo,
         escolhidos,
         obraFonteSelecionada.capa_url ?? null,
       )
-      const status = await mamApi.sourceStatusOperacao(opId)
+      setPopupDownload({
+        obra: obraFonteSelecionada.titulo,
+        total: escolhidos.length,
+      })
+      const [status, ops] = await Promise.all([
+        mamApi.sourceStatusOperacao(opId),
+        mamApi.sourceListarOperacoes(),
+      ])
       setStatusArquivamento(status)
-      setMensagem(`Arquivamento concluído (operação ${opId}).`)
-      await carregarObras()
+      setOperacoesDownload(ops)
     } catch (err) {
       setMensagem(`Erro ao arquivar capítulos: ${String(err)}`)
     }
@@ -973,13 +1009,61 @@ function App() {
               <div>
                 <h1 className="mam-section-title">LOG DE DOWNLOADS</h1>
                 <p className="mam-section-desc">
-                  Histórico de capítulos baixados com nome, pasta de destino na biblioteca e hora.
+                  Progresso dos downloads em andamento e histórico de capítulos baixados com nome, pasta de destino na biblioteca e hora.
                 </p>
               </div>
-              <button className="mam-btn" onClick={carregarObras}>
+              <button
+                className="mam-btn"
+                onClick={async () => {
+                  const [ops] = await Promise.all([
+                    mamApi.sourceListarOperacoes(),
+                    carregarObras(),
+                  ])
+                  setOperacoesDownload(ops)
+                }}
+              >
                 Atualizar Log
               </button>
             </div>
+
+            {operacoesDownload.length > 0 && (
+              <div style={{ marginBottom: '1.25rem', display: 'grid', gap: '0.6rem' }}>
+                {operacoesDownload.map((op) => (
+                  <div
+                    key={op.id}
+                    className="mam-row-card"
+                    style={{ flexDirection: 'column', alignItems: 'stretch', gap: '0.45rem' }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <strong>
+                        {op.concluida ? '✓ Concluído' : '⬇️ Baixando conjunto'}: {op.obra_titulo}
+                      </strong>
+                      <span className="mam-pill-badge">
+                        {op.capitulos_processados}/{op.total_capitulos} ({Math.round(op.percentual)}%)
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        height: 6,
+                        borderRadius: 999,
+                        background: 'rgba(148, 163, 184, 0.18)',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${Math.min(100, Math.max(0, op.percentual))}%`,
+                          height: '100%',
+                          background: op.concluida ? 'var(--success)' : 'var(--accent)',
+                          transition: 'width 250ms ease',
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {downloadsLog.length === 0 ? (
               <p className="mam-section-desc">Nenhum download registrado até o momento.</p>
             ) : (
@@ -1141,6 +1225,45 @@ function App() {
               <pre className="mam-pre">{JSON.stringify(resultadoImportacao, null, 2)}</pre>
             )}
           </form>
+        </div>
+      )}
+
+      {popupDownload && (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => {
+            setAbaAtiva('downloads')
+            setPopupDownload(null)
+            carregarObras()
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              setAbaAtiva('downloads')
+              setPopupDownload(null)
+              carregarObras()
+            }
+          }}
+          style={{
+            position: 'fixed',
+            right: '1.25rem',
+            bottom: '3rem',
+            zIndex: 1200,
+            maxWidth: 380,
+            padding: '0.85rem 1.05rem',
+            borderRadius: 12,
+            background: 'var(--bg-elevated, #111827)',
+            border: '1px solid var(--accent, #38bdf8)',
+            boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
+            cursor: 'pointer',
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: '0.2rem' }}>
+            ⬇️ Baixando conjunto: {popupDownload.obra} ({popupDownload.total} cap.)
+          </div>
+          <div className="mam-brand-sub">
+            Clique aqui para acompanhar o progresso no Log de Downloads
+          </div>
         </div>
       )}
 

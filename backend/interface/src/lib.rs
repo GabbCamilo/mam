@@ -250,6 +250,37 @@ pub async fn source_arquivar_capitulos(
         .map_err(|e| e.to_string())
 }
 
+/// Inicia uma operação de arquivamento em segundo plano e retorna imediatamente o `id_operacao`.
+pub async fn source_iniciar_arquivamento(
+    source_manager: Arc<SourceIntegrationManager>,
+    library_manager: Arc<LibraryManager>,
+    obra_titulo: String,
+    capitulos: Vec<CapituloBuscaResultado>,
+    capa_url: Option<String>,
+) -> Result<String, String> {
+    let id_operacao = source_manager
+        .iniciar_operacao_arquivamento(obra_titulo.clone(), capitulos.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let id_clone = id_operacao.clone();
+    let raiz = library_manager.raiz().to_path_buf();
+    tokio::spawn(async move {
+        let _ = source_manager
+            .executar_arquivamento_operacao(&id_clone, &raiz, obra_titulo, capitulos, capa_url)
+            .await;
+    });
+
+    Ok(id_operacao)
+}
+
+/// Lista todas as operações de arquivamento (em andamento e concluídas).
+pub async fn source_listar_operacoes(
+    source_manager: Arc<SourceIntegrationManager>,
+) -> Result<Vec<StatusOperacao>, String> {
+    Ok(source_manager.listar_operacoes().await)
+}
+
 /// Baixa uma imagem de capa pelo backend Rust (evitando bloqueio de Referer/CSP no WebView).
 pub async fn source_obter_capa(url: String) -> Result<String, String> {
     mam_source_integration::baixar_imagem_data_url(&url)

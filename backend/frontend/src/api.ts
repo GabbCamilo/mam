@@ -220,6 +220,17 @@ export const mamApi = {
       capitulos,
       capaUrl: capaUrl ?? null,
     }),
+  sourceIniciarArquivamento: (
+    obraTitulo: string,
+    capitulos: CapituloBuscaResultado[],
+    capaUrl?: string | null,
+  ) =>
+    invoke<string>('source_iniciar_arquivamento', {
+      obraTitulo,
+      capitulos,
+      capaUrl: capaUrl ?? null,
+    }),
+  sourceListarOperacoes: () => invoke<StatusOperacao[]>('source_listar_operacoes'),
   sourceObterCapa: (url: string) => invoke<string>('source_obter_capa', { url }),
   libraryListarObrasResumo: () => invoke<ObraResumo[]>('library_listar_obras_resumo'),
   sourceListarHistoricoDownloads: () =>

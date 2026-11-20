@@ -291,6 +291,26 @@ impl SourceIntegrationManager {
         let id_operacao = self
             .iniciar_operacao_arquivamento(obra_titulo.clone(), capitulos.clone())
             .await?;
+        self.executar_arquivamento_operacao(
+            &id_operacao,
+            raiz_biblioteca,
+            obra_titulo,
+            capitulos,
+            capa_url,
+        )
+        .await?;
+        Ok(id_operacao)
+    }
+
+    /// Executa o download e arquivamento de uma operação já iniciada em `self.operacoes`.
+    pub async fn executar_arquivamento_operacao(
+        &self,
+        id_operacao: &str,
+        raiz_biblioteca: &std::path::Path,
+        obra_titulo: String,
+        capitulos: Vec<CapituloBuscaResultado>,
+        capa_url: Option<String>,
+    ) -> Result<(), SourceError> {
 
         let nome_pasta_obra = sanitizar_nome(&obra_titulo);
         let caminho_rel_obra = format!("Manga/{}", nome_pasta_obra);
@@ -397,11 +417,11 @@ impl SourceIntegrationManager {
                 )
                 .await;
 
-            self.arquivar_capitulo(&id_operacao, &cap.fonte_id, &cap)
+            self.arquivar_capitulo(id_operacao, &cap.fonte_id, &cap)
                 .await?;
         }
 
-        Ok(id_operacao)
+        Ok(())
     }
 }
 
