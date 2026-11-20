@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Capitulo,
   MarcadorPagina,
@@ -36,6 +36,8 @@ export function CbzReader({
   const [telaCheia, setTelaCheia] = useState(false)
   const [paginaHover, setPaginaHover] = useState<number | null>(null)
   const viewportRef = useRef<HTMLDivElement | null>(null)
+  const longStripPageRefs = useRef<(HTMLImageElement | null)[]>([])
+  const pendingScrollRatioRef = useRef<{ x: number; y: number } | null>(null)
   const [marcadores, setMarcadores] = useState<MarcadorPagina[]>([])
   const [erro, setErro] = useState<string | null>(null)
   const [carregando, setCarregando] = useState(false)
@@ -159,6 +161,53 @@ export function CbzReader({
     }
   }
 
+  function aplicarZoom(updater: number | ((prev: number) => number)) {
+    const vp = viewportRef.current
+    if (vp) {
+      const ratioX =
+        vp.scrollWidth > vp.clientWidth
+          ? (vp.scrollLeft + vp.clientWidth / 2) / vp.scrollWidth
+          : 0.5
+      const ratioY =
+        vp.scrollHeight > vp.clientHeight
+          ? (vp.scrollTop + vp.clientHeight / 2) / vp.scrollHeight
+          : 0.5
+      pendingScrollRatioRef.current = { x: ratioX, y: ratioY }
+    }
+    setZoom((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater
+      return Math.min(200, Math.max(10, next))
+    })
+  }
+
+  useLayoutEffect(() => {
+    const vp = viewportRef.current
+    if (!vp) return
+    const ratio = pendingScrollRatioRef.current
+    pendingScrollRatioRef.current = null
+    if (!ratio) return
+
+    if (vp.scrollWidth > vp.clientWidth) {
+      vp.scrollLeft = Math.max(0, ratio.x * vp.scrollWidth - vp.clientWidth / 2)
+    } else {
+      vp.scrollLeft = 0
+    }
+    if (vp.scrollHeight > vp.clientHeight) {
+      vp.scrollTop = Math.max(0, ratio.y * vp.scrollHeight - vp.clientHeight / 2)
+    } else {
+      vp.scrollTop = 0
+    }
+  }, [zoom, modo])
+
+  function irParaPagina(idx: number) {
+    setIndiceAtual(idx)
+    if (modo === 'vertical') {
+      requestAnimationFrame(() => {
+        longStripPageRefs.current[idx]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
+    }
+  }
+
   useEffect(() => {
     function onFullscreenChange() {
       setTelaCheia(Boolean(document.fullscreenElement))
@@ -167,6 +216,10 @@ export function CbzReader({
       if (e.key === 'F11') {
         e.preventDefault()
         alternarTelaCheia()
+      } else if (modo === 'vertical' && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+        e.preventDefault()
+        const delta = e.key === 'ArrowDown' ? 220 : -220
+        viewportRef.current?.scrollBy({ top: delta, behavior: 'smooth' })
       }
     }
     document.addEventListener('fullscreenchange', onFullscreenChange)
@@ -175,7 +228,7 @@ export function CbzReader({
       document.removeEventListener('fullscreenchange', onFullscreenChange)
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [])
+  }, [modo])
 
   function avancarPagina() {
     if (totalPaginas > 0 && indiceAtual + passo < totalPaginas) {
@@ -444,30 +497,8 @@ export function CbzReader({
         onWheel={(e) => {
           if (e.ctrlKey) {
             e.preventDefault()
-            const vp = viewportRef.current
-            const prevW = vp ? vp.scrollWidth : 0
-            const prevH = vp ? vp.scrollHeight : 0
-            const ratioX =
-              vp && prevW > vp.clientWidth
-                ? (vp.scrollLeft + vp.clientWidth / 2) / prevW
-                : 0.5
-            const ratioY =
-              vp && prevH > vp.clientHeight
-                ? (vp.scrollTop + vp.clientHeight / 2) / prevH
-                : 0.5
-
             const delta = e.deltaY < 0 ? 10 : -10
-            setZoom((z) => Math.min(200, Math.max(10, z + delta)))
-
-            requestAnimationFrame(() => {
-              if (!vp) return
-              if (vp.scrollWidth > vp.clientWidth) {
-                vp.scrollLeft = ratioX * vp.scrollWidth - vp.clientWidth / 2
-              }
-              if (vp.scrollHeight > vp.clientHeight) {
-                vp.scrollTop = ratioY * vp.scrollHeight - vp.clientHeight / 2
-              }
-            })
+            aplicarZoom((z) => z + delta)
           }
         }}
         style={{
@@ -482,9 +513,18 @@ export function CbzReader({
           paginasLongStrip.map((pag, idx) => (
             <img
               key={pag.nome + idx}
+              ref={(el) => {
+                longStripPageRefs.current[idx] = el
+              }}
               src={`data:${pag.mime_type};base64,${pag.dados_base64}`}
               alt={pag.nome}
-              style={{ ...estiloImagem, maxWidth: '100%' }}
+              style={{
+                ...estiloImagem,
+                width: `${zoom}%`,
+                maxWidth: zoom <= 100 ? '100%' : 'none',
+                maxHeight: 'none',
+                flexShrink: 0,
+              }}
             />
           ))
         ) : modo === 'dupla' ? (
@@ -642,7 +682,7 @@ export function CbzReader({
               <div
                 key={idx}
                 onMouseEnter={() => setPaginaHover(idx)}
-                onClick={() => setIndiceAtual(idx)}
+                onClick={() => irParaPagina(idx)}
                 style={{
                   flex: 1,
                   height: '100%',
@@ -735,17 +775,17 @@ export function CbzReader({
             <div>
               <small style={{ color: '#94a3b8' }}>ZOOM</small>
               <div className="mam-stepper" style={{ marginTop: '0.35rem' }}>
-                <button className="mam-btn" onClick={() => setZoom((z) => Math.max(10, z - 10))}>
+                <button className="mam-btn" onClick={() => aplicarZoom((z) => z - 10)}>
                   −
                 </button>
                 <span>{zoom}%</span>
-                <button className="mam-btn" onClick={() => setZoom((z) => Math.min(200, z + 10))}>
+                <button className="mam-btn" onClick={() => aplicarZoom((z) => z + 10)}>
                   +
                 </button>
                 <button
                   className="mam-btn"
                   onClick={() =>
-                    setZoom(modo === 'horizontal' ? 30 : modo === 'dupla' ? 110 : 100)
+                    aplicarZoom(modo === 'horizontal' ? 30 : modo === 'dupla' ? 110 : 100)
                   }
                 >
                   Reset
