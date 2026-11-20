@@ -67,8 +67,10 @@ async fn chapter_listar_por_obra(
 }
 
 #[tauri::command]
-async fn library_raiz() -> Result<String, String> {
-    if_library_raiz().await
+async fn library_raiz(
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+) -> Result<String, String> {
+    if_library_raiz(library_manager.inner().clone()).await
 }
 
 #[tauri::command]
@@ -349,14 +351,15 @@ pub fn run() {
         )?;
       }
 
-      // Inicializa o banco de dados SQLite como estado gerenciado pelo Tauri
+      // Resolve a raiz portátil da biblioteca:
+      // 1. MAM_LIBRARY_DIR (variável de ambiente explícita)
+      // 2. Pasta portátil ao lado do executável (se existir System/database.db ou MAM_LIBRARY)
+      // 3. Fallback para app_data_dir() do sistema
       let app_handle = app.handle();
-      let caminho_db = app_handle.path().app_data_dir()
-        .unwrap_or(PathBuf::from("."))
-        .join("database.db");
-
-      let raiz_biblioteca = app_handle.path().app_data_dir()
-        .unwrap_or(PathBuf::from("."));
+      let raiz_biblioteca = resolver_raiz_biblioteca(app_handle);
+      let sistema_dir = raiz_biblioteca.join("System");
+      let _ = std::fs::create_dir_all(&sistema_dir);
+      let caminho_db = sistema_dir.join("database.db");
 
       // Abre o banco de dados SQLite (runtime do Tauri executa setup de forma síncrona)
       let db = tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -395,4 +398,31 @@ pub fn run() {
     })
     .run(tauri::generate_context!())
     .expect("error while building tauri application");
+}
+
+/// Resolve a raiz da biblioteca priorizando portabilidade em SSD/mídia externa.
+fn resolver_raiz_biblioteca(app_handle: &tauri::AppHandle) -> PathBuf {
+    if let Ok(env_dir) = std::env::var("MAM_LIBRARY_DIR") {
+        let trimmed = env_dir.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            if exe_dir.join("System/database.db").exists() {
+                return exe_dir.to_path_buf();
+            }
+            let pasta_portatil = exe_dir.join("MAM_LIBRARY");
+            if pasta_portatil.exists() {
+                return pasta_portatil;
+            }
+        }
+    }
+
+    app_handle
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
 }

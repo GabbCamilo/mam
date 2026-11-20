@@ -43,8 +43,32 @@ impl AiEngineManager {
         }
     }
 
-    /// Resolve o diretório padrão do `ai-engine` relativo ao workspace.
+    /// Resolve o diretório padrão do `ai-engine` priorizando:
+    /// 1. Variável de ambiente `MAM_AI_ENGINE_DIR`
+    /// 2. Diretório ao lado do executável portátil (`<exe_dir>/ai-engine`)
+    /// 3. Caminhos relativos ao workspace de desenvolvimento (`ai-engine`, `../ai-engine`, `../../ai-engine`)
     pub fn detectar_diretorio_padrao() -> PathBuf {
+        if let Ok(env_dir) = std::env::var("MAM_AI_ENGINE_DIR") {
+            let p = PathBuf::from(env_dir);
+            if p.join("mam_ai_engine").exists() {
+                return p;
+            }
+        }
+
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                let candidatos_exe = [
+                    exe_dir.join("ai-engine"),
+                    exe_dir.join("../share/mam/ai-engine"),
+                ];
+                for cand in candidatos_exe {
+                    if cand.join("mam_ai_engine").exists() {
+                        return cand;
+                    }
+                }
+            }
+        }
+
         let candidatos = [
             PathBuf::from("ai-engine"),
             PathBuf::from("../ai-engine"),

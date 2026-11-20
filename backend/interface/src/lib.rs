@@ -67,8 +67,8 @@ pub async fn chapter_listar_por_obra(
 }
 
 /// Retorna o caminho da raiz da biblioteca configurada.
-pub async fn library_raiz() -> Result<String, String> {
-    Ok(PathBuf::from("MAM_LIBRARY").to_string_lossy().to_string())
+pub async fn library_raiz(library_manager: Arc<LibraryManager>) -> Result<String, String> {
+    Ok(library_manager.raiz().to_string_lossy().to_string())
 }
 
 /// Cadastra uma nova obra na biblioteca.
@@ -427,8 +427,96 @@ pub async fn ai_listar_modelos(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::env;
+    use std::fs;
+    use uuid::Uuid;
+
     #[test]
     fn it_works() {
         assert_eq!(2 + 2, 4);
+    }
+
+    #[tokio::test]
+    async fn portabilidade_entre_unidades_ou_diretorios_distintos() {
+        let base = env::temp_dir().join(format!("mam_test_portabilidade_{}", Uuid::new_v4()));
+        let ssd_pc_a = base.join("PC_A_Unidade_D");
+        let ssd_pc_b = base.join("PC_B_Unidade_E_Outro_Caminho");
+        let imgs_tmp = base.join("imgs_origem");
+
+        fs::create_dir_all(ssd_pc_a.join("System")).unwrap();
+        fs::create_dir_all(ssd_pc_a.join("Manga/Obra Portatil")).unwrap();
+        fs::create_dir_all(&imgs_tmp).unwrap();
+        fs::write(imgs_tmp.join("001.jpg"), b"FAKEJPGDATA").unwrap();
+
+        // 1. Cria biblioteca, CBZ, obra, capítulo e progresso no "PC A"
+        let db_a = Arc::new(
+            Database::abrir(ssd_pc_a.join("System/database.db"), ssd_pc_a.clone())
+                .await
+                .expect("abrir db no PC A"),
+        );
+        let lib_a = Arc::new(LibraryManager::nova(db_a.clone(), ssd_pc_a.clone()));
+        let arch_a = Arc::new(ArchiveManager::nova(db_a.clone()));
+
+        let rel_obra = "Manga/Obra Portatil".to_string();
+        let rel_cap = "Manga/Obra Portatil/Cap 001.cbz".to_string();
+
+        arch_a
+            .criar_cbz_de_imagens(&imgs_tmp, &ssd_pc_a.join(&rel_cap))
+            .await
+            .expect("criar cbz no PC A");
+
+        let obra = lib_a
+            .criar_obra("Obra Portátil".to_string(), rel_obra.clone(), None)
+            .await
+            .expect("criar obra");
+
+        let cap = lib_a
+            .registrar_capitulo(obra.id, None, 1, None, rel_cap.clone(), 1)
+            .await
+            .expect("registrar capitulo");
+
+        reader_salvar_progresso(db_a.clone(), cap.id.to_string(), 0)
+            .await
+            .expect("salvar progresso");
+
+        // Fecha instâncias do PC A antes de mover o SSD
+        drop(arch_a);
+        drop(lib_a);
+        drop(db_a);
+
+        // 2. Simula desconectar o SSD do PC A e montar em outro caminho no PC B
+        fs::rename(&ssd_pc_a, &ssd_pc_b).expect("mover biblioteca para novo caminho");
+
+        // 3. Abre tudo a partir do novo caminho no PC B
+        let db_b = Arc::new(
+            Database::abrir(ssd_pc_b.join("System/database.db"), ssd_pc_b.clone())
+                .await
+                .expect("abrir db no PC B"),
+        );
+        let lib_b = Arc::new(LibraryManager::nova(db_b.clone(), ssd_pc_b.clone()));
+        let arch_b = Arc::new(ArchiveManager::nova(db_b.clone()));
+
+        let detalhes = library_obter_detalhes_obra(lib_b.clone(), obra.id.to_string())
+            .await
+            .expect("ler detalhes da obra no PC B");
+        assert_eq!(detalhes.obra.caminho_relativo.as_str(), rel_obra);
+        assert_eq!(detalhes.capitulos_avulsos.len(), 1);
+
+        let caminho_cap_rel = detalhes.capitulos_avulsos[0].caminho_relativo.as_str().to_string();
+        assert_eq!(caminho_cap_rel, rel_cap);
+
+        let pagina = reader_obter_pagina(arch_b, lib_b, caminho_cap_rel, 0)
+            .await
+            .expect("ler pagina do CBZ no PC B usando caminho relativo");
+        assert_eq!(pagina.nome, "001.jpg");
+        assert_eq!(pagina.total_paginas, 1);
+
+        let progresso = reader_obter_progresso(db_b, cap.id.to_string())
+            .await
+            .expect("recuperar progresso no PC B");
+        assert_eq!(progresso, 0);
+
+        let _ = fs::remove_dir_all(&base);
     }
 }
