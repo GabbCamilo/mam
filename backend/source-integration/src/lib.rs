@@ -335,11 +335,8 @@ impl SourceIntegrationManager {
             }
         };
 
-        let mut caminhos_neste_lote = std::collections::HashSet::new();
-
         for cap in capitulos {
             let numero = cap.numero.unwrap_or(0);
-            let nome_arquivo = format!("Capitulo_{:04}.cbz", numero);
             let idioma_limpo = cap
                 .idioma
                 .as_deref()
@@ -349,13 +346,6 @@ impl SourceIntegrationManager {
                 Some(lang) => format!("{}/{}", caminho_rel_obra, lang),
                 None => caminho_rel_obra.clone(),
             };
-            let caminho_rel_cap = format!("{}/{}", pasta_destino_rel, nome_arquivo);
-
-            if !caminhos_neste_lote.insert(caminho_rel_cap.clone()) {
-                self.arquivar_capitulo(id_operacao, &cap.fonte_id, &cap)
-                    .await?;
-                continue;
-            }
 
             let fonte = {
                 let fontes = self.fontes.read().await;
@@ -370,7 +360,63 @@ impl SourceIntegrationManager {
             }
 
             let cbz_bytes = fonte.obter_capitulo(&cap.capitulo_id_fonte).await?;
-            let caminho_abs = raiz_biblioteca.join(&caminho_rel_cap);
+            use sha2::Digest;
+            let hash = format!("{:x}", sha2::Sha256::digest(&cbz_bytes));
+
+            let mut ja_existe_identico = false;
+            let mut nome_arquivo = String::new();
+            let mut caminho_rel_cap = String::new();
+            let mut caminho_abs = std::path::PathBuf::new();
+
+            let mut versao: usize = 1;
+            loop {
+                let nome_cand = if versao == 1 {
+                    format!("Capitulo_{:04}.cbz", numero)
+                } else {
+                    format!("Capitulo_{:04}_v{}.cbz", numero, versao)
+                };
+                let rel_cand = format!("{}/{}", pasta_destino_rel, nome_cand);
+                let abs_cand = raiz_biblioteca.join(&rel_cand);
+
+                let existe_disco = abs_cand.exists();
+                let existe_banco = self
+                    .db
+                    .buscar_capitulo_por_caminho(&rel_cand)
+                    .await?
+                    .is_some();
+
+                if !existe_disco && !existe_banco {
+                    nome_arquivo = nome_cand;
+                    caminho_rel_cap = rel_cand;
+                    caminho_abs = abs_cand;
+                    break;
+                }
+
+                // Avalia se o arquivo existente é idêntico pelo hash SHA-256
+                let hash_existente = if existe_disco {
+                    std::fs::read(&abs_cand)
+                        .ok()
+                        .map(|bytes| format!("{:x}", sha2::Sha256::digest(&bytes)))
+                } else {
+                    self.db
+                        .consultar_integridade(&rel_cand)
+                        .await?
+                        .map(|i| i.hash_sha256)
+                };
+
+                if hash_existente.as_deref() == Some(hash.as_str()) {
+                    ja_existe_identico = true;
+                    break;
+                }
+
+                versao += 1;
+            }
+
+            if ja_existe_identico {
+                self.arquivar_capitulo(id_operacao, &cap.fonte_id, &cap)
+                    .await?;
+                continue;
+            }
 
             if let Some(pai) = caminho_abs.parent() {
                 std::fs::create_dir_all(pai).map_err(|e| SourceError::Operacao(e.to_string()))?;
@@ -379,50 +425,27 @@ impl SourceIntegrationManager {
             let temp_path = caminho_abs.with_extension("cbz.mam_tmp");
             std::fs::write(&temp_path, &cbz_bytes)
                 .map_err(|e| SourceError::Operacao(e.to_string()))?;
-            if caminho_abs.exists() {
-                std::fs::remove_file(&caminho_abs)
-                    .map_err(|e| SourceError::Operacao(e.to_string()))?;
-            }
             std::fs::rename(&temp_path, &caminho_abs)
                 .map_err(|e| SourceError::Operacao(e.to_string()))?;
 
-            use sha2::Digest;
-            let hash = format!("{:x}", sha2::Sha256::digest(&cbz_bytes));
             self.db
                 .registrar_integridade(&caminho_rel_cap, &hash, "valido")
                 .await?;
 
             let qtd_paginas = contar_paginas_cbz_bytes(&cbz_bytes) as i32;
-            let cap_id = if let Some(existente) = self
-                .db
-                .buscar_capitulo_por_caminho(&caminho_rel_cap)
-                .await?
-            {
-                self.db
-                    .atualizar_capitulo_arquivado(
-                        existente.id,
-                        cap.titulo.clone(),
-                        qtd_paginas,
-                        cap.idioma.clone(),
-                    )
-                    .await?;
-                existente.id
-            } else {
-                let novo_id = mam_core::CapituloId::new();
-                self.db
-                    .criar_capitulo_com_idioma(
-                        novo_id,
-                        None,
-                        obra.id,
-                        numero,
-                        cap.titulo.clone(),
-                        mam_core::CaminhoRelativo::from_str(caminho_rel_cap.clone()),
-                        qtd_paginas,
-                        cap.idioma.clone(),
-                    )
-                    .await?;
-                novo_id
-            };
+            let cap_id = mam_core::CapituloId::new();
+            self.db
+                .criar_capitulo_com_idioma(
+                    cap_id,
+                    None,
+                    obra.id,
+                    numero,
+                    cap.titulo.clone(),
+                    mam_core::CaminhoRelativo::from_str(caminho_rel_cap.clone()),
+                    qtd_paginas,
+                    cap.idioma.clone(),
+                )
+                .await?;
 
             let detalhes = serde_json::json!({
                 "operacao_id": id_operacao,
