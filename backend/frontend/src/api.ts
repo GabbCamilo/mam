@@ -53,8 +53,32 @@ export interface MarcadorPagina {
   nota: string
 }
 
+export interface RelatorioTransferencia {
+  operacao_id: string
+  arquivos_copiados: string[]
+  arquivos_ignorados: string[]
+  bytes_transferidos: number
+}
+
+export interface DiferencaBibliotecas {
+  ausentes_no_destino: string[]
+  diferentes: string[]
+  identicos: string[]
+}
+
+export interface ModeloInfo {
+  id: string
+  nome: string
+  formato: string
+  caminho: string
+  tamanho_bytes: number
+  disponivel: boolean
+}
+
 export const mamApi = {
   healthCheck: () => invoke<string>('health_check'),
+  libraryRaiz: () => invoke<string>('library_raiz'),
+  chapterDetectar: () => invoke<string[]>('chapter_detectar'),
   listarObras: () => invoke<Obra[]>('library_listar_obras'),
   criarObra: (titulo: string, caminhoRelativo: string, origem?: string | null) =>
     invoke<Obra>('library_criar_obra', {
@@ -85,4 +109,17 @@ export const mamApi = {
     invoke<void>('reader_adicionar_marcador', { capituloId, pagina, nota }),
   listarMarcadores: (capituloId: string) =>
     invoke<MarcadorPagina[]>('reader_listar_marcadores', { capituloId }),
+  transferCopiaIntegral: (origem: string, destino: string) =>
+    invoke<RelatorioTransferencia>('transfer_copia_integral', { origem, destino }),
+  syncCompararBibliotecas: (origem: string, destino: string) =>
+    invoke<DiferencaBibliotecas>('sync_comparar_bibliotecas', { origem, destino }),
+  syncSincronizarBibliotecas: (origem: string, destino: string, permitirSobrescrita: boolean) =>
+    invoke<RelatorioTransferencia>('sync_sincronizar_bibliotecas', {
+      origem,
+      destino,
+      permitirSobrescrita,
+    }),
+  aiHealth: () => invoke<Record<string, unknown>>('ai_health'),
+  aiListarModelos: (diretorios: string[]) =>
+    invoke<ModeloInfo[]>('ai_listar_modelos', { diretorios }),
 }
