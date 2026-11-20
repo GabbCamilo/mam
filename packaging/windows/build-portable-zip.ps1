@@ -48,6 +48,8 @@ if (Test-Path $StageDir) { Remove-Item $StageDir -Recurse -Force }
 New-Item -ItemType Directory -Path $StageDir -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $StageDir "ai-engine") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $StageDir "models") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $StageDir "MAM_LIBRARY\Manga") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $StageDir "MAM_LIBRARY\System") -Force | Out-Null
 
 Copy-Item $ExePath (Join-Path $StageDir "app.exe") -Force
 $WebViewDll = Join-Path (Split-Path $ExePath -Parent) "WebView2Loader.dll"
