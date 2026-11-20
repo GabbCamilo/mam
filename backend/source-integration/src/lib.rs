@@ -335,7 +335,28 @@ impl SourceIntegrationManager {
             }
         };
 
+        let mut caminhos_neste_lote = std::collections::HashSet::new();
+
         for cap in capitulos {
+            let numero = cap.numero.unwrap_or(0);
+            let nome_arquivo = format!("Capitulo_{:04}.cbz", numero);
+            let idioma_limpo = cap
+                .idioma
+                .as_deref()
+                .map(|s| sanitizar_nome(s))
+                .filter(|s| !s.is_empty());
+            let pasta_destino_rel = match &idioma_limpo {
+                Some(lang) => format!("{}/{}", caminho_rel_obra, lang),
+                None => caminho_rel_obra.clone(),
+            };
+            let caminho_rel_cap = format!("{}/{}", pasta_destino_rel, nome_arquivo);
+
+            if !caminhos_neste_lote.insert(caminho_rel_cap.clone()) {
+                self.arquivar_capitulo(id_operacao, &cap.fonte_id, &cap)
+                    .await?;
+                continue;
+            }
+
             let fonte = {
                 let fontes = self.fontes.read().await;
                 fontes
@@ -349,18 +370,6 @@ impl SourceIntegrationManager {
             }
 
             let cbz_bytes = fonte.obter_capitulo(&cap.capitulo_id_fonte).await?;
-            let numero = cap.numero.unwrap_or(0);
-            let nome_arquivo = format!("Capitulo_{:04}.cbz", numero);
-            let idioma_limpo = cap
-                .idioma
-                .as_deref()
-                .map(|s| sanitizar_nome(s))
-                .filter(|s| !s.is_empty());
-            let pasta_destino_rel = match &idioma_limpo {
-                Some(lang) => format!("{}/{}", caminho_rel_obra, lang),
-                None => caminho_rel_obra.clone(),
-            };
-            let caminho_rel_cap = format!("{}/{}", pasta_destino_rel, nome_arquivo);
             let caminho_abs = raiz_biblioteca.join(&caminho_rel_cap);
 
             if let Some(pai) = caminho_abs.parent() {
@@ -384,19 +393,36 @@ impl SourceIntegrationManager {
                 .await?;
 
             let qtd_paginas = contar_paginas_cbz_bytes(&cbz_bytes) as i32;
-            let cap_id = mam_core::CapituloId::new();
-            self.db
-                .criar_capitulo_com_idioma(
-                    cap_id,
-                    None,
-                    obra.id,
-                    numero,
-                    cap.titulo.clone(),
-                    mam_core::CaminhoRelativo::from_str(caminho_rel_cap.clone()),
-                    qtd_paginas,
-                    cap.idioma.clone(),
-                )
-                .await?;
+            let cap_id = if let Some(existente) = self
+                .db
+                .buscar_capitulo_por_caminho(&caminho_rel_cap)
+                .await?
+            {
+                self.db
+                    .atualizar_capitulo_arquivado(
+                        existente.id,
+                        cap.titulo.clone(),
+                        qtd_paginas,
+                        cap.idioma.clone(),
+                    )
+                    .await?;
+                existente.id
+            } else {
+                let novo_id = mam_core::CapituloId::new();
+                self.db
+                    .criar_capitulo_com_idioma(
+                        novo_id,
+                        None,
+                        obra.id,
+                        numero,
+                        cap.titulo.clone(),
+                        mam_core::CaminhoRelativo::from_str(caminho_rel_cap.clone()),
+                        qtd_paginas,
+                        cap.idioma.clone(),
+                    )
+                    .await?;
+                novo_id
+            };
 
             let detalhes = serde_json::json!({
                 "operacao_id": id_operacao,

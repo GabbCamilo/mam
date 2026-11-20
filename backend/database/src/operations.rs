@@ -663,6 +663,89 @@ impl Database {
         )?;
         Ok(())
     }
+
+    /// Exclui um volume pelo ID (capítulos vinculados permanecem na obra com `volume_id = NULL`) e retorna `(numero, titulo)`.
+    pub async fn excluir_volume(&self, volume_id: VolumeId) -> DbResult<Option<(i32, Option<String>)>> {
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction()?;
+        let info: Option<(i32, Option<String>)> = {
+            let mut stmt = tx.prepare("SELECT numero, titulo FROM volumes WHERE id = ?1")?;
+            let mut rows = stmt.query_map(params![volume_id.to_string()], |row| {
+                Ok((row.get::<_, i32>(0)?, row.get::<_, Option<String>>(1)?))
+            })?;
+            rows.next().transpose()?
+        };
+        if info.is_some() {
+            tx.execute("DELETE FROM volumes WHERE id = ?1", params![volume_id.to_string()])?;
+        }
+        tx.commit()?;
+        Ok(info)
+    }
+
+    /// Busca um capítulo pelo `caminho_relativo` para evitar duplicatas no catálogo.
+    pub async fn buscar_capitulo_por_caminho(
+        &self,
+        caminho_relativo: &str,
+    ) -> DbResult<Option<Capitulo>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, volume_id, obra_id, numero, titulo_original, caminho_relativo, quantidade_paginas, idioma, data_arquivamento, estado_integridade FROM capitulos WHERE caminho_relativo = ?1 LIMIT 1",
+        )?;
+        let mut rows = stmt.query_map(params![caminho_relativo], |row| {
+            Ok(Capitulo {
+                id: CapituloId::from_string(row.get(0)?),
+                volume_id: row.get::<_, Option<String>>(1)?.map(VolumeId::from_string),
+                obra_id: ObraId::from_string(row.get(2)?),
+                numero: row.get(3)?,
+                titulo_original: row.get(4)?,
+                caminho_relativo: CaminhoRelativo::from_str(row.get(5)?),
+                quantidade_paginas: row.get(6)?,
+                idioma: row.get(7)?,
+                data_arquivamento: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or(Utc::now()),
+                estado_integridade: EstadoIntegridade::from_str(&row.get::<_, String>(9)?),
+            })
+        })?;
+        Ok(rows.next().transpose()?)
+    }
+
+    /// Atualiza páginas e título de um capítulo já existente no catálogo.
+    pub async fn atualizar_capitulo_arquivado(
+        &self,
+        capitulo_id: CapituloId,
+        titulo_original: Option<String>,
+        quantidade_paginas: i32,
+        idioma: Option<String>,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE capitulos SET titulo_original = ?1, quantidade_paginas = ?2, idioma = COALESCE(?3, idioma), data_arquivamento = datetime('now') WHERE id = ?4",
+            params![titulo_original, quantidade_paginas, idioma, capitulo_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// Lista registros de renomeações ordenados do mais recente para o mais antigo.
+    pub async fn listar_historico_renomeacoes(
+        &self,
+    ) -> DbResult<Vec<(String, Option<String>, Option<String>, String)>> {
+        self.listar_historico_por_tipo("renomeacao").await
+    }
+
+    /// Limpa registros do histórico de operações (de um tipo específico ou de todos os logs).
+    pub async fn limpar_historico(&self, tipo: Option<&str>) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        match tipo {
+            Some(t) => {
+                conn.execute("DELETE FROM historico_operacoes WHERE tipo = ?1", params![t])?;
+            }
+            None => {
+                conn.execute("DELETE FROM historico_operacoes", [])?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

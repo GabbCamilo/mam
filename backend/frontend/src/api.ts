@@ -287,6 +287,12 @@ export const mamApi = {
     invoke<void>('library_renomear_capitulo', { capituloId, novoTitulo }),
   listarHistoricoExclusoes: () =>
     invoke<DownloadLogItem[]>('library_listar_historico_exclusoes'),
+  excluirVolume: (volumeId: string) =>
+    invoke<void>('library_excluir_volume', { volumeId }),
+  listarHistoricoRenomeacoes: () =>
+    invoke<DownloadLogItem[]>('library_listar_historico_renomeacoes'),
+  limparHistoricoLogs: (tipo?: string | null) =>
+    invoke<void>('library_limpar_historico_logs', { tipo: tipo ?? null }),
   marcarLido: (capituloId: string, lido: boolean) =>
     invoke<void>('reader_marcar_lido', { capituloId, lido }),
   listarLidos: () => invoke<string[]>('reader_listar_lidos'),

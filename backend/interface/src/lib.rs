@@ -898,39 +898,92 @@ pub async fn library_criar_volume_com_capitulos(
     Ok(vol)
 }
 
-/// Renomeia um volume (nome e número de ordem).
+/// Renomeia um volume (nome e número de ordem) e registra no log de renomeações.
 pub async fn library_renomear_volume(
     db: Arc<Database>,
     volume_id: String,
     numero: i32,
     titulo: Option<String>,
 ) -> Result<(), String> {
-    db.atualizar_volume(mam_core::VolumeId::from_string(volume_id), numero, titulo)
+    db.atualizar_volume(mam_core::VolumeId::from_string(volume_id), numero, titulo.clone())
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    let nome = match titulo.as_deref().filter(|t| !t.trim().is_empty()) {
+        Some(t) => format!("Volume {} — {}", numero, t),
+        None => format!("Volume {}", numero),
+    };
+    let detalhes = serde_json::json!({ "nome": nome, "pasta": "Volume" }).to_string();
+    let _ = db
+        .registrar_operacao("renomeacao".to_string(), None, Some(detalhes), None)
+        .await;
+    Ok(())
 }
 
-/// Renomeia o título de um capítulo baixado.
+/// Exclui um volume da biblioteca (desvinculando seus capítulos sem remover os arquivos) e registra no log.
+pub async fn library_excluir_volume(
+    db: Arc<Database>,
+    volume_id: String,
+) -> Result<(), String> {
+    let info = db
+        .excluir_volume(mam_core::VolumeId::from_string(volume_id))
+        .await
+        .map_err(|e| e.to_string())?;
+    if let Some((numero, titulo)) = info {
+        let nome = match titulo.as_deref().filter(|t| !t.trim().is_empty()) {
+            Some(t) => format!("Volume {} — {}", numero, t),
+            None => format!("Volume {}", numero),
+        };
+        let detalhes = serde_json::json!({ "nome": nome, "pasta": "Volume" }).to_string();
+        let _ = db
+            .registrar_operacao("exclusao".to_string(), None, Some(detalhes), None)
+            .await;
+    }
+    Ok(())
+}
+
+/// Renomeia o título de um capítulo baixado e registra no log de renomeações.
 pub async fn library_renomear_capitulo(
     db: Arc<Database>,
     capitulo_id: String,
     novo_titulo: Option<String>,
 ) -> Result<(), String> {
-    db.renomear_capitulo(CapituloId::from_string(capitulo_id), novo_titulo)
-        .await
-        .map_err(|e| e.to_string())
-}
-
-/// Lista os registros de exclusão no histórico do SQLite.
-pub async fn library_listar_historico_exclusoes(
-    db: Arc<Database>,
-) -> Result<Vec<DownloadLogItem>, String> {
-    let rows = db
-        .listar_historico_exclusoes()
+    let id = CapituloId::from_string(capitulo_id);
+    let cap_info = db.obter_capitulo_por_id(id).await.map_err(|e| e.to_string())?;
+    db.renomear_capitulo(id, novo_titulo.clone())
         .await
         .map_err(|e| e.to_string())?;
-    Ok(rows
-        .into_iter()
+    if let Some(cap) = cap_info {
+        let pasta = std::path::Path::new(cap.caminho_relativo.as_str())
+            .parent()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|| cap.caminho_relativo.as_str().to_string());
+        let nome = match novo_titulo.as_deref().filter(|t| !t.trim().is_empty()) {
+            Some(t) => format!("Cap. {} → {}", cap.numero, t),
+            None => format!("Cap. {} (título removido)", cap.numero),
+        };
+        let detalhes = serde_json::json!({
+            "nome": nome,
+            "pasta": pasta,
+            "caminho_relativo": cap.caminho_relativo.as_str(),
+        })
+        .to_string();
+        let _ = db
+            .registrar_operacao(
+                "renomeacao".to_string(),
+                Some(cap.caminho_relativo.as_str().to_string()),
+                Some(detalhes),
+                None,
+            )
+            .await;
+    }
+    Ok(())
+}
+
+fn map_historico_rows(
+    rows: Vec<(String, Option<String>, Option<String>, String)>,
+    fallback_nome: &str,
+) -> Vec<DownloadLogItem> {
+    rows.into_iter()
         .map(|(id, alvo, detalhes, criado_em)| {
             let parsed = detalhes
                 .as_deref()
@@ -940,7 +993,7 @@ pub async fn library_listar_historico_exclusoes(
                 .and_then(|v| v["nome"].as_str())
                 .map(|s| s.to_string())
                 .or_else(|| alvo.clone())
-                .unwrap_or_else(|| "Exclusão".to_string());
+                .unwrap_or_else(|| fallback_nome.to_string());
             let pasta_destino = parsed
                 .as_ref()
                 .and_then(|v| v["pasta"].as_str())
@@ -959,7 +1012,39 @@ pub async fn library_listar_historico_exclusoes(
                 caminho_relativo: alvo,
             }
         })
-        .collect())
+        .collect()
+}
+
+/// Lista os registros de exclusão no histórico do SQLite.
+pub async fn library_listar_historico_exclusoes(
+    db: Arc<Database>,
+) -> Result<Vec<DownloadLogItem>, String> {
+    let rows = db
+        .listar_historico_exclusoes()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(map_historico_rows(rows, "Exclusão"))
+}
+
+/// Lista os registros de renomeação no histórico do SQLite.
+pub async fn library_listar_historico_renomeacoes(
+    db: Arc<Database>,
+) -> Result<Vec<DownloadLogItem>, String> {
+    let rows = db
+        .listar_historico_renomeacoes()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(map_historico_rows(rows, "Renomeação"))
+}
+
+/// Limpa o histórico de operações no SQLite (de um tipo específico ou todos).
+pub async fn library_limpar_historico_logs(
+    db: Arc<Database>,
+    tipo: Option<String>,
+) -> Result<(), String> {
+    db.limpar_historico(tipo.as_deref())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Marca ou desmarca um capítulo como lido na biblioteca.

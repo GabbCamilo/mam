@@ -516,6 +516,29 @@ async fn library_listar_historico_exclusoes(
 }
 
 #[tauri::command]
+async fn library_excluir_volume(
+    db: tauri::State<'_, Arc<Database>>,
+    volume_id: String,
+) -> Result<(), String> {
+    mam_interface::library_excluir_volume(db.inner().clone(), volume_id).await
+}
+
+#[tauri::command]
+async fn library_listar_historico_renomeacoes(
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<Vec<DownloadLogItem>, String> {
+    mam_interface::library_listar_historico_renomeacoes(db.inner().clone()).await
+}
+
+#[tauri::command]
+async fn library_limpar_historico_logs(
+    db: tauri::State<'_, Arc<Database>>,
+    tipo: Option<String>,
+) -> Result<(), String> {
+    mam_interface::library_limpar_historico_logs(db.inner().clone(), tipo).await
+}
+
+#[tauri::command]
 async fn library_excluir_capitulo(
     db: tauri::State<'_, Arc<Database>>,
     library_manager: tauri::State<'_, Arc<LibraryManager>>,
@@ -597,6 +620,9 @@ pub fn run() {
       library_renomear_volume,
       library_renomear_capitulo,
       library_listar_historico_exclusoes,
+      library_excluir_volume,
+      library_listar_historico_renomeacoes,
+      library_limpar_historico_logs,
       reader_marcar_lido,
       reader_listar_lidos,
       source_obter_capa,

@@ -170,11 +170,24 @@ export function CbzReader({
 
   const estiloImagem: React.CSSProperties = {
     width: ajuste === 'fit-width' ? `${zoom}%` : 'auto',
-    maxHeight: ajuste === 'fit-height' ? '82vh' : 'none',
+    maxWidth: ajuste === 'fit-width' ? (zoom <= 100 ? '100%' : 'none') : undefined,
+    maxHeight: ajuste === 'fit-height' ? `${0.82 * zoom}vh` : 'none',
     transform: ajuste === 'original' ? `scale(${zoom / 100})` : undefined,
+    transformOrigin: 'center center',
     objectFit: 'contain',
     borderRadius: 6,
     boxShadow: '0 8px 28px rgba(0,0,0,0.55)',
+    display: 'block',
+  }
+
+  function handleClickNavegacaoImagem(e: React.MouseEvent<HTMLElement>) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const relX = e.clientX - rect.left
+    if (relX < rect.width / 2) {
+      voltarPagina()
+    } else {
+      avancarPagina()
+    }
   }
 
   const capsModalFiltrados = [...capitulosDisponiveis]
@@ -396,11 +409,11 @@ export function CbzReader({
         }}
         style={{
           flexDirection: modo === 'vertical' ? 'column' : 'row',
-          alignItems: modo === 'vertical' ? 'center' : 'center',
-          justifyContent: modo === 'vertical' ? 'flex-start' : 'center',
+          alignItems: modo === 'vertical' ? 'center' : 'flex-start',
+          justifyContent: 'flex-start',
         }}
       >
-        {carregando && <p style={{ color: '#94a3b8' }}>Carregando página...</p>}
+        {carregando && <p style={{ color: '#94a3b8', margin: 'auto' }}>Carregando página...</p>}
 
         {modo === 'vertical' && paginasLongStrip.length > 0 ? (
           paginasLongStrip.map((pag, idx) => (
@@ -413,15 +426,19 @@ export function CbzReader({
           ))
         ) : modo === 'dupla' ? (
           <div
+            onClick={handleClickNavegacaoImagem}
             style={{
               display: 'grid',
               gridTemplateColumns: paginaSecundaria ? '1fr 1fr' : '1fr',
               gap: '2px',
-              width: '100%',
-              maxWidth: '100%',
+              width: `${zoom}%`,
+              minWidth: zoom <= 100 ? '100%' : `${zoom}%`,
+              margin: 'auto',
               alignItems: 'center',
               justifyItems: 'center',
+              cursor: 'pointer',
             }}
+            title="Clique na esquerda para voltar ou na direita para avançar"
           >
             {paginaPrincipal && (
               <div
@@ -435,14 +452,11 @@ export function CbzReader({
                 <img
                   src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
                   alt={paginaPrincipal.nome}
-                  onClick={avancarPagina}
-                  title="Clique para ir para a próxima página"
                   style={{
                     width: '100%',
                     maxHeight: `${0.82 * zoom}vh`,
                     objectFit: 'contain',
                     objectPosition: paginaSecundaria ? 'right center' : 'center',
-                    cursor: 'pointer',
                   }}
                 />
               </div>
@@ -459,14 +473,11 @@ export function CbzReader({
                 <img
                   src={`data:${paginaSecundaria.mime_type};base64,${paginaSecundaria.dados_base64}`}
                   alt={paginaSecundaria.nome}
-                  onClick={avancarPagina}
-                  title="Clique para ir para a próxima página"
                   style={{
                     width: '100%',
                     maxHeight: `${0.82 * zoom}vh`,
                     objectFit: 'contain',
                     objectPosition: 'left center',
-                    cursor: 'pointer',
                   }}
                 />
               </div>
@@ -474,12 +485,20 @@ export function CbzReader({
           </div>
         ) : (
           paginaPrincipal && (
-            <div style={{ position: 'relative', display: 'inline-block' }}>
+            <div
+              style={{
+                position: 'relative',
+                margin: 'auto',
+                width: '100%',
+                display: 'flex',
+                justifyContent: 'center',
+              }}
+            >
               <img
                 src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
                 alt={paginaPrincipal.nome}
-                onClick={avancarPagina}
-                title="Clique para ir para a próxima página"
+                onClick={handleClickNavegacaoImagem}
+                title="Clique na esquerda para voltar ou na direita para avançar"
                 style={{ ...estiloImagem, cursor: 'pointer' }}
               />
               {mostrarSobreposicao &&
