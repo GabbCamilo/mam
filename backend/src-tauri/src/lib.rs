@@ -9,7 +9,7 @@ use mam_archive::{ArchiveManager, PaginaExtraida};
 use mam_interface::{db_health as if_db_health, db_list_obras as if_db_list_obras};
 use mam_interface::{chapter_detectar as if_chapter_detectar, chapter_listar_por_obra as if_chapter_listar_por_obra};
 use mam_interface::{library_raiz as if_library_raiz, library_criar_obra as if_library_criar_obra, library_listar_obras as if_library_listar_obras, library_obter_detalhes_obra as if_library_obter_detalhes_obra, library_criar_volume as if_library_criar_volume, library_atualizar_metadados as if_library_atualizar_metadados};
-use mam_database::models::{Obra, Volume};
+use mam_database::models::{Obra, ResultadoIA, Volume};
 use mam_library::{DetalhesObra, LibraryManager};
 use mam_interface::{archive_criar_cbz as if_archive_criar_cbz, archive_ler_cbz as if_archive_ler_cbz, archive_validar_cbz as if_archive_validar_cbz};
 use mam_interface::{source_listar_fontes as if_source_listar_fontes, source_buscar_obras as if_source_buscar_obras};
@@ -30,6 +30,8 @@ use mam_interface::{
     ai_health as if_ai_health,
     ai_processar_pagina as if_ai_processar_pagina,
     ai_listar_modelos as if_ai_listar_modelos,
+    ai_listar_resultados_capitulo as if_ai_listar_resultados_capitulo,
+    ai_revisar_resultado as if_ai_revisar_resultado,
 };
 use mam_ai_engine::{AiEngineManager, ModeloInfo};
 use mam_transfer::{DiferencaBibliotecas, RelatorioTransferencia, TransferManager};
@@ -321,6 +323,23 @@ async fn ai_listar_modelos(
     if_ai_listar_modelos(ai_manager.inner().clone(), diretorios).await
 }
 
+#[tauri::command]
+async fn ai_listar_resultados_capitulo(
+    db: tauri::State<'_, Arc<Database>>,
+    capitulo_id: String,
+) -> Result<Vec<ResultadoIA>, String> {
+    if_ai_listar_resultados_capitulo(db.inner().clone(), capitulo_id).await
+}
+
+#[tauri::command]
+async fn ai_revisar_resultado(
+    db: tauri::State<'_, Arc<Database>>,
+    resultado_id: String,
+    resultado_json_revisado: String,
+) -> Result<(), String> {
+    if_ai_revisar_resultado(db.inner().clone(), resultado_id, resultado_json_revisado).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -358,6 +377,8 @@ pub fn run() {
       ai_health,
       ai_processar_pagina,
       ai_listar_modelos,
+      ai_listar_resultados_capitulo,
+      ai_revisar_resultado,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {
@@ -412,8 +433,11 @@ pub fn run() {
       let transfer_manager = TransferManager::nova();
       app.manage(Arc::new(transfer_manager));
 
-      // Inicializa o AiEngineManager como estado
-      let ai_manager = AiEngineManager::nova("python", AiEngineManager::detectar_diretorio_padrao());
+      // Inicializa o AiEngineManager como estado (prioriza runtime Python embutido)
+      let ai_manager = AiEngineManager::nova(
+        AiEngineManager::detectar_executavel_python(),
+        AiEngineManager::detectar_diretorio_padrao(),
+      );
       app.manage(Arc::new(ai_manager));
 
       Ok(())

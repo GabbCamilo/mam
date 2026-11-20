@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Capitulo, MarcadorPagina, PaginaExtraida, mamApi } from '../api'
+import { Capitulo, MarcadorPagina, PaginaExtraida, ResultadoIA, mamApi } from '../api'
 
 type ModoLeitura = 'horizontal' | 'vertical' | 'dupla'
 type AjusteTela = 'fit-width' | 'fit-height' | 'original'
@@ -27,6 +27,9 @@ export function CbzReader({
   const [marcadores, setMarcadores] = useState<MarcadorPagina[]>([])
   const [erro, setErro] = useState<string | null>(null)
   const [carregando, setCarregando] = useState(false)
+  const [mostrarIa, setMostrarIa] = useState(false)
+  const [resultadosIa, setResultadosIa] = useState<ResultadoIA[]>([])
+  const [textoRevisao, setTextoRevisao] = useState('')
 
   const indiceCapituloAtual = capitulosDisponiveis.findIndex((c) => c.id === capitulo.id)
   const capituloAnterior =
@@ -40,13 +43,15 @@ export function CbzReader({
     let ativo = true
     async function inicializar() {
       try {
-        const [progresso, listaMarcadores] = await Promise.all([
+        const [progresso, listaMarcadores, listaIa] = await Promise.all([
           mamApi.obterProgresso(capitulo.id),
           mamApi.listarMarcadores(capitulo.id),
+          mamApi.aiListarResultadosCapitulo(capitulo.id),
         ])
         if (!ativo) return
         setIndiceAtual(progresso)
         setMarcadores(listaMarcadores)
+        setResultadosIa(listaIa)
       } catch {
         if (!ativo) return
         setIndiceAtual(0)
@@ -184,7 +189,50 @@ export function CbzReader({
 
         <button onClick={handleFavorito}>{favorito ? '★ Favorito' : '☆ Favoritar'}</button>
         <button onClick={handleAdicionarMarcador}>🔖 Marcar Página</button>
+        <button onClick={() => setMostrarIa((v) => !v)}>
+          {mostrarIa ? 'Ocultar Camada IA' : 'Camada IA / Revisão'}
+        </button>
       </div>
+
+      {mostrarIa && (
+        <div style={{ padding: '0.75rem', background: '#f4f4f6', borderRadius: 6 }}>
+          <strong>Resultados de IA — Página {indiceAtual + 1}</strong>
+          {resultadosIa
+            .filter((r) => r.pagina_numero === indiceAtual)
+            .map((r) => (
+              <div key={r.id} style={{ marginTop: '0.5rem' }}>
+                <span>
+                  Estado: <code>{r.estado_revisao}</code> | Modelo: {r.modelo_id}
+                </span>
+                <pre style={{ background: '#fff', padding: '0.5rem', borderRadius: 4 }}>
+                  {r.resultado_json}
+                </pre>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    placeholder="JSON/texto revisado..."
+                    value={textoRevisao}
+                    onChange={(e) => setTextoRevisao(e.target.value)}
+                    style={{ minWidth: 260 }}
+                  />
+                  <button
+                    onClick={async () => {
+                      if (!textoRevisao.trim()) return
+                      await mamApi.aiRevisarResultado(r.id, textoRevisao.trim())
+                      const atualizados = await mamApi.aiListarResultadosCapitulo(capitulo.id)
+                      setResultadosIa(atualizados)
+                      setTextoRevisao('')
+                    }}
+                  >
+                    Salvar Revisão
+                  </button>
+                </div>
+              </div>
+            ))}
+          {resultadosIa.filter((r) => r.pagina_numero === indiceAtual).length === 0 && (
+            <p style={{ margin: '0.4rem 0 0' }}>Nenhum resultado de IA salvo para esta página.</p>
+          )}
+        </div>
+      )}
 
       {marcadores.length > 0 && (
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', fontSize: '0.9rem' }}>

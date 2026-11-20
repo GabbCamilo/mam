@@ -107,6 +107,19 @@ export interface StatusOperacao {
   concluida: boolean
 }
 
+export interface ResultadoIA {
+  id: string
+  capitulo_id: string
+  pagina_numero: number
+  modelo_id: string
+  versao_modelo: string
+  tipo_processamento: string
+  resultado_json: string
+  idioma_origem?: string | null
+  idioma_destino?: string | null
+  estado_revisao: string
+}
+
 export const mamApi = {
   healthCheck: () => invoke<string>('health_check'),
   libraryRaiz: () => invoke<string>('library_raiz'),
@@ -163,4 +176,8 @@ export const mamApi = {
     invoke<string>('source_arquivar_capitulos', { obraTitulo, capitulos }),
   sourceStatusOperacao: (idOperacao: string) =>
     invoke<StatusOperacao | null>('source_status_operacao', { idOperacao }),
+  aiListarResultadosCapitulo: (capituloId: string) =>
+    invoke<ResultadoIA[]>('ai_listar_resultados_capitulo', { capituloId }),
+  aiRevisarResultado: (resultadoId: string, resultadoJsonRevisado: string) =>
+    invoke<void>('ai_revisar_resultado', { resultadoId, resultadoJsonRevisado }),
 }

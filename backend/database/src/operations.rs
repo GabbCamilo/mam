@@ -370,6 +370,95 @@ impl Database {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(itens)
     }
+
+    // ── Resultados de IA (OCR, balões, tradução e revisão) ──
+
+    pub async fn salvar_resultado_ia(
+        &self,
+        capitulo_id: CapituloId,
+        pagina_numero: i32,
+        modelo_id: &str,
+        versao_modelo: &str,
+        tipo_processamento: &str,
+        resultado_json: &str,
+        idioma_origem: Option<&str>,
+        idioma_destino: Option<&str>,
+    ) -> DbResult<ResultadoIA> {
+        let id = Uuid::new_v4().to_string();
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "INSERT INTO resultados_ia (id, capitulo_id, pagina_numero, modelo_id, versao_modelo, tipo_processamento, resultado_json, idioma_origem, idioma_destino, estado_revisao)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'nao_revisado')",
+            params![
+                id,
+                capitulo_id.to_string(),
+                pagina_numero,
+                modelo_id,
+                versao_modelo,
+                tipo_processamento,
+                resultado_json,
+                idioma_origem,
+                idioma_destino,
+            ],
+        )?;
+        Ok(ResultadoIA {
+            id: Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::nil()),
+            capitulo_id,
+            pagina_numero,
+            modelo_id: modelo_id.to_string(),
+            versao_modelo: versao_modelo.to_string(),
+            tipo_processamento: tipo_processamento.to_string(),
+            resultado_json: resultado_json.to_string(),
+            idioma_origem: idioma_origem.map(|s| s.to_string()),
+            idioma_destino: idioma_destino.map(|s| s.to_string()),
+            estado_revisao: "nao_revisado".to_string(),
+            criado_em: Utc::now(),
+        })
+    }
+
+    pub async fn listar_resultados_ia_capitulo(
+        &self,
+        capitulo_id: CapituloId,
+    ) -> DbResult<Vec<ResultadoIA>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, capitulo_id, pagina_numero, modelo_id, versao_modelo, tipo_processamento, resultado_json, idioma_origem, idioma_destino, estado_revisao
+             FROM resultados_ia WHERE capitulo_id = ?1 ORDER BY pagina_numero",
+        )?;
+        let itens = stmt
+            .query_map(params![capitulo_id.to_string()], |row| {
+                let id_str: String = row.get(0)?;
+                let cap_str: String = row.get(1)?;
+                Ok(ResultadoIA {
+                    id: Uuid::parse_str(&id_str).unwrap_or_else(|_| Uuid::nil()),
+                    capitulo_id: CapituloId::from_string(cap_str),
+                    pagina_numero: row.get(2)?,
+                    modelo_id: row.get(3)?,
+                    versao_modelo: row.get(4)?,
+                    tipo_processamento: row.get(5)?,
+                    resultado_json: row.get(6)?,
+                    idioma_origem: row.get(7)?,
+                    idioma_destino: row.get(8)?,
+                    estado_revisao: row.get(9)?,
+                    criado_em: Utc::now(),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(itens)
+    }
+
+    pub async fn revisar_resultado_ia(
+        &self,
+        resultado_id: &str,
+        resultado_json_revisado: &str,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE resultados_ia SET resultado_json = ?1, estado_revisao = 'revisado' WHERE id = ?2",
+            params![resultado_json_revisado, resultado_id],
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -467,5 +556,43 @@ mod tests {
             .expect("listar marcadores");
         assert_eq!(marcadores.len(), 1);
         assert_eq!(marcadores[0].1, "Cena importante");
+    }
+
+    #[tokio::test]
+    async fn salvar_e_revisar_resultado_ia() {
+        let db = criar_db_teste().await;
+        let obra_id = ObraId::new();
+        let cap_id = CapituloId::new();
+        let caminho = CaminhoRelativo::from_str("Manga/Obra/Cap 01.cbz".to_string());
+        db.criar_obra(obra_id, "Obra IA".to_string(), caminho.clone(), None)
+            .await
+            .unwrap();
+        db.criar_capitulo(cap_id, None, obra_id, 1, None, caminho, 10)
+            .await
+            .unwrap();
+
+        let res = db
+            .salvar_resultado_ia(
+                cap_id,
+                0,
+                "ocr-ja",
+                "1.0",
+                "translation",
+                r#"{"texto":"olá"}"#,
+                Some("ja"),
+                Some("pt-BR"),
+            )
+            .await
+            .expect("salvar resultado ia");
+        assert_eq!(res.estado_revisao, "nao_revisado");
+
+        db.revisar_resultado_ia(&res.id.to_string(), r#"{"texto":"Olá!"}"#)
+            .await
+            .expect("revisar resultado ia");
+
+        let lista = db.listar_resultados_ia_capitulo(cap_id).await.unwrap();
+        assert_eq!(lista.len(), 1);
+        assert_eq!(lista[0].estado_revisao, "revisado");
+        assert_eq!(lista[0].resultado_json, r#"{"texto":"Olá!"}"#);
     }
 }

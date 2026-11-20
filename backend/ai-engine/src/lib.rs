@@ -43,6 +43,35 @@ impl AiEngineManager {
         }
     }
 
+    /// Resolve o executável Python priorizando:
+    /// 1. Variável de ambiente `MAM_PYTHON_EXE`
+    /// 2. Runtime Python embutido ao lado do executável (`<exe_dir>/python/python.exe` ou `python/bin/python3`)
+    /// 3. Fallback `python` no PATH do sistema
+    pub fn detectar_executavel_python() -> String {
+        if let Ok(env_py) = std::env::var("MAM_PYTHON_EXE") {
+            let trimmed = env_py.trim();
+            if !trimmed.is_empty() && Path::new(trimmed).exists() {
+                return trimmed.to_string();
+            }
+        }
+
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                let candidatos = [
+                    exe_dir.join("python/python.exe"),
+                    exe_dir.join("python/bin/python3"),
+                ];
+                for cand in candidatos {
+                    if cand.exists() {
+                        return cand.to_string_lossy().to_string();
+                    }
+                }
+            }
+        }
+
+        "python".to_string()
+    }
+
     /// Resolve o diretório padrão do `ai-engine` priorizando:
     /// 1. Variável de ambiente `MAM_AI_ENGINE_DIR`
     /// 2. Diretório ao lado do executável portátil (`<exe_dir>/ai-engine`)

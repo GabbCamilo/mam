@@ -16,8 +16,8 @@ use mam_chapter::ChapterManager;
 use mam_archive::{ArchiveManager, PaginaExtraida};
 use mam_source_integration::SourceIntegrationManager;
 use mam_source_integration::{FonteInfo, ObraBuscaResultado, CapituloBuscaResultado, StatusOperacao};
-use mam_core::ObraId;
-use mam_database::models::{Obra, Volume};
+use mam_core::{CapituloId, ObraId};
+use mam_database::models::{Obra, ResultadoIA, Volume};
 use mam_library::{DetalhesObra, LibraryManager};
 use mam_transfer::{DiferencaBibliotecas, RelatorioTransferencia, TransferManager};
 use mam_ai_engine::{AiEngineManager, ModeloInfo};
@@ -433,6 +433,28 @@ pub async fn ai_listar_modelos(
 ) -> Result<Vec<ModeloInfo>, String> {
     ai_manager
         .listar_modelos(diretorios)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Lista resultados de IA salvos para um capítulo (com estado `nao_revisado` ou `revisado`).
+pub async fn ai_listar_resultados_capitulo(
+    db: Arc<Database>,
+    capitulo_id: String,
+) -> Result<Vec<ResultadoIA>, String> {
+    let id = CapituloId::from_string(capitulo_id);
+    db.listar_resultados_ia_capitulo(id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Salva ou revisa manualmente um resultado de IA sem alterar o CBZ original.
+pub async fn ai_revisar_resultado(
+    db: Arc<Database>,
+    resultado_id: String,
+    resultado_json_revisado: String,
+) -> Result<(), String> {
+    db.revisar_resultado_ia(&resultado_id, &resultado_json_revisado)
         .await
         .map_err(|e| e.to_string())
 }

@@ -3,9 +3,12 @@
 //! Identificação de bibliotecas, unidades conectadas, espaço disponível,
 //! detecção de duplicatas e validação de integridade SHA-256.
 
+pub mod cache;
+
 use std::path::{Path, PathBuf};
-use std::io::Write;
 use thiserror::Error;
+
+pub use cache::CacheL1Lru;
 
 /// Erros do módulo de armazenamento.
 #[derive(Debug, Error)]
@@ -58,19 +61,25 @@ impl StorageManager {
         })
     }
 
-    /// Verifica espaço disponível em um caminho.
-    /// Retorna os bytes livres (aproximação).
+    /// Verifica se a unidade/diretório raiz está acessível (detecta desconexão de SSD).
+    pub fn unidade_disponivel(caminho: &Path) -> bool {
+        caminho.exists() && std::fs::metadata(caminho).is_ok()
+    }
+
+    /// Verifica espaço livre real disponível em um caminho (em bytes).
     pub fn espaco_disponivel(caminho: &Path) -> Result<u64, StorageError> {
-        // Em sistemas de arquivos comuns, usamos o espaço do disco onde o caminho reside.
-        // Para simplicidade, retorna um valor padrão alto se não conseguir determinar.
-        let metadata = std::fs::metadata(caminho)
-            .map_err(StorageError::Io)?;
-        if metadata.is_dir() {
-            // Não temos API padrão para espaço livre em disco no std.
-            // Retornamos um valor conservador.
-            Ok(u64::MAX / 2)
-        } else {
-            Ok(u64::MAX / 2)
+        if !Self::unidade_disponivel(caminho) {
+            return Err(StorageError::BibliotecaNaoEncontrada(caminho.to_path_buf()));
+        }
+
+        #[cfg(windows)]
+        {
+            espaco_livre_windows(caminho)
+        }
+
+        #[cfg(unix)]
+        {
+            espaco_livre_unix(caminho)
         }
     }
 
@@ -96,6 +105,7 @@ impl StorageManager {
 mod tests {
     use super::*;
     use std::fs;
+    use std::io::Write;
 
     #[test]
     fn identifica_biblioteca_valida() {
@@ -133,8 +143,85 @@ mod tests {
 
         let resultado = StorageManager::verificar_espaco(&temp, 1024);
         assert!(resultado.is_ok());
+        assert!(StorageManager::unidade_disponivel(&temp));
+        let livre = StorageManager::espaco_disponivel(&temp).expect("espaco livre real");
+        assert!(livre > 0);
+        assert!(livre < u64::MAX / 2);
 
         // Limpeza
         let _ = fs::remove_dir_all(&temp);
     }
+}
+
+#[cfg(windows)]
+fn espaco_livre_windows(caminho: &Path) -> Result<u64, StorageError> {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetDiskFreeSpaceExW(
+            lpDirectoryName: *const u16,
+            lpFreeBytesAvailableToCaller: *mut u64,
+            lpTotalNumberOfBytes: *mut u64,
+            lpTotalNumberOfFreeBytes: *mut u64,
+        ) -> i32;
+    }
+
+    let wide: Vec<u16> = caminho
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut disponivel: u64 = 0;
+    let mut total: u64 = 0;
+    let mut total_livre: u64 = 0;
+
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut disponivel,
+            &mut total,
+            &mut total_livre,
+        )
+    };
+    if ok == 0 {
+        return Err(StorageError::Io(std::io::Error::last_os_error()));
+    }
+    Ok(disponivel)
+}
+
+#[cfg(unix)]
+fn espaco_livre_unix(caminho: &Path) -> Result<u64, StorageError> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    #[repr(C)]
+    struct Statvfs {
+        f_bsize: usize,
+        f_frsize: usize,
+        f_blocks: u64,
+        f_bfree: u64,
+        f_bavail: u64,
+        f_files: u64,
+        f_ffree: u64,
+        f_favail: u64,
+        f_fsid: usize,
+        f_flag: usize,
+        f_namemax: usize,
+        __f_spare: [i32; 6],
+    }
+
+    unsafe extern "C" {
+        fn statvfs(path: *const i8, buf: *mut Statvfs) -> i32;
+    }
+
+    let c_path = CString::new(caminho.as_os_str().as_bytes())
+        .map_err(|_| StorageError::BibliotecaNaoEncontrada(caminho.to_path_buf()))?;
+    let mut stat = std::mem::MaybeUninit::<Statvfs>::zeroed();
+    let res = unsafe { statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
+    if res != 0 {
+        return Err(StorageError::Io(std::io::Error::last_os_error()));
+    }
+    let stat = unsafe { stat.assume_init() };
+    Ok((stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64))
 }

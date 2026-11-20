@@ -1,6 +1,7 @@
 ﻿param(
     [switch]$SkipBuild,
-    [string]$OutputDir = ""
+    [string]$OutputDir = "",
+    [string]$PythonRuntimeDir = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +52,11 @@ New-Item -ItemType Directory -Path (Join-Path $StageDir "models") -Force | Out-N
 Copy-Item $ExePath (Join-Path $StageDir "app.exe") -Force
 Copy-Item (Join-Path $AiEngineDir "mam_ai_engine") (Join-Path $StageDir "ai-engine\mam_ai_engine") -Recurse -Force
 Copy-Item (Join-Path $AiEngineDir "requirements.txt") (Join-Path $StageDir "ai-engine\requirements.txt") -Force
+
+if (-not [string]::IsNullOrWhiteSpace($PythonRuntimeDir) -and (Test-Path $PythonRuntimeDir)) {
+    Write-Host "==> Incluindo runtime Python portátil de $PythonRuntimeDir..."
+    Copy-Item $PythonRuntimeDir (Join-Path $StageDir "python") -Recurse -Force
+}
 
 if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
 Compress-Archive -Path (Join-Path $StageDir "*") -DestinationPath $ZipPath -CompressionLevel Optimal
