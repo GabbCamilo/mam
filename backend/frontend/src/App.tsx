@@ -494,6 +494,12 @@ function App() {
     return () => clearTimeout(timer)
   }, [popupDownload])
 
+  useEffect(() => {
+    if (!mensagem) return
+    const timer = setTimeout(() => setMensagem(null), 5000)
+    return () => clearTimeout(timer)
+  }, [mensagem])
+
   const temDownloadAtivo = operacoesDownload.some((op) => !op.concluida)
 
   useEffect(() => {
@@ -737,15 +743,6 @@ function App() {
       </nav>
 
       <main className="mam-main">
-        {mensagem && (
-          <div className="mam-alert">
-            <span>{mensagem}</span>
-            <button className="mam-btn" onClick={() => setMensagem(null)}>
-              ✕
-            </button>
-          </div>
-        )}
-
         {abaAtiva === 'biblioteca' && (
           <>
             <div className="mam-section-header">
@@ -1762,42 +1759,77 @@ function App() {
         </div>
       )}
 
-      {popupDownload && (
+      {(popupDownload || mensagem) && (
         <div
-          role="button"
-          tabIndex={0}
-          onClick={() => {
-            setAbaAtiva('downloads')
-            setPopupDownload(null)
-            carregarObras()
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              setAbaAtiva('downloads')
-              setPopupDownload(null)
-              carregarObras()
-            }
-          }}
           style={{
             position: 'fixed',
             right: '1.25rem',
             bottom: '3rem',
             zIndex: 1200,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.6rem',
             maxWidth: 380,
-            padding: '0.85rem 1.05rem',
-            borderRadius: 12,
-            background: 'var(--bg-elevated, #111827)',
-            border: '1px solid var(--accent, #38bdf8)',
-            boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
-            cursor: 'pointer',
           }}
         >
-          <div style={{ fontWeight: 700, marginBottom: '0.2rem' }}>
-            ⬇️ Baixando conjunto: {popupDownload.obra} ({popupDownload.total} cap.)
-          </div>
-          <div className="mam-brand-sub">
-            Clique aqui para acompanhar o progresso no Log de Downloads
-          </div>
+          {mensagem && (
+            <div
+              style={{
+                padding: '0.75rem 0.95rem',
+                borderRadius: 12,
+                background: 'var(--bg-elevated, #111827)',
+                border: '1px solid var(--border-subtle, rgba(148,163,184,0.3))',
+                boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+              }}
+            >
+              <span style={{ fontSize: '0.9rem' }}>{mensagem}</span>
+              <button
+                className="mam-btn"
+                onClick={() => setMensagem(null)}
+                style={{ padding: '0.2rem 0.45rem', flexShrink: 0 }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {popupDownload && (
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => {
+                setAbaAtiva('downloads')
+                setPopupDownload(null)
+                carregarObras()
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  setAbaAtiva('downloads')
+                  setPopupDownload(null)
+                  carregarObras()
+                }
+              }}
+              style={{
+                padding: '0.85rem 1.05rem',
+                borderRadius: 12,
+                background: 'var(--bg-elevated, #111827)',
+                border: '1px solid var(--accent, #38bdf8)',
+                boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: '0.2rem' }}>
+                ⬇️ Baixando conjunto: {popupDownload.obra} ({popupDownload.total} cap.)
+              </div>
+              <div className="mam-brand-sub">
+                Clique aqui para acompanhar o progresso no Log de Downloads
+              </div>
+            </div>
+          )}
         </div>
       )}
 

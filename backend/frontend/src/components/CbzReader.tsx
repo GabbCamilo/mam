@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Capitulo,
   MarcadorPagina,
@@ -33,6 +33,7 @@ export function CbzReader({
   const [modo, setModo] = useState<ModoLeitura>('horizontal')
   const [ajuste, setAjuste] = useState<AjusteTela>('fit-width')
   const [zoom, setZoom] = useState(100)
+  const viewportRef = useRef<HTMLDivElement | null>(null)
   const [marcadores, setMarcadores] = useState<MarcadorPagina[]>([])
   const [erro, setErro] = useState<string | null>(null)
   const [carregando, setCarregando] = useState(false)
@@ -399,12 +400,35 @@ export function CbzReader({
       )}
 
       <div
+        ref={viewportRef}
         className="mam-reader-viewport"
         onWheel={(e) => {
-          if (modo !== 'vertical' || e.ctrlKey) {
+          if (e.ctrlKey) {
             e.preventDefault()
+            const vp = viewportRef.current
+            const prevW = vp ? vp.scrollWidth : 0
+            const prevH = vp ? vp.scrollHeight : 0
+            const ratioX =
+              vp && prevW > vp.clientWidth
+                ? (vp.scrollLeft + vp.clientWidth / 2) / prevW
+                : 0.5
+            const ratioY =
+              vp && prevH > vp.clientHeight
+                ? (vp.scrollTop + vp.clientHeight / 2) / prevH
+                : 0.5
+
             const delta = e.deltaY < 0 ? 10 : -10
             setZoom((z) => Math.min(250, Math.max(50, z + delta)))
+
+            requestAnimationFrame(() => {
+              if (!vp) return
+              if (vp.scrollWidth > vp.clientWidth) {
+                vp.scrollLeft = ratioX * vp.scrollWidth - vp.clientWidth / 2
+              }
+              if (vp.scrollHeight > vp.clientHeight) {
+                vp.scrollTop = ratioY * vp.scrollHeight - vp.clientHeight / 2
+              }
+            })
           }
         }}
         style={{
@@ -489,7 +513,8 @@ export function CbzReader({
               style={{
                 position: 'relative',
                 margin: 'auto',
-                width: '100%',
+                width: ajuste === 'fit-width' && zoom > 100 ? `${zoom}%` : '100%',
+                minWidth: ajuste === 'fit-width' && zoom > 100 ? `${zoom}%` : undefined,
                 display: 'flex',
                 justifyContent: 'center',
               }}
@@ -499,7 +524,16 @@ export function CbzReader({
                 alt={paginaPrincipal.nome}
                 onClick={handleClickNavegacaoImagem}
                 title="Clique na esquerda para voltar ou na direita para avançar"
-                style={{ ...estiloImagem, cursor: 'pointer' }}
+                style={{
+                  ...estiloImagem,
+                  width:
+                    ajuste === 'fit-width'
+                      ? zoom > 100
+                        ? '100%'
+                        : `${zoom}%`
+                      : 'auto',
+                  cursor: 'pointer',
+                }}
               />
               {mostrarSobreposicao &&
                 resultadosIa
