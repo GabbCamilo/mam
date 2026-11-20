@@ -39,6 +39,11 @@ use mam_interface::{
     library_excluir_capitulo as if_library_excluir_capitulo,
     reader_marcar_lido as if_reader_marcar_lido,
     reader_listar_lidos as if_reader_listar_lidos,
+    DownloadLogItem,
+    ObraResumo,
+    library_listar_obras_resumo as if_library_listar_obras_resumo,
+    source_listar_historico_downloads as if_source_listar_historico_downloads,
+    source_obter_capa as if_source_obter_capa,
 };
 use mam_source_integration::extractors::{EntradaImportacao, ExtratorInfo, ResultadoImportacao};
 use mam_storage::CacheL1Lru;
@@ -193,14 +198,36 @@ async fn source_arquivar_capitulos(
     library_manager: tauri::State<'_, Arc<LibraryManager>>,
     obra_titulo: String,
     capitulos: Vec<CapituloBuscaResultado>,
+    capa_url: Option<String>,
 ) -> Result<String, String> {
     if_source_arquivar_capitulos(
         source_manager.inner().clone(),
         library_manager.inner().clone(),
         obra_titulo,
         capitulos,
+        capa_url,
     )
     .await
+}
+
+#[tauri::command]
+async fn source_obter_capa(url: String) -> Result<String, String> {
+    if_source_obter_capa(url).await
+}
+
+#[tauri::command]
+async fn library_listar_obras_resumo(
+    db: tauri::State<'_, Arc<Database>>,
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+) -> Result<Vec<ObraResumo>, String> {
+    if_library_listar_obras_resumo(db.inner().clone(), library_manager.inner().clone()).await
+}
+
+#[tauri::command]
+async fn source_listar_historico_downloads(
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<Vec<DownloadLogItem>, String> {
+    if_source_listar_historico_downloads(db.inner().clone()).await
 }
 
 #[tauri::command]
@@ -473,6 +500,9 @@ pub fn run() {
       library_excluir_capitulo,
       reader_marcar_lido,
       reader_listar_lidos,
+      source_obter_capa,
+      library_listar_obras_resumo,
+      source_listar_historico_downloads,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

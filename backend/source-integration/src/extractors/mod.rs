@@ -193,6 +193,22 @@ impl RegistroExtratores {
         )
         .await?;
 
+        let detalhes = serde_json::json!({
+            "nome": format!("{} — Cap. {}", entrada.obra_titulo, entrada.numero_capitulo),
+            "pasta": format!("Manga/{}", pasta_obra),
+            "arquivo": format!("Capitulo_{:04}.cbz", entrada.numero_capitulo),
+            "paginas": paginas_bytes.len(),
+        })
+        .to_string();
+        let _ = db
+            .registrar_operacao(
+                "download".to_string(),
+                Some(caminho_rel_cap.clone()),
+                Some(detalhes),
+                None,
+            )
+            .await;
+
         Ok(ResultadoImportacao {
             extrator_usado: extrator.id().to_string(),
             obra_titulo: entrada.obra_titulo.clone(),

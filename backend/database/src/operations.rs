@@ -489,6 +489,47 @@ impl Database {
         tx.commit()?;
         Ok(if pode_remover_arquivo { caminho } else { None })
     }
+
+    /// Retorna a quantidade de capítulos cadastrados por `obra_id`.
+    pub async fn contar_capitulos_por_obra(&self) -> DbResult<std::collections::HashMap<String, usize>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT obra_id, COUNT(*) FROM capitulos GROUP BY obra_id",
+        )?;
+        let mut mapa = std::collections::HashMap::new();
+        let rows = stmt.query_map([], |row| {
+            let obra_id: String = row.get(0)?;
+            let qtd: i64 = row.get(1)?;
+            Ok((obra_id, qtd.max(0) as usize))
+        })?;
+        for item in rows {
+            let (id, qtd) = item?;
+            mapa.insert(id, qtd);
+        }
+        Ok(mapa)
+    }
+
+    /// Lista registros de downloads ordenados do mais recente para o mais antigo.
+    pub async fn listar_historico_downloads(
+        &self,
+    ) -> DbResult<Vec<(String, Option<String>, Option<String>, String)>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, alvo_caminho, detalhes_json, criado_em FROM historico_operacoes
+             WHERE tipo = 'download' ORDER BY criado_em DESC LIMIT 200",
+        )?;
+        let itens = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(itens)
+    }
 }
 
 #[cfg(test)]

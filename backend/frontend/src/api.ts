@@ -144,6 +144,19 @@ export interface ResultadoImportacao {
   hash_sha256: string
 }
 
+export interface ObraResumo {
+  obra: Obra
+  total_capitulos: number
+  capa_data_url?: string | null
+}
+
+export interface DownloadLogItem {
+  id: string
+  nome: string
+  pasta_destino: string
+  data_hora: string
+}
+
 export const mamApi = {
   healthCheck: () => invoke<string>('health_check'),
   libraryRaiz: () => invoke<string>('library_raiz'),
@@ -196,8 +209,20 @@ export const mamApi = {
     invoke<ObraBuscaResultado[]>('source_buscar_obras', { consulta }),
   sourceListarCapitulos: (fonteId: string, obraIdFonte: string) =>
     invoke<CapituloBuscaResultado[]>('source_listar_capitulos', { fonteId, obraIdFonte }),
-  sourceArquivarCapitulos: (obraTitulo: string, capitulos: CapituloBuscaResultado[]) =>
-    invoke<string>('source_arquivar_capitulos', { obraTitulo, capitulos }),
+  sourceArquivarCapitulos: (
+    obraTitulo: string,
+    capitulos: CapituloBuscaResultado[],
+    capaUrl?: string | null,
+  ) =>
+    invoke<string>('source_arquivar_capitulos', {
+      obraTitulo,
+      capitulos,
+      capaUrl: capaUrl ?? null,
+    }),
+  sourceObterCapa: (url: string) => invoke<string>('source_obter_capa', { url }),
+  libraryListarObrasResumo: () => invoke<ObraResumo[]>('library_listar_obras_resumo'),
+  sourceListarHistoricoDownloads: () =>
+    invoke<DownloadLogItem[]>('source_listar_historico_downloads'),
   sourceStatusOperacao: (idOperacao: string) =>
     invoke<StatusOperacao | null>('source_status_operacao', { idOperacao }),
   aiListarResultadosCapitulo: (capituloId: string) =>

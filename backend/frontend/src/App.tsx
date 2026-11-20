@@ -4,11 +4,12 @@ import {
   CapituloBuscaResultado,
   DetalhesObra,
   DiferencaBibliotecas,
+  DownloadLogItem,
   ExtratorInfo,
   FonteInfo,
   ModeloInfo,
-  Obra,
   ObraBuscaResultado,
+  ObraResumo,
   PaginaExtraida,
   RelatorioTransferencia,
   ResultadoImportacao,
@@ -17,16 +18,18 @@ import {
 } from './api'
 import { CbzReader } from './components/CbzReader'
 
-type AbaAtiva = 'biblioteca' | 'fontes' | 'transferencia' | 'ai'
+type AbaAtiva = 'biblioteca' | 'fontes' | 'downloads' | 'transferencia' | 'ai'
 type SubAbaObra = 'capitulos' | 'volumes'
+type OrdemBiblioteca = 'nome-asc' | 'nome-desc' | 'caps-desc' | 'caps-asc'
 
 function App() {
   const [tema, setTema] = useState<'dark' | 'light'>('dark')
   const [abaAtiva, setAbaAtiva] = useState<AbaAtiva>('biblioteca')
   const [subAbaObra, setSubAbaObra] = useState<SubAbaObra>('capitulos')
   const [raizBiblioteca, setRaizBiblioteca] = useState<string>('')
-  const [obras, setObras] = useState<Obra[]>([])
+  const [obrasResumo, setObrasResumo] = useState<ObraResumo[]>([])
   const [buscaObra, setBuscaObra] = useState('')
+  const [ordemBiblioteca, setOrdemBiblioteca] = useState<OrdemBiblioteca>('nome-asc')
   const [buscaCapitulo, setBuscaCapitulo] = useState('')
   const [ordemCaps, setOrdemCaps] = useState<'desc' | 'asc'>('desc')
   const [detalhes, setDetalhes] = useState<DetalhesObra | null>(null)
@@ -49,10 +52,12 @@ function App() {
   const [fontes, setFontes] = useState<FonteInfo[]>([])
   const [consultaFonte, setConsultaFonte] = useState('')
   const [obrasFonte, setObrasFonte] = useState<ObraBuscaResultado[]>([])
+  const [capasCache, setCapasCache] = useState<Record<string, string>>({})
   const [obraFonteSelecionada, setObraFonteSelecionada] = useState<ObraBuscaResultado | null>(null)
   const [capitulosFonte, setCapitulosFonte] = useState<CapituloBuscaResultado[]>([])
   const [selecionadosIds, setSelecionadosIds] = useState<string[]>([])
   const [statusArquivamento, setStatusArquivamento] = useState<StatusOperacao | null>(null)
+  const [downloadsLog, setDownloadsLog] = useState<DownloadLogItem[]>([])
 
   const [modalImportarUrlAberto, setModalImportarUrlAberto] = useState(false)
   const [extratores, setExtratores] = useState<ExtratorInfo[]>([])
@@ -69,14 +74,16 @@ function App() {
 
   async function carregarObras() {
     try {
-      const [lista, raiz, lidos] = await Promise.all([
-        mamApi.listarObras(),
+      const [lista, raiz, lidos, logs] = await Promise.all([
+        mamApi.libraryListarObrasResumo(),
         mamApi.libraryRaiz(),
         mamApi.listarLidos(),
+        mamApi.sourceListarHistoricoDownloads(),
       ])
-      setObras(lista)
+      setObrasResumo(lista)
       setRaizBiblioteca(raiz)
       setCapitulosLidos(lidos)
+      setDownloadsLog(logs)
     } catch (e) {
       setMensagem(`Erro ao listar obras: ${String(e)}`)
     }
@@ -266,6 +273,18 @@ function App() {
       setCapitulosFonte([])
       setSelecionadosIds([])
       setMensagem(`${res.length} obra(s) encontrada(s).`)
+
+      // Carrega capas em segundo plano pelo backend Rust (evita bloqueio de Referer/CSP)
+      for (const item of res) {
+        if (item.capa_url && !capasCache[item.capa_url]) {
+          mamApi
+            .sourceObterCapa(item.capa_url)
+            .then((dataUrl) => {
+              setCapasCache((prev) => ({ ...prev, [item.capa_url!]: dataUrl }))
+            })
+            .catch(() => {})
+        }
+      }
     } catch (err) {
       setMensagem(`Erro na busca de fontes: ${String(err)}`)
     }
@@ -306,7 +325,11 @@ function App() {
     if (!obraFonteSelecionada || selecionadosIds.length === 0) return
     const escolhidos = capitulosFonte.filter((c) => selecionadosIds.includes(c.capitulo_id_fonte))
     try {
-      const opId = await mamApi.sourceArquivarCapitulos(obraFonteSelecionada.titulo, escolhidos)
+      const opId = await mamApi.sourceArquivarCapitulos(
+        obraFonteSelecionada.titulo,
+        escolhidos,
+        obraFonteSelecionada.capa_url ?? null,
+      )
       const status = await mamApi.sourceStatusOperacao(opId)
       setStatusArquivamento(status)
       setMensagem(`Arquivamento concluído (operação ${opId}).`)
@@ -331,9 +354,28 @@ function App() {
     )
     .sort((a, b) => (ordemCaps === 'desc' ? b.numero - a.numero : a.numero - b.numero))
 
-  const obrasFiltradas = obras.filter((o) =>
-    buscaObra.trim() ? o.titulo.toLowerCase().includes(buscaObra.trim().toLowerCase()) : true,
-  )
+  const obrasFiltradas = [...obrasResumo]
+    .filter((item) =>
+      buscaObra.trim()
+        ? item.obra.titulo.toLowerCase().includes(buscaObra.trim().toLowerCase())
+        : true,
+    )
+    .sort((a, b) => {
+      if (ordemBiblioteca === 'nome-asc') return a.obra.titulo.localeCompare(b.obra.titulo)
+      if (ordemBiblioteca === 'nome-desc') return b.obra.titulo.localeCompare(a.obra.titulo)
+      if (ordemBiblioteca === 'caps-desc') return b.total_capitulos - a.total_capitulos
+      return a.total_capitulos - b.total_capitulos
+    })
+
+  const resumoObraSelecionada = detalhes
+    ? obrasResumo.find((r) => r.obra.id === detalhes.obra.id)
+    : undefined
+
+  const capaDestaqueBiblioteca =
+    resumoObraSelecionada?.capa_data_url ??
+    (capaBiblioteca
+      ? `data:${capaBiblioteca.mime_type};base64,${capaBiblioteca.dados_base64}`
+      : null)
 
   if (capituloAtivo) {
     return (
@@ -359,7 +401,7 @@ function App() {
             <div className="mam-brand-title">MANGA ARCHIVE MANAGER</div>
             <div className="mam-brand-sub">Biblioteca Portátil • Raiz: {raizBiblioteca || '...'}</div>
           </div>
-          <span className="mam-pill-badge">{obras.length} obra(s)</span>
+          <span className="mam-pill-badge">{obrasResumo.length} obra(s)</span>
         </div>
 
         <button
@@ -382,7 +424,10 @@ function App() {
         </button>
         <button
           className={`mam-btn ${abaAtiva === 'biblioteca' ? 'mam-btn-active' : ''}`}
-          onClick={() => setAbaAtiva('biblioteca')}
+          onClick={() => {
+            setAbaAtiva('biblioteca')
+            carregarObras()
+          }}
         >
           Biblioteca
         </button>
@@ -394,6 +439,15 @@ function App() {
           }}
         >
           Fontes & Importação
+        </button>
+        <button
+          className={`mam-btn ${abaAtiva === 'downloads' ? 'mam-btn-active' : ''}`}
+          onClick={() => {
+            setAbaAtiva('downloads')
+            carregarObras()
+          }}
+        >
+          Log de Downloads ({downloadsLog.length})
         </button>
         <button
           className={`mam-btn ${abaAtiva === 'transferencia' ? 'mam-btn-active' : ''}`}
@@ -425,7 +479,7 @@ function App() {
               <div>
                 <h1 className="mam-section-title">BIBLIOTECA</h1>
                 <p className="mam-section-desc">
-                  Gerencie obras, volumes híbridos e capítulos CBZ armazenados localmente.
+                  Obras carregadas automaticamente — ordene por nome ou quantidade de capítulos.
                 </p>
               </div>
               <div className="mam-toolbar-row">
@@ -463,20 +517,40 @@ function App() {
                   value={buscaObra}
                   onChange={(e) => setBuscaObra(e.target.value)}
                 />
+                <select
+                  className="mam-select"
+                  value={ordemBiblioteca}
+                  onChange={(e) => setOrdemBiblioteca(e.target.value as OrdemBiblioteca)}
+                >
+                  <option value="nome-asc">Ordenar: Nome (A → Z)</option>
+                  <option value="nome-desc">Ordenar: Nome (Z → A)</option>
+                  <option value="caps-desc">Ordenar: Mais capítulos</option>
+                  <option value="caps-asc">Ordenar: Menos capítulos</option>
+                </select>
+
                 {obrasFiltradas.length === 0 ? (
                   <p className="mam-section-desc">Nenhuma obra encontrada.</p>
                 ) : (
-                  obrasFiltradas.map((obra) => (
+                  obrasFiltradas.map((item) => (
                     <div
-                      key={obra.id}
-                      onClick={() => handleSelecionarObra(obra.id)}
-                      className={`mam-row-card ${detalhes?.obra.id === obra.id ? 'mam-row-card-active' : ''}`}
+                      key={item.obra.id}
+                      onClick={() => handleSelecionarObra(item.obra.id)}
+                      className={`mam-row-card ${detalhes?.obra.id === item.obra.id ? 'mam-row-card-active' : ''}`}
                     >
-                      <div>
-                        <strong>{obra.titulo}</strong>
-                        <div className="mam-brand-sub">{obra.caminho_relativo}</div>
+                      <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center' }}>
+                        {item.capa_data_url && (
+                          <img
+                            src={item.capa_data_url}
+                            alt={item.obra.titulo}
+                            style={{ width: 38, height: 54, objectFit: 'cover', borderRadius: 6 }}
+                          />
+                        )}
+                        <div>
+                          <strong>{item.obra.titulo}</strong>
+                          <div className="mam-brand-sub">{item.obra.caminho_relativo}</div>
+                        </div>
                       </div>
-                      <span className="mam-pill-badge">{obra.estado_integridade}</span>
+                      <span className="mam-pill-badge">{item.total_capitulos} cap(s)</span>
                     </div>
                   ))
                 )}
@@ -487,13 +561,13 @@ function App() {
                   <>
                     <div className="mam-section-header">
                       <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'center' }}>
-                        {capaBiblioteca && (
+                        {capaDestaqueBiblioteca && (
                           <img
-                            src={`data:${capaBiblioteca.mime_type};base64,${capaBiblioteca.dados_base64}`}
+                            src={capaDestaqueBiblioteca}
                             alt={detalhes.obra.titulo}
                             style={{
-                              width: 56,
-                              height: 78,
+                              width: 68,
+                              height: 96,
                               objectFit: 'cover',
                               borderRadius: 8,
                               border: '1px solid var(--border-subtle)',
@@ -558,7 +632,7 @@ function App() {
                                       </span>
                                     )}
                                     <button
-                                      className={`mam-pill-badge ${lido ? '' : ''}`}
+                                      className="mam-pill-badge"
                                       style={{
                                         cursor: 'pointer',
                                         background: lido ? 'rgba(34, 197, 94, 0.16)' : 'rgba(148, 163, 184, 0.12)',
@@ -628,7 +702,7 @@ function App() {
                   </>
                 ) : (
                   <p className="mam-section-desc">
-                    Selecione uma obra à esquerda para visualizar capítulos e volumes.
+                    Selecione uma obra à esquerda para visualizar capítulos, capa em destaque e volumes.
                   </p>
                 )}
               </section>
@@ -671,24 +745,27 @@ function App() {
             <div className="mam-grid-2">
               <div className="mam-panel">
                 <strong>Resultados ({obrasFonte.length})</strong>
-                {obrasFonte.map((o) => (
-                  <div
-                    key={`${o.fonte_id}-${o.obra_id_fonte}`}
-                    className={`mam-row-card ${obraFonteSelecionada?.obra_id_fonte === o.obra_id_fonte ? 'mam-row-card-active' : ''}`}
-                    onClick={() => handleSelecionarObraFonte(o)}
-                  >
-                    <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center' }}>
-                      {o.capa_url && (
-                        <img
-                          src={o.capa_url}
-                          alt={o.titulo}
-                          style={{ width: 38, height: 54, objectFit: 'cover', borderRadius: 6 }}
-                        />
-                      )}
-                      <span>{o.titulo}</span>
+                {obrasFonte.map((o) => {
+                  const capaSrc = o.capa_url ? capasCache[o.capa_url] : undefined
+                  return (
+                    <div
+                      key={`${o.fonte_id}-${o.obra_id_fonte}`}
+                      className={`mam-row-card ${obraFonteSelecionada?.obra_id_fonte === o.obra_id_fonte ? 'mam-row-card-active' : ''}`}
+                      onClick={() => handleSelecionarObraFonte(o)}
+                    >
+                      <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center' }}>
+                        {capaSrc && (
+                          <img
+                            src={capaSrc}
+                            alt={o.titulo}
+                            style={{ width: 40, height: 56, objectFit: 'cover', borderRadius: 6 }}
+                          />
+                        )}
+                        <span>{o.titulo}</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
 
               <div className="mam-panel">
@@ -696,11 +773,11 @@ function App() {
                   <>
                     <div className="mam-section-header">
                       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                        {obraFonteSelecionada.capa_url && (
+                        {obraFonteSelecionada.capa_url && capasCache[obraFonteSelecionada.capa_url] && (
                           <img
-                            src={obraFonteSelecionada.capa_url}
+                            src={capasCache[obraFonteSelecionada.capa_url]}
                             alt={obraFonteSelecionada.titulo}
-                            style={{ width: 48, height: 68, objectFit: 'cover', borderRadius: 8 }}
+                            style={{ width: 52, height: 74, objectFit: 'cover', borderRadius: 8 }}
                           />
                         )}
                         <strong>{obraFonteSelecionada.titulo}</strong>
@@ -750,6 +827,35 @@ function App() {
               </div>
             </div>
           </>
+        )}
+
+        {abaAtiva === 'downloads' && (
+          <section className="mam-panel">
+            <div className="mam-section-header">
+              <div>
+                <h1 className="mam-section-title">LOG DE DOWNLOADS</h1>
+                <p className="mam-section-desc">
+                  Histórico de capítulos baixados com nome, pasta de destino na biblioteca e hora.
+                </p>
+              </div>
+              <button className="mam-btn" onClick={carregarObras}>
+                Atualizar Log
+              </button>
+            </div>
+            {downloadsLog.length === 0 ? (
+              <p className="mam-section-desc">Nenhum download registrado até o momento.</p>
+            ) : (
+              downloadsLog.map((item) => (
+                <div key={item.id} className="mam-row-card">
+                  <div>
+                    <strong>{item.nome}</strong>
+                    <div className="mam-brand-sub">Pasta: {item.pasta_destino}</div>
+                  </div>
+                  <span className="mam-pill-badge">{item.data_hora}</span>
+                </div>
+              ))
+            )}
+          </section>
         )}
 
         {abaAtiva === 'transferencia' && (

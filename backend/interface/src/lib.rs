@@ -237,11 +237,114 @@ pub async fn source_arquivar_capitulos(
     library_manager: Arc<LibraryManager>,
     obra_titulo: String,
     capitulos: Vec<CapituloBuscaResultado>,
+    capa_url: Option<String>,
 ) -> Result<String, String> {
     source_manager
-        .arquivar_para_biblioteca(library_manager.raiz(), obra_titulo, capitulos)
+        .arquivar_para_biblioteca_com_capa(
+            library_manager.raiz(),
+            obra_titulo,
+            capitulos,
+            capa_url,
+        )
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Baixa uma imagem de capa pelo backend Rust (evitando bloqueio de Referer/CSP no WebView).
+pub async fn source_obter_capa(url: String) -> Result<String, String> {
+    mam_source_integration::baixar_imagem_data_url(&url)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Resumo de uma obra na Biblioteca com contagem de capítulos e capa em destaque.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ObraResumo {
+    pub obra: Obra,
+    pub total_capitulos: usize,
+    pub capa_data_url: Option<String>,
+}
+
+/// Lista todas as obras da Biblioteca com total de capítulos e capa local em destaque.
+pub async fn library_listar_obras_resumo(
+    db: Arc<Database>,
+    library_manager: Arc<LibraryManager>,
+) -> Result<Vec<ObraResumo>, String> {
+    let obras = db.listar_obras().await.map_err(|e| e.to_string())?;
+    let contagens = db
+        .contar_capitulos_por_obra()
+        .await
+        .map_err(|e| e.to_string())?;
+    let raiz = library_manager.raiz();
+
+    let mut resumos = Vec::with_capacity(obras.len());
+    for obra in obras {
+        let total_capitulos = contagens.get(&obra.id.to_string()).copied().unwrap_or(0);
+        let cover_path = raiz.join(obra.caminho_relativo.as_str()).join("cover.jpg");
+        let capa_data_url = if cover_path.is_file() {
+            std::fs::read(&cover_path).ok().map(|bytes| {
+                format!(
+                    "data:image/jpeg;base64,{}",
+                    mam_source_integration::codificar_base64(&bytes)
+                )
+            })
+        } else {
+            None
+        };
+        resumos.push(ObraResumo {
+            obra,
+            total_capitulos,
+            capa_data_url,
+        });
+    }
+    Ok(resumos)
+}
+
+/// Registro visual de um download concluído na biblioteca.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DownloadLogItem {
+    pub id: String,
+    pub nome: String,
+    pub pasta_destino: String,
+    pub data_hora: String,
+}
+
+/// Lista os downloads registrados no histórico do SQLite.
+pub async fn source_listar_historico_downloads(
+    db: Arc<Database>,
+) -> Result<Vec<DownloadLogItem>, String> {
+    let rows = db
+        .listar_historico_downloads()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(id, alvo, detalhes, criado_em)| {
+            let parsed = detalhes
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+            let nome = parsed
+                .as_ref()
+                .and_then(|v| v["nome"].as_str())
+                .map(|s| s.to_string())
+                .or_else(|| alvo.clone())
+                .unwrap_or_else(|| "Download".to_string());
+            let pasta_destino = parsed
+                .as_ref()
+                .and_then(|v| v["pasta"].as_str())
+                .map(|s| s.to_string())
+                .or(alvo)
+                .unwrap_or_default();
+
+            DownloadLogItem {
+                id,
+                nome,
+                pasta_destino,
+                data_hora: criado_em,
+            }
+        })
+        .collect())
 }
 
 /// Consulta o status de uma operação de arquivamento.

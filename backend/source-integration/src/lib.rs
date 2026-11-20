@@ -269,12 +269,24 @@ impl SourceIntegrationManager {
 
     /// Executa o arquivamento completo de uma lista de capítulos na biblioteca:
     /// obtém bytes da fonte autorizada, grava `.cbz` atomicamente (`temp` + `rename`),
-    /// calcula SHA-256 e registra obra/capítulo/integridade no SQLite.
+    /// calcula SHA-256, salva capa local (quando informada) e registra obra/capítulo/log no SQLite.
     pub async fn arquivar_para_biblioteca(
         &self,
         raiz_biblioteca: &std::path::Path,
         obra_titulo: String,
         capitulos: Vec<CapituloBuscaResultado>,
+    ) -> Result<String, SourceError> {
+        self.arquivar_para_biblioteca_com_capa(raiz_biblioteca, obra_titulo, capitulos, None)
+            .await
+    }
+
+    /// Variante de `arquivar_para_biblioteca` que também persiste `cover.jpg` localmente quando `capa_url` é fornecida.
+    pub async fn arquivar_para_biblioteca_com_capa(
+        &self,
+        raiz_biblioteca: &std::path::Path,
+        obra_titulo: String,
+        capitulos: Vec<CapituloBuscaResultado>,
+        capa_url: Option<String>,
     ) -> Result<String, SourceError> {
         let id_operacao = self
             .iniciar_operacao_arquivamento(obra_titulo.clone(), capitulos.clone())
@@ -282,6 +294,12 @@ impl SourceIntegrationManager {
 
         let nome_pasta_obra = sanitizar_nome(&obra_titulo);
         let caminho_rel_obra = format!("Manga/{}", nome_pasta_obra);
+        let pasta_obra_abs = raiz_biblioteca.join(&caminho_rel_obra);
+        let _ = std::fs::create_dir_all(&pasta_obra_abs);
+
+        if let Some(ref url_capa) = capa_url {
+            let _ = salvar_capa_local(url_capa, &pasta_obra_abs).await;
+        }
 
         let obra = match self.db.buscar_obra_por_titulo(&obra_titulo).await? {
             Some(o) => o,
@@ -344,10 +362,27 @@ impl SourceIntegrationManager {
                     obra.id,
                     numero,
                     cap.titulo.clone(),
-                    mam_core::CaminhoRelativo::from_str(caminho_rel_cap),
+                    mam_core::CaminhoRelativo::from_str(caminho_rel_cap.clone()),
                     qtd_paginas,
                 )
                 .await?;
+
+            let detalhes = serde_json::json!({
+                "nome": format!("{} — Cap. {}", obra_titulo, numero),
+                "pasta": caminho_rel_obra,
+                "arquivo": nome_arquivo,
+                "paginas": qtd_paginas,
+            })
+            .to_string();
+            let _ = self
+                .db
+                .registrar_operacao(
+                    "download".to_string(),
+                    Some(caminho_rel_cap),
+                    Some(detalhes),
+                    None,
+                )
+                .await;
 
             self.arquivar_capitulo(&id_operacao, &cap.fonte_id, &cap)
                 .await?;
@@ -355,6 +390,75 @@ impl SourceIntegrationManager {
 
         Ok(id_operacao)
     }
+}
+
+/// Baixa uma imagem externa via HTTP (sem Referer de WebView) e retorna Data URL Base64.
+pub async fn baixar_imagem_data_url(url: &str) -> Result<String, SourceError> {
+    let client = reqwest::Client::builder()
+        .user_agent("MAM-MangaArchiveManager/0.1.0")
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let resp = client.get(url).send().await?;
+    if !resp.status().is_success() {
+        return Err(SourceError::Operacao(format!(
+            "Falha ao obter imagem: HTTP {}",
+            resp.status()
+        )));
+    }
+    let mime = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/jpeg")
+        .split(';')
+        .next()
+        .unwrap_or("image/jpeg")
+        .to_string();
+    let bytes = resp.bytes().await?;
+    Ok(format!("data:{};base64,{}", mime, codificar_base64(&bytes)))
+}
+
+/// Baixa e salva `cover.jpg` na pasta da obra para exibição offline na Biblioteca.
+pub async fn salvar_capa_local(url: &str, pasta_obra: &std::path::Path) -> Result<(), SourceError> {
+    let client = reqwest::Client::builder()
+        .user_agent("MAM-MangaArchiveManager/0.1.0")
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let resp = client.get(url).send().await?;
+    if !resp.status().is_success() {
+        return Err(SourceError::Operacao(format!(
+            "Falha ao baixar capa: HTTP {}",
+            resp.status()
+        )));
+    }
+    let bytes = resp.bytes().await?;
+    std::fs::create_dir_all(pasta_obra).map_err(|e| SourceError::Operacao(e.to_string()))?;
+    let destino = pasta_obra.join("cover.jpg");
+    let temp = pasta_obra.join(".cover.jpg.mam_tmp");
+    std::fs::write(&temp, &bytes).map_err(|e| SourceError::Operacao(e.to_string()))?;
+    if destino.exists() {
+        let _ = std::fs::remove_file(&destino);
+    }
+    std::fs::rename(&temp, &destino).map_err(|e| SourceError::Operacao(e.to_string()))?;
+    Ok(())
+}
+
+pub fn codificar_base64(bytes: &[u8]) -> String {
+    const TABELA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut saida = String::with_capacity(((bytes.len() + 2) / 3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triplo = (b0 << 16) | (b1 << 8) | b2;
+        saida.push(TABELA[((triplo >> 18) & 0x3F) as usize] as char);
+        saida.push(TABELA[((triplo >> 12) & 0x3F) as usize] as char);
+        saida.push(if chunk.len() > 1 { TABELA[((triplo >> 6) & 0x3F) as usize] as char } else { '=' });
+        saida.push(if chunk.len() > 2 { TABELA[(triplo & 0x3F) as usize] as char } else { '=' });
+    }
+    saida
 }
 
 pub fn sanitizar_nome(s: &str) -> String {
