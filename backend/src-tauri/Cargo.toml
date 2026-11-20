@@ -30,3 +30,4 @@ mam-chapter = { path = "../chapter" }
 mam-archive = { path = "../archive" }
 mam-source-integration = { path = "../source-integration" }
 mam-library = { path = "../library" }
+mam-transfer = { path = "../transfer" }

@@ -23,7 +23,12 @@ use mam_interface::{
     reader_alternar_favorito as if_reader_alternar_favorito,
     reader_adicionar_marcador as if_reader_adicionar_marcador,
     reader_listar_marcadores as if_reader_listar_marcadores,
+    transfer_copia_integral as if_transfer_copia_integral,
+    transfer_seletiva as if_transfer_seletiva,
+    sync_comparar_bibliotecas as if_sync_comparar_bibliotecas,
+    sync_sincronizar_bibliotecas as if_sync_sincronizar_bibliotecas,
 };
+use mam_transfer::{DiferencaBibliotecas, RelatorioTransferencia, TransferManager};
 use mam_source_integration::SourceIntegrationManager;
 use mam_source_integration::{FonteInfo, ObraBuscaResultado, CapituloBuscaResultado};
 
@@ -232,6 +237,44 @@ async fn reader_listar_marcadores(
     if_reader_listar_marcadores(db.inner().clone(), capitulo_id).await
 }
 
+#[tauri::command]
+async fn transfer_copia_integral(
+    transfer_manager: tauri::State<'_, Arc<TransferManager>>,
+    origem: String,
+    destino: String,
+) -> Result<RelatorioTransferencia, String> {
+    if_transfer_copia_integral(transfer_manager.inner().clone(), origem, destino).await
+}
+
+#[tauri::command]
+async fn transfer_seletiva(
+    transfer_manager: tauri::State<'_, Arc<TransferManager>>,
+    origem: String,
+    destino: String,
+    caminhos_relativos: Vec<String>,
+) -> Result<RelatorioTransferencia, String> {
+    if_transfer_seletiva(transfer_manager.inner().clone(), origem, destino, caminhos_relativos).await
+}
+
+#[tauri::command]
+async fn sync_comparar_bibliotecas(
+    transfer_manager: tauri::State<'_, Arc<TransferManager>>,
+    origem: String,
+    destino: String,
+) -> Result<DiferencaBibliotecas, String> {
+    if_sync_comparar_bibliotecas(transfer_manager.inner().clone(), origem, destino).await
+}
+
+#[tauri::command]
+async fn sync_sincronizar_bibliotecas(
+    transfer_manager: tauri::State<'_, Arc<TransferManager>>,
+    origem: String,
+    destino: String,
+    permitir_sobrescrita: bool,
+) -> Result<RelatorioTransferencia, String> {
+    if_sync_sincronizar_bibliotecas(transfer_manager.inner().clone(), origem, destino, permitir_sobrescrita).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -261,6 +304,10 @@ pub fn run() {
       reader_alternar_favorito,
       reader_adicionar_marcador,
       reader_listar_marcadores,
+      transfer_copia_integral,
+      transfer_seletiva,
+      sync_comparar_bibliotecas,
+      sync_sincronizar_bibliotecas,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {
@@ -304,6 +351,10 @@ pub fn run() {
       // Inicializa o SourceIntegrationManager como estado
       let source_manager = SourceIntegrationManager::nova(db_arc);
       app.manage(Arc::new(source_manager));
+
+      // Inicializa o TransferManager como estado
+      let transfer_manager = TransferManager::nova();
+      app.manage(Arc::new(transfer_manager));
 
       Ok(())
     })

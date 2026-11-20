@@ -19,6 +19,7 @@ use mam_source_integration::{FonteInfo, ObraBuscaResultado, CapituloBuscaResulta
 use mam_core::ObraId;
 use mam_database::models::{Obra, Volume};
 use mam_library::{DetalhesObra, LibraryManager};
+use mam_transfer::{DiferencaBibliotecas, RelatorioTransferencia, TransferManager};
 
 /// Retorna o status do banco de dados.
 pub async fn db_health() -> String {
@@ -341,6 +342,56 @@ pub async fn reader_listar_marcadores(
                 .map(|pagina| MarcadorPagina { pagina, nota })
         })
         .collect())
+}
+
+/// Executa cópia integral de uma biblioteca origem para um destino.
+pub async fn transfer_copia_integral(
+    transfer_manager: Arc<TransferManager>,
+    origem: String,
+    destino: String,
+) -> Result<RelatorioTransferencia, String> {
+    transfer_manager
+        .copia_integral(Path::new(&origem), Path::new(&destino))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Executa transferência seletiva de caminhos relativos para um destino.
+pub async fn transfer_seletiva(
+    transfer_manager: Arc<TransferManager>,
+    origem: String,
+    destino: String,
+    caminhos_relativos: Vec<String>,
+) -> Result<RelatorioTransferencia, String> {
+    transfer_manager
+        .transferencia_seletiva(Path::new(&origem), Path::new(&destino), &caminhos_relativos)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Compara duas bibliotecas identificando arquivos ausentes, diferentes e idênticos.
+pub async fn sync_comparar_bibliotecas(
+    transfer_manager: Arc<TransferManager>,
+    origem: String,
+    destino: String,
+) -> Result<DiferencaBibliotecas, String> {
+    transfer_manager
+        .comparar_bibliotecas(Path::new(&origem), Path::new(&destino))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Sincroniza duas bibliotecas com controle explícito de sobrescrita.
+pub async fn sync_sincronizar_bibliotecas(
+    transfer_manager: Arc<TransferManager>,
+    origem: String,
+    destino: String,
+    permitir_sobrescrita: bool,
+) -> Result<RelatorioTransferencia, String> {
+    transfer_manager
+        .sincronizar_bibliotecas(Path::new(&origem), Path::new(&destino), permitir_sobrescrita)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
