@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Capitulo, MarcadorPagina, PaginaExtraida, ResultadoIA, mamApi } from '../api'
+import {
+  Capitulo,
+  MarcadorPagina,
+  PaginaExtraida,
+  ResultadoIA,
+  VolumeComCapitulos,
+  mamApi,
+} from '../api'
 
 type ModoLeitura = 'horizontal' | 'vertical' | 'dupla'
 type AjusteTela = 'fit-width' | 'fit-height' | 'original'
@@ -7,6 +14,7 @@ type AjusteTela = 'fit-width' | 'fit-height' | 'original'
 interface CbzReaderProps {
   capitulo: Capitulo
   capitulosDisponiveis: Capitulo[]
+  volumesDisponiveis?: VolumeComCapitulos[]
   onSelecionarCapitulo: (capitulo: Capitulo) => void
   onFechar: () => void
 }
@@ -14,6 +22,7 @@ interface CbzReaderProps {
 export function CbzReader({
   capitulo,
   capitulosDisponiveis,
+  volumesDisponiveis = [],
   onSelecionarCapitulo,
   onFechar,
 }: CbzReaderProps) {
@@ -27,11 +36,18 @@ export function CbzReader({
   const [marcadores, setMarcadores] = useState<MarcadorPagina[]>([])
   const [erro, setErro] = useState<string | null>(null)
   const [carregando, setCarregando] = useState(false)
+
   const [mostrarIa, setMostrarIa] = useState(false)
   const [mostrarSobreposicao, setMostrarSobreposicao] = useState(true)
   const [processandoIa, setProcessandoIa] = useState(false)
   const [resultadosIa, setResultadosIa] = useState<ResultadoIA[]>([])
   const [textoRevisao, setTextoRevisao] = useState('')
+
+  const [modalLayoutAberto, setModalLayoutAberto] = useState(false)
+  const [modalCapitulosAberto, setModalCapitulosAberto] = useState(false)
+  const [abaModalCap, setAbaModalCap] = useState<'capitulos' | 'volumes'>('capitulos')
+  const [buscaModalCap, setBuscaModalCap] = useState('')
+  const [ordemModalCap, setOrdemModalCap] = useState<'desc' | 'asc'>('desc')
 
   const indiceCapituloAtual = capitulosDisponiveis.findIndex((c) => c.id === capitulo.id)
   const capituloAnterior =
@@ -98,6 +114,10 @@ export function CbzReader({
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'ArrowRight') avancarPagina()
       if (e.key === 'ArrowLeft') voltarPagina()
+      if (e.key === 'Escape') {
+        setModalLayoutAberto(false)
+        setModalCapitulosAberto(false)
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -137,95 +157,114 @@ export function CbzReader({
 
   const estiloImagem: React.CSSProperties = {
     width: ajuste === 'fit-width' ? `${zoom}%` : 'auto',
-    maxHeight: ajuste === 'fit-height' ? '80vh' : 'none',
+    maxHeight: ajuste === 'fit-height' ? '82vh' : 'none',
     transform: ajuste === 'original' ? `scale(${zoom / 100})` : undefined,
     objectFit: 'contain',
-    borderRadius: 4,
-    boxShadow: '0 2px 12px rgba(0,0,0,0.4)',
+    borderRadius: 6,
+    boxShadow: '0 8px 28px rgba(0,0,0,0.55)',
   }
 
+  const capsModalFiltrados = [...capitulosDisponiveis]
+    .filter((c) =>
+      buscaModalCap.trim() ? String(c.numero).includes(buscaModalCap.trim()) : true,
+    )
+    .sort((a, b) => (ordemModalCap === 'desc' ? b.numero - a.numero : a.numero - b.numero))
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '0.5rem',
-          alignItems: 'center',
-          padding: '0.75rem',
-          background: '#1e1e24',
-          color: '#f4f4f6',
-          borderRadius: 8,
-        }}
-      >
-        <button onClick={onFechar}>← Biblioteca</button>
-        <strong>
-          Capítulo {capitulo.numero} ({indiceAtual + 1} / {Math.max(totalPaginas, 1)})
-        </strong>
+    <div className="mam-reader-shell">
+      <div className="mam-reader-toolbar">
+        <div className="mam-toolbar-row">
+          <button className="mam-btn" onClick={onFechar}>
+            ← Biblioteca
+          </button>
+          <button className="mam-btn" onClick={() => setModalCapitulosAberto(true)}>
+            Cap. {capitulo.numero} ({indiceAtual + 1}/{Math.max(totalPaginas, 1)}) ▾
+          </button>
+          <button className="mam-btn" onClick={voltarPagina}>
+            ◀ Anterior
+          </button>
+          <button className="mam-btn mam-btn-primary" onClick={avancarPagina}>
+            Próxima ▶
+          </button>
+        </div>
 
-        <button onClick={voltarPagina}>Página Anterior</button>
-        <button onClick={avancarPagina}>Próxima Página</button>
-
-        {capituloAnterior && (
-          <button onClick={() => onSelecionarCapitulo(capituloAnterior)}>Cap. Anterior</button>
-        )}
-        {proximoCapitulo && (
-          <button onClick={() => onSelecionarCapitulo(proximoCapitulo)}>Próx. Cap.</button>
-        )}
-
-        <select value={modo} onChange={(e) => setModo(e.target.value as ModoLeitura)}>
-          <option value="horizontal">Horizontal</option>
-          <option value="vertical">Vertical</option>
-          <option value="dupla">Página Dupla</option>
-        </select>
-
-        <select value={ajuste} onChange={(e) => setAjuste(e.target.value as AjusteTela)}>
-          <option value="fit-width">Ajustar à Largura</option>
-          <option value="fit-height">Ajustar à Altura</option>
-          <option value="original">Tamanho Original</option>
-        </select>
-
-        <button onClick={() => setZoom((z) => Math.max(40, z - 10))}>-</button>
-        <span>{zoom}%</span>
-        <button onClick={() => setZoom((z) => Math.min(200, z + 10))}>+</button>
-
-        <button onClick={handleFavorito}>{favorito ? '★ Favorito' : '☆ Favoritar'}</button>
-        <button onClick={handleAdicionarMarcador}>🔖 Marcar Página</button>
-        <button onClick={() => setMostrarIa((v) => !v)}>
-          {mostrarIa ? 'Ocultar Camada IA' : 'Camada IA / Revisão'}
-        </button>
-        <button onClick={() => setMostrarSobreposicao((v) => !v)}>
-          {mostrarSobreposicao ? 'Sobreposição: ON' : 'Sobreposição: OFF'}
-        </button>
-        <button
-          disabled={processandoIa}
-          onClick={async () => {
-            setProcessandoIa(true)
-            setErro(null)
-            try {
-              await mamApi.aiProcessarESalvarPagina({
-                capituloId: capitulo.id,
-                caminhoCbz: capitulo.caminho_relativo,
-                indice: indiceAtual,
-                idiomaOrigem: 'ja',
-                idiomaDestino: 'pt-BR',
-              })
-              const atualizados = await mamApi.aiListarResultadosCapitulo(capitulo.id)
-              setResultadosIa(atualizados)
-              setMostrarIa(true)
-            } catch (e) {
-              setErro(String(e))
-            } finally {
-              setProcessandoIa(false)
-            }
-          }}
-        >
-          {processandoIa ? 'Processando IA...' : 'Processar Página (IA)'}
-        </button>
+        <div className="mam-toolbar-row">
+          <button className="mam-btn" onClick={() => setModalLayoutAberto(true)}>
+            ⚙ Layout
+          </button>
+          <button className="mam-btn" onClick={handleFavorito}>
+            {favorito ? '★ Favorito' : '☆ Favoritar'}
+          </button>
+          <button className="mam-btn" onClick={handleAdicionarMarcador}>
+            🔖 Marcar
+          </button>
+          <button
+            className={`mam-btn ${mostrarSobreposicao ? 'mam-btn-active' : ''}`}
+            onClick={() => setMostrarSobreposicao((v) => !v)}
+          >
+            Sobreposição: {mostrarSobreposicao ? 'ON' : 'OFF'}
+          </button>
+          <button
+            className="mam-btn mam-btn-primary"
+            disabled={processandoIa}
+            onClick={async () => {
+              setProcessandoIa(true)
+              setErro(null)
+              try {
+                await mamApi.aiProcessarESalvarPagina({
+                  capituloId: capitulo.id,
+                  caminhoCbz: capitulo.caminho_relativo,
+                  indice: indiceAtual,
+                  idiomaOrigem: 'ja',
+                  idiomaDestino: 'pt-BR',
+                })
+                const atualizados = await mamApi.aiListarResultadosCapitulo(capitulo.id)
+                setResultadosIa(atualizados)
+                setMostrarIa(true)
+              } catch (e) {
+                setErro(String(e))
+              } finally {
+                setProcessandoIa(false)
+              }
+            }}
+          >
+            {processandoIa ? 'Processando IA...' : '✨ Processar IA'}
+          </button>
+          <button className="mam-btn" onClick={() => setMostrarIa((v) => !v)}>
+            {mostrarIa ? 'Ocultar IA' : 'Revisão IA'}
+          </button>
+        </div>
       </div>
 
+      {marcadores.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            gap: '0.4rem',
+            flexWrap: 'wrap',
+            padding: '0.45rem 1rem',
+            background: '#0d1320',
+            borderBottom: '1px solid #1e293b',
+            fontSize: '0.8rem',
+          }}
+        >
+          <span style={{ color: '#94a3b8' }}>Marcadores:</span>
+          {marcadores.map((m) => (
+            <button key={m.pagina} className="mam-btn" onClick={() => setIndiceAtual(m.pagina)}>
+              {m.nota}
+            </button>
+          ))}
+        </div>
+      )}
+
       {mostrarIa && (
-        <div style={{ padding: '0.75rem', background: '#f4f4f6', borderRadius: 6 }}>
+        <div
+          style={{
+            padding: '0.75rem 1rem',
+            background: '#111827',
+            borderBottom: '1px solid #1e293b',
+          }}
+        >
           <strong>Resultados de IA — Página {indiceAtual + 1}</strong>
           {resultadosIa
             .filter((r) => r.pagina_numero === indiceAtual)
@@ -244,30 +283,42 @@ export function CbzReader({
 
               return (
                 <div key={r.id} style={{ marginTop: '0.5rem' }}>
-                  <span>
-                    Estado: <code>{r.estado_revisao}</code> | Modelo: {r.modelo_id}
+                  <span className="mam-pill-badge">
+                    {r.estado_revisao} • {r.modelo_id}
                   </span>
                   {parsedRegioes.length > 0 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.4rem' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.4rem',
+                        marginTop: '0.4rem',
+                      }}
+                    >
                       {parsedRegioes.map((reg, idx) => (
-                        <div key={idx} style={{ background: '#fff', padding: '0.4rem', borderRadius: 4 }}>
-                          <small>Região #{idx + 1} — Original: {reg.texto_original || '(vazio)'}</small>
-                          <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.25rem' }}>
+                        <div key={idx} className="mam-panel">
+                          <small>
+                            Região #{idx + 1} — Original: {reg.texto_original || '(vazio)'}
+                          </small>
+                          <div className="mam-toolbar-row">
                             <input
+                              className="mam-input mam-search-input"
                               defaultValue={reg.texto_traduzido || ''}
                               placeholder="Tradução revisada..."
                               onChange={(e) => {
                                 reg.texto_traduzido = e.target.value
                               }}
-                              style={{ minWidth: 240 }}
                             />
                             <button
+                              className="mam-btn mam-btn-primary"
                               onClick={async () => {
                                 const obj = JSON.parse(r.resultado_json) as Record<string, unknown>
                                 obj.regioes = parsedRegioes
                                 obj.estado_revisao = 'revisado'
                                 await mamApi.aiRevisarResultado(r.id, JSON.stringify(obj))
-                                const atualizados = await mamApi.aiListarResultadosCapitulo(capitulo.id)
+                                const atualizados = await mamApi.aiListarResultadosCapitulo(
+                                  capitulo.id,
+                                )
                                 setResultadosIa(atualizados)
                               }}
                             >
@@ -278,17 +329,18 @@ export function CbzReader({
                       ))}
                     </div>
                   )}
-                  <pre style={{ background: '#fff', padding: '0.5rem', borderRadius: 4 }}>
+                  <pre className="mam-pre" style={{ marginTop: '0.4rem' }}>
                     {r.resultado_json}
                   </pre>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <div className="mam-toolbar-row" style={{ marginTop: '0.4rem' }}>
                     <input
+                      className="mam-input mam-search-input"
                       placeholder="JSON/texto revisado..."
                       value={textoRevisao}
                       onChange={(e) => setTextoRevisao(e.target.value)}
-                      style={{ minWidth: 260 }}
                     />
                     <button
+                      className="mam-btn mam-btn-primary"
                       onClick={async () => {
                         if (!textoRevisao.trim()) return
                         await mamApi.aiRevisarResultado(r.id, textoRevisao.trim())
@@ -304,44 +356,31 @@ export function CbzReader({
               )
             })}
           {resultadosIa.filter((r) => r.pagina_numero === indiceAtual).length === 0 && (
-            <p style={{ margin: '0.4rem 0 0' }}>Nenhum resultado de IA salvo para esta página.</p>
+            <p className="mam-section-desc">Nenhum resultado de IA salvo para esta página.</p>
           )}
         </div>
       )}
 
-      {marcadores.length > 0 && (
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', fontSize: '0.9rem' }}>
-          <span>Marcadores:</span>
-          {marcadores.map((m) => (
-            <button key={m.pagina} onClick={() => setIndiceAtual(m.pagina)}>
-              {m.nota}
-            </button>
-          ))}
-        </div>
-      )}
-
       {erro && (
-        <div style={{ padding: '0.75rem', background: '#4a1c1c', color: '#ffd6d6', borderRadius: 6 }}>
+        <div
+          style={{
+            margin: '0.75rem 1rem 0',
+            padding: '0.75rem',
+            background: '#451a1a',
+            color: '#fecaca',
+            borderRadius: 8,
+          }}
+        >
           Erro ao carregar página: {erro}
         </div>
       )}
 
-      {carregando && <p>Carregando página...</p>}
-
       <div
-        style={{
-          display: 'flex',
-          flexDirection: modo === 'vertical' ? 'column' : 'row',
-          justifyContent: 'center',
-          alignItems: 'center',
-          gap: '0.75rem',
-          minHeight: '60vh',
-          background: '#121216',
-          padding: '1rem',
-          borderRadius: 8,
-          overflow: 'auto',
-        }}
+        className="mam-reader-viewport"
+        style={{ flexDirection: modo === 'vertical' ? 'column' : 'row' }}
       >
+        {carregando && <p style={{ color: '#94a3b8' }}>Carregando página...</p>}
+
         {paginaPrincipal && (
           <div style={{ position: 'relative', display: 'inline-block' }}>
             <img
@@ -377,8 +416,8 @@ export function CbzReader({
                         top: `${y * 100}%`,
                         width: `${w * 100}%`,
                         height: `${h * 100}%`,
-                        background: 'rgba(255, 255, 255, 0.88)',
-                        color: '#111',
+                        background: 'rgba(255, 255, 255, 0.9)',
+                        color: '#0f172a',
                         padding: '2px 4px',
                         fontSize: '0.8rem',
                         borderRadius: 4,
@@ -392,6 +431,7 @@ export function CbzReader({
                 })}
           </div>
         )}
+
         {modo === 'dupla' && paginaSecundaria && (
           <img
             src={`data:${paginaSecundaria.mime_type};base64,${paginaSecundaria.dados_base64}`}
@@ -400,6 +440,159 @@ export function CbzReader({
           />
         )}
       </div>
+
+      {/* Modal flutuante de Layout (inspirado na referência) */}
+      {modalLayoutAberto && (
+        <div className="mam-modal-backdrop" onClick={() => setModalLayoutAberto(false)}>
+          <div className="mam-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="mam-modal-header">
+              <strong>Layout & Visualização</strong>
+              <button className="mam-btn" onClick={() => setModalLayoutAberto(false)}>
+                ✕
+              </button>
+            </div>
+
+            <div className="mam-layout-cards">
+              <button
+                className={`mam-layout-card ${modo === 'horizontal' ? 'active' : ''}`}
+                onClick={() => setModo('horizontal')}
+              >
+                <span>▯</span>
+                <span>Single</span>
+              </button>
+              <button
+                className={`mam-layout-card ${modo === 'dupla' ? 'active' : ''}`}
+                onClick={() => setModo('dupla')}
+              >
+                <span>▯▯</span>
+                <span>Double</span>
+              </button>
+              <button
+                className={`mam-layout-card ${modo === 'vertical' ? 'active' : ''}`}
+                onClick={() => setModo('vertical')}
+              >
+                <span>☰</span>
+                <span>Long strip</span>
+              </button>
+            </div>
+
+            <div>
+              <small style={{ color: '#94a3b8' }}>ZOOM</small>
+              <div className="mam-stepper" style={{ marginTop: '0.35rem' }}>
+                <button className="mam-btn" onClick={() => setZoom((z) => Math.max(40, z - 10))}>
+                  −
+                </button>
+                <span>{zoom}%</span>
+                <button className="mam-btn" onClick={() => setZoom((z) => Math.min(200, z + 10))}>
+                  +
+                </button>
+                <button className="mam-btn" onClick={() => setZoom(100)}>
+                  Reset
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <small style={{ color: '#94a3b8' }}>AJUSTE À TELA</small>
+              <select
+                className="mam-select"
+                style={{ width: '100%', marginTop: '0.35rem' }}
+                value={ajuste}
+                onChange={(e) => setAjuste(e.target.value as AjusteTela)}
+              >
+                <option value="fit-width">Ajustar à Largura</option>
+                <option value="fit-height">Ajustar à Altura</option>
+                <option value="original">Tamanho Original</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal flutuante de Capítulos / Volumes (inspirado na referência) */}
+      {modalCapitulosAberto && (
+        <div className="mam-modal-backdrop" onClick={() => setModalCapitulosAberto(false)}>
+          <div className="mam-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="mam-modal-header">
+              <div className="mam-segmented">
+                <button
+                  className={`mam-segmented-btn ${abaModalCap === 'capitulos' ? 'active' : ''}`}
+                  onClick={() => setAbaModalCap('capitulos')}
+                >
+                  Capítulos
+                </button>
+                <button
+                  className={`mam-segmented-btn ${abaModalCap === 'volumes' ? 'active' : ''}`}
+                  onClick={() => setAbaModalCap('volumes')}
+                >
+                  Volumes
+                </button>
+              </div>
+              <button className="mam-btn" onClick={() => setModalCapitulosAberto(false)}>
+                ✕
+              </button>
+            </div>
+
+            {abaModalCap === 'capitulos' ? (
+              <>
+                <div className="mam-toolbar-row">
+                  <input
+                    className="mam-input mam-search-input"
+                    placeholder="🔍 Buscar capítulo..."
+                    value={buscaModalCap}
+                    onChange={(e) => setBuscaModalCap(e.target.value)}
+                  />
+                  <button
+                    className="mam-btn mam-btn-primary"
+                    onClick={() => setOrdemModalCap((o) => (o === 'desc' ? 'asc' : 'desc'))}
+                  >
+                    Cap {ordemModalCap === 'desc' ? '↓' : '↑'}
+                  </button>
+                </div>
+
+                <div style={{ maxHeight: 320, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  {capsModalFiltrados.map((c) => (
+                    <div
+                      key={c.id}
+                      className={`mam-row-card ${c.id === capitulo.id ? 'mam-row-card-active' : ''}`}
+                      onClick={() => {
+                        onSelecionarCapitulo(c)
+                        setModalCapitulosAberto(false)
+                      }}
+                    >
+                      <span>Cap. {c.numero}</span>
+                      <span className="mam-brand-sub">{c.quantidade_paginas} págs</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div style={{ maxHeight: 320, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                {volumesDisponiveis.map((vc) => (
+                  <div key={vc.volume.id} className="mam-panel">
+                    <strong>Volume {vc.volume.numero}</strong>
+                    {vc.capitulos.map((c) => (
+                      <div
+                        key={c.id}
+                        className="mam-row-card"
+                        onClick={() => {
+                          onSelecionarCapitulo(c)
+                          setModalCapitulosAberto(false)
+                        }}
+                      >
+                        <span>Cap. {c.numero}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+                {volumesDisponiveis.length === 0 && (
+                  <p className="mam-section-desc">Nenhum volume cadastrado para esta obra.</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -17,11 +17,17 @@ import {
 import { CbzReader } from './components/CbzReader'
 
 type AbaAtiva = 'biblioteca' | 'fontes' | 'transferencia' | 'ai'
+type SubAbaObra = 'capitulos' | 'volumes'
 
 function App() {
+  const [tema, setTema] = useState<'dark' | 'light'>('dark')
   const [abaAtiva, setAbaAtiva] = useState<AbaAtiva>('biblioteca')
+  const [subAbaObra, setSubAbaObra] = useState<SubAbaObra>('capitulos')
   const [raizBiblioteca, setRaizBiblioteca] = useState<string>('')
   const [obras, setObras] = useState<Obra[]>([])
+  const [buscaObra, setBuscaObra] = useState('')
+  const [buscaCapitulo, setBuscaCapitulo] = useState('')
+  const [ordemCaps, setOrdemCaps] = useState<'desc' | 'asc'>('desc')
   const [detalhes, setDetalhes] = useState<DetalhesObra | null>(null)
   const [capituloAtivo, setCapituloAtivo] = useState<Capitulo | null>(null)
   const [tituloNovaObra, setTituloNovaObra] = useState('')
@@ -51,6 +57,10 @@ function App() {
   const [extHtml, setExtHtml] = useState('')
   const [extUrlsTexto, setExtUrlsTexto] = useState('')
   const [resultadoImportacao, setResultadoImportacao] = useState<ResultadoImportacao | null>(null)
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', tema)
+  }, [tema])
 
   async function carregarObras() {
     try {
@@ -245,29 +255,69 @@ function App() {
       )
     : []
 
+  const capitulosFiltrados = [...todosCapitulosObra]
+    .filter((c) =>
+      buscaCapitulo.trim()
+        ? String(c.numero).includes(buscaCapitulo.trim()) ||
+          (c.titulo_original ?? '').toLowerCase().includes(buscaCapitulo.trim().toLowerCase())
+        : true,
+    )
+    .sort((a, b) => (ordemCaps === 'desc' ? b.numero - a.numero : a.numero - b.numero))
+
+  const obrasFiltradas = obras.filter((o) =>
+    buscaObra.trim() ? o.titulo.toLowerCase().includes(buscaObra.trim().toLowerCase()) : true,
+  )
+
   if (capituloAtivo) {
     return (
-      <div style={{ padding: '1.25rem', fontFamily: 'system-ui, sans-serif' }}>
-        <CbzReader
-          capitulo={capituloAtivo}
-          capitulosDisponiveis={todosCapitulosObra}
-          onSelecionarCapitulo={setCapituloAtivo}
-          onFechar={() => setCapituloAtivo(null)}
-        />
-      </div>
+      <CbzReader
+        capitulo={capituloAtivo}
+        capitulosDisponiveis={todosCapitulosObra}
+        volumesDisponiveis={detalhes?.volumes ?? []}
+        onSelecionarCapitulo={setCapituloAtivo}
+        onFechar={() => setCapituloAtivo(null)}
+      />
     )
   }
 
   return (
-    <div style={{ padding: '1.5rem', fontFamily: 'system-ui, sans-serif', maxWidth: 980, margin: '0 auto' }}>
-      <h1>Manga Archive Manager (MAM)</h1>
-      <p style={{ color: '#555' }}>
-        Biblioteca portátil — Raiz ativa: <code>{raizBiblioteca || 'carregando...'}</code>
-      </p>
+    <div className="mam-shell">
+      <header className="mam-topbar">
+        <div className="mam-brand">
+          <div className="mam-logo">MAM</div>
+          <div>
+            <div className="mam-brand-title">MANGA ARCHIVE MANAGER</div>
+            <div className="mam-brand-sub">Biblioteca Portátil • Raiz: {raizBiblioteca || '...'}</div>
+          </div>
+          <span className="mam-pill-badge">{obras.length} obra(s)</span>
+        </div>
 
-      <nav style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-        <button onClick={() => setAbaAtiva('biblioteca')}>Biblioteca</button>
         <button
+          className="mam-btn"
+          onClick={() => setTema((t) => (t === 'dark' ? 'light' : 'dark'))}
+        >
+          {tema === 'dark' ? '🌙 Dark' : '☀️ Light'}
+        </button>
+      </header>
+
+      <nav className="mam-nav-bar">
+        <button
+          className="mam-btn mam-btn-primary"
+          onClick={() => {
+            setAbaAtiva('fontes')
+            handleCarregarFontes()
+          }}
+        >
+          + Importar URL
+        </button>
+        <button
+          className={`mam-btn ${abaAtiva === 'biblioteca' ? 'mam-btn-active' : ''}`}
+          onClick={() => setAbaAtiva('biblioteca')}
+        >
+          Biblioteca
+        </button>
+        <button
+          className={`mam-btn ${abaAtiva === 'fontes' ? 'mam-btn-active' : ''}`}
           onClick={() => {
             setAbaAtiva('fontes')
             handleCarregarFontes()
@@ -275,281 +325,409 @@ function App() {
         >
           Fontes & Importação
         </button>
-        <button onClick={() => setAbaAtiva('transferencia')}>Transferência & Sync</button>
-        <button onClick={() => setAbaAtiva('ai')}>AI Engine</button>
+        <button
+          className={`mam-btn ${abaAtiva === 'transferencia' ? 'mam-btn-active' : ''}`}
+          onClick={() => setAbaAtiva('transferencia')}
+        >
+          Transferência & Sync
+        </button>
+        <button
+          className={`mam-btn ${abaAtiva === 'ai' ? 'mam-btn-active' : ''}`}
+          onClick={() => setAbaAtiva('ai')}
+        >
+          AI Engine
+        </button>
       </nav>
 
-      {mensagem && (
-        <p style={{ padding: '0.5rem 0.75rem', background: '#eef2ff', borderRadius: 6 }}>{mensagem}</p>
-      )}
-
-      {abaAtiva === 'biblioteca' && (
-        <>
-          <form onSubmit={handleCriarObra} style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-            <input
-              placeholder="Título da obra"
-              value={tituloNovaObra}
-              onChange={(e) => setTituloNovaObra(e.target.value)}
-            />
-            <input
-              placeholder="Caminho relativo (ex: Manga/Obra)"
-              value={caminhoNovaObra}
-              onChange={(e) => setCaminhoNovaObra(e.target.value)}
-            />
-            <button type="submit">Cadastrar Obra</button>
-            <button type="button" onClick={handleDetectarCapitulos}>
-              Detectar Capítulos CBZ
+      <main className="mam-main">
+        {mensagem && (
+          <div className="mam-alert">
+            <span>{mensagem}</span>
+            <button className="mam-btn" onClick={() => setMensagem(null)}>
+              ✕
             </button>
-          </form>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1rem' }}>
-            <section>
-              <h2>Obras ({obras.length})</h2>
-              <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                {obras.map((obra) => (
-                  <li key={obra.id}>
-                    <button
-                      onClick={() => handleSelecionarObra(obra.id)}
-                      style={{ width: '100%', textAlign: 'left', padding: '0.5rem' }}
-                    >
-                      {obra.titulo}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            <section>
-              {detalhes ? (
-                <div>
-                  <h2>{detalhes.obra.titulo}</h2>
-                  <p style={{ color: '#555' }}>Caminho relativo: {detalhes.obra.caminho_relativo}</p>
-
-                  {detalhes.volumes.map((vc) => (
-                    <div key={vc.volume.id} style={{ marginBottom: '1rem' }}>
-                      <h3>
-                        Volume {vc.volume.numero} {vc.volume.titulo ? `— ${vc.volume.titulo}` : ''}
-                      </h3>
-                      <ul>
-                        {vc.capitulos.map((cap) => (
-                          <li key={cap.id}>
-                            <button onClick={() => setCapituloAtivo(cap)}>
-                              Ler Capítulo {cap.numero} ({cap.quantidade_paginas} págs)
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-
-                  {detalhes.capitulos_avulsos.length > 0 && (
-                    <div>
-                      <h3>Capítulos Avulsos</h3>
-                      <ul>
-                        {detalhes.capitulos_avulsos.map((cap) => (
-                          <li key={cap.id}>
-                            <button onClick={() => setCapituloAtivo(cap)}>
-                              Ler Capítulo {cap.numero} ({cap.quantidade_paginas} págs)
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p>Selecione uma obra para visualizar volumes e capítulos.</p>
-              )}
-            </section>
           </div>
-        </>
-      )}
+        )}
 
-      {abaAtiva === 'fontes' && (
-        <section style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          <h2>Fontes Autorizadas & Importação Web</h2>
-          <p style={{ color: '#555' }}>
-            Fontes ativas: {fontes.map((f) => f.nome).join(', ') || 'nenhuma'}
-          </p>
-          <form onSubmit={handleBuscarNaFonte} style={{ display: 'flex', gap: '0.5rem' }}>
-            <input
-              placeholder="Buscar obra pelo título..."
-              value={consultaFonte}
-              onChange={(e) => setConsultaFonte(e.target.value)}
-              style={{ minWidth: 280 }}
-            />
-            <button type="submit">Pesquisar</button>
-          </form>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1rem' }}>
-            <div>
-              <h3>Resultados ({obrasFonte.length})</h3>
-              <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                {obrasFonte.map((o) => (
-                  <li key={`${o.fonte_id}-${o.obra_id_fonte}`}>
-                    <button
-                      onClick={() => handleSelecionarObraFonte(o)}
-                      style={{ width: '100%', textAlign: 'left', padding: '0.4rem' }}
-                    >
-                      {o.titulo}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+        {abaAtiva === 'biblioteca' && (
+          <>
+            <div className="mam-section-header">
+              <div>
+                <h1 className="mam-section-title">BIBLIOTECA</h1>
+                <p className="mam-section-desc">
+                  Gerencie obras, volumes híbridos e capítulos CBZ armazenados localmente.
+                </p>
+              </div>
+              <div className="mam-toolbar-row">
+                <button className="mam-btn" onClick={handleDetectarCapitulos}>
+                  Detectar Capítulos CBZ
+                </button>
+              </div>
             </div>
 
-            <div>
-              {obraFonteSelecionada ? (
-                <>
-                  <h3>{obraFonteSelecionada.titulo}</h3>
-                  <button
-                    onClick={handleArquivarSelecionados}
-                    disabled={selecionadosIds.length === 0}
+            <form onSubmit={handleCriarObra} className="mam-panel">
+              <div className="mam-toolbar-row">
+                <input
+                  className="mam-input mam-search-input"
+                  placeholder="Título da nova obra..."
+                  value={tituloNovaObra}
+                  onChange={(e) => setTituloNovaObra(e.target.value)}
+                />
+                <input
+                  className="mam-input mam-search-input"
+                  placeholder="Caminho relativo (ex: Manga/Medaka Box)"
+                  value={caminhoNovaObra}
+                  onChange={(e) => setCaminhoNovaObra(e.target.value)}
+                />
+                <button className="mam-btn mam-btn-primary" type="submit">
+                  + Cadastrar Obra
+                </button>
+              </div>
+            </form>
+
+            <div className="mam-grid-2">
+              <section className="mam-panel">
+                <input
+                  className="mam-input"
+                  placeholder="🔍 Buscar obra na biblioteca..."
+                  value={buscaObra}
+                  onChange={(e) => setBuscaObra(e.target.value)}
+                />
+                {obrasFiltradas.length === 0 ? (
+                  <p className="mam-section-desc">Nenhuma obra encontrada.</p>
+                ) : (
+                  obrasFiltradas.map((obra) => (
+                    <div
+                      key={obra.id}
+                      onClick={() => handleSelecionarObra(obra.id)}
+                      className={`mam-row-card ${detalhes?.obra.id === obra.id ? 'mam-row-card-active' : ''}`}
+                    >
+                      <div>
+                        <strong>{obra.titulo}</strong>
+                        <div className="mam-brand-sub">{obra.caminho_relativo}</div>
+                      </div>
+                      <span className="mam-pill-badge">{obra.estado_integridade}</span>
+                    </div>
+                  ))
+                )}
+              </section>
+
+              <section className="mam-panel">
+                {detalhes ? (
+                  <>
+                    <div className="mam-section-header">
+                      <div>
+                        <h2 className="mam-section-title">{detalhes.obra.titulo}</h2>
+                        <p className="mam-section-desc">{detalhes.obra.caminho_relativo}</p>
+                      </div>
+                      <div className="mam-segmented">
+                        <button
+                          className={`mam-segmented-btn ${subAbaObra === 'capitulos' ? 'active' : ''}`}
+                          onClick={() => setSubAbaObra('capitulos')}
+                        >
+                          Capítulos ({todosCapitulosObra.length})
+                        </button>
+                        <button
+                          className={`mam-segmented-btn ${subAbaObra === 'volumes' ? 'active' : ''}`}
+                          onClick={() => setSubAbaObra('volumes')}
+                        >
+                          Volumes ({detalhes.volumes.length})
+                        </button>
+                      </div>
+                    </div>
+
+                    {subAbaObra === 'capitulos' ? (
+                      <>
+                        <div className="mam-toolbar-row">
+                          <input
+                            className="mam-input mam-search-input"
+                            placeholder="🔍 Buscar número ou título do capítulo..."
+                            value={buscaCapitulo}
+                            onChange={(e) => setBuscaCapitulo(e.target.value)}
+                          />
+                          <button
+                            className="mam-btn"
+                            onClick={() => setOrdemCaps((o) => (o === 'desc' ? 'asc' : 'desc'))}
+                          >
+                            Capítulo {ordemCaps === 'desc' ? '↓' : '↑'}
+                          </button>
+                        </div>
+
+                        {capitulosFiltrados.length === 0 ? (
+                          <p className="mam-section-desc">Nenhum capítulo cadastrado nesta obra.</p>
+                        ) : (
+                          capitulosFiltrados.map((cap) => (
+                            <div
+                              key={cap.id}
+                              className="mam-row-card"
+                              onClick={() => setCapituloAtivo(cap)}
+                            >
+                              <div>
+                                <strong>Cap. {cap.numero}</strong>
+                                {cap.titulo_original && (
+                                  <span style={{ color: 'var(--text-secondary)' }}>
+                                    {' '}
+                                    • {cap.titulo_original}
+                                  </span>
+                                )}
+                                <div className="mam-brand-sub">{cap.caminho_relativo}</div>
+                              </div>
+                              <div className="mam-toolbar-row">
+                                <span className="mam-pill-badge">{cap.quantidade_paginas} págs</span>
+                                <button className="mam-btn mam-btn-primary">Ler</button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        {detalhes.volumes.map((vc) => (
+                          <div key={vc.volume.id} className="mam-panel">
+                            <strong>
+                              Volume {vc.volume.numero}{' '}
+                              {vc.volume.titulo ? `— ${vc.volume.titulo}` : ''}
+                            </strong>
+                            {vc.capitulos.map((cap) => (
+                              <div
+                                key={cap.id}
+                                className="mam-row-card"
+                                onClick={() => setCapituloAtivo(cap)}
+                              >
+                                <span>
+                                  Cap. {cap.numero} ({cap.quantidade_paginas} págs)
+                                </span>
+                                <button className="mam-btn mam-btn-primary">Ler</button>
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                        {detalhes.volumes.length === 0 && (
+                          <p className="mam-section-desc">
+                            Nenhum volume agrupado; capítulos listados na aba Capítulos.
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <p className="mam-section-desc">
+                    Selecione uma obra à esquerda para visualizar capítulos e volumes.
+                  </p>
+                )}
+              </section>
+            </div>
+          </>
+        )}
+
+        {abaAtiva === 'fontes' && (
+          <>
+            <div className="mam-section-header">
+              <div>
+                <h1 className="mam-section-title">FONTES & IMPORTAÇÃO</h1>
+                <p className="mam-section-desc">
+                  Fontes ativas: {fontes.map((f) => f.nome).join(', ') || 'nenhuma'} • Extratores:{' '}
+                  {extratores.map((e) => e.id).join(', ') || '...'}
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleBuscarNaFonte} className="mam-panel">
+              <div className="mam-toolbar-row">
+                <input
+                  className="mam-input mam-search-input"
+                  placeholder="🔍 Pesquisar obra por título no MangaDex..."
+                  value={consultaFonte}
+                  onChange={(e) => setConsultaFonte(e.target.value)}
+                />
+                <button className="mam-btn mam-btn-primary" type="submit">
+                  Pesquisar
+                </button>
+              </div>
+            </form>
+
+            <div className="mam-grid-2">
+              <div className="mam-panel">
+                <strong>Resultados ({obrasFonte.length})</strong>
+                {obrasFonte.map((o) => (
+                  <div
+                    key={`${o.fonte_id}-${o.obra_id_fonte}`}
+                    className={`mam-row-card ${obraFonteSelecionada?.obra_id_fonte === o.obra_id_fonte ? 'mam-row-card-active' : ''}`}
+                    onClick={() => handleSelecionarObraFonte(o)}
                   >
-                    Arquivar Selecionados ({selecionadosIds.length})
-                  </button>
-                  {statusArquivamento && (
-                    <p>
-                      Progresso: {statusArquivamento.capitulos_processados}/
-                      {statusArquivamento.total_capitulos} ({statusArquivamento.percentual}%)
-                    </p>
-                  )}
-                  <ul style={{ listStyle: 'none', padding: 0, marginTop: '0.5rem' }}>
+                    <span>{o.titulo}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mam-panel">
+                {obraFonteSelecionada ? (
+                  <>
+                    <div className="mam-section-header">
+                      <strong>{obraFonteSelecionada.titulo}</strong>
+                      <button
+                        className="mam-btn mam-btn-primary"
+                        onClick={handleArquivarSelecionados}
+                        disabled={selecionadosIds.length === 0}
+                      >
+                        Arquivar Selecionados ({selecionadosIds.length})
+                      </button>
+                    </div>
+                    {statusArquivamento && (
+                      <div className="mam-alert">
+                        Progresso: {statusArquivamento.capitulos_processados}/
+                        {statusArquivamento.total_capitulos} ({statusArquivamento.percentual}%)
+                      </div>
+                    )}
                     {capitulosFonte.map((c) => (
-                      <li key={c.capitulo_id_fonte}>
-                        <label style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                      <label key={c.capitulo_id_fonte} className="mam-row-card">
+                        <span style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                           <input
                             type="checkbox"
                             checked={selecionadosIds.includes(c.capitulo_id_fonte)}
                             onChange={() => alternarCapituloSelecionado(c.capitulo_id_fonte)}
                           />
                           Cap. {c.numero ?? '?'} {c.titulo ? `— ${c.titulo}` : ''}
-                        </label>
-                      </li>
+                        </span>
+                      </label>
                     ))}
-                  </ul>
-                </>
-              ) : (
-                <p>Pesquise e selecione uma obra para listar os capítulos disponíveis.</p>
+                  </>
+                ) : (
+                  <p className="mam-section-desc">
+                    Pesquise e selecione uma obra para listar os capítulos disponíveis.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <form onSubmit={handleImportarExtrator} className="mam-panel">
+              <strong>Importar por Link Direto / HTML / Lista Ordenada (Extratores Modulares)</strong>
+              <div className="mam-toolbar-row">
+                <input
+                  className="mam-input mam-search-input"
+                  placeholder="Título da obra (ex: Medaka Box)"
+                  value={extObraTitulo}
+                  onChange={(e) => setExtObraTitulo(e.target.value)}
+                />
+                <input
+                  className="mam-input"
+                  type="number"
+                  placeholder="Cap."
+                  value={extNumeroCap}
+                  onChange={(e) => setExtNumeroCap(e.target.value)}
+                  style={{ width: 90 }}
+                />
+                <input
+                  className="mam-input mam-search-input"
+                  placeholder="Link (mangadex.org/chapter/..., mangafire.to/...)"
+                  value={extUrl}
+                  onChange={(e) => setExtUrl(e.target.value)}
+                />
+              </div>
+              <textarea
+                className="mam-textarea"
+                placeholder="Lista ordenada de URLs de páginas (uma por linha, opcional)"
+                value={extUrlsTexto}
+                onChange={(e) => setExtUrlsTexto(e.target.value)}
+                rows={3}
+              />
+              <textarea
+                className="mam-textarea"
+                placeholder="HTML da página do capítulo (opcional — útil para MangaFire/sites dinâmicos)"
+                value={extHtml}
+                onChange={(e) => setExtHtml(e.target.value)}
+                rows={3}
+              />
+              <div>
+                <button className="mam-btn mam-btn-primary" type="submit">
+                  Importar e Gerar CBZ na Biblioteca
+                </button>
+              </div>
+              {resultadoImportacao && (
+                <pre className="mam-pre">{JSON.stringify(resultadoImportacao, null, 2)}</pre>
               )}
-            </div>
-          </div>
+            </form>
+          </>
+        )}
 
-          <hr style={{ margin: '1rem 0' }} />
-          <h3>Importar por Link Direto / HTML / Lista Ordenada (Extratores Modulares)</h3>
-          <p style={{ color: '#555', margin: 0 }}>
-            Extratores registrados: {extratores.map((e) => e.id).join(', ') || 'carregando...'}
-          </p>
-          <form onSubmit={handleImportarExtrator} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        {abaAtiva === 'transferencia' && (
+          <section className="mam-panel">
+            <h1 className="mam-section-title">TRANSFERÊNCIA & SINCRONIZAÇÃO</h1>
+            <p className="mam-section-desc">
+              Compare bibliotecas, sincronize sem sobrescritas inesperadas e valide integridade SHA-256.
+            </p>
+            <div className="mam-toolbar-row">
               <input
-                placeholder="Título da obra (ex: Medaka Box)"
-                value={extObraTitulo}
-                onChange={(e) => setExtObraTitulo(e.target.value)}
-                style={{ minWidth: 220 }}
+                className="mam-input mam-search-input"
+                placeholder="Caminho da biblioteca origem"
+                value={origemTransfer}
+                onChange={(e) => setOrigemTransfer(e.target.value)}
               />
               <input
-                type="number"
-                placeholder="Nº Cap."
-                value={extNumeroCap}
-                onChange={(e) => setExtNumeroCap(e.target.value)}
-                style={{ width: 90 }}
+                className="mam-input mam-search-input"
+                placeholder="Caminho da biblioteca destino"
+                value={destinoTransfer}
+                onChange={(e) => setDestinoTransfer(e.target.value)}
               />
+            </div>
+            <div className="mam-toolbar-row">
+              <button className="mam-btn" onClick={handleCompararBibliotecas}>
+                Comparar Bibliotecas
+              </button>
+              <button className="mam-btn" onClick={() => handleSincronizar(false)}>
+                Sincronizar (Sem Sobrescrita)
+              </button>
+              <button className="mam-btn mam-btn-primary" onClick={handleCopiaIntegral}>
+                Cópia Integral (SHA-256)
+              </button>
+            </div>
+            {diferenca && <pre className="mam-pre">{JSON.stringify(diferenca, null, 2)}</pre>}
+            {relatorioTransfer && (
+              <pre className="mam-pre">{JSON.stringify(relatorioTransfer, null, 2)}</pre>
+            )}
+          </section>
+        )}
+
+        {abaAtiva === 'ai' && (
+          <section className="mam-panel">
+            <h1 className="mam-section-title">MANGA AI ENGINE</h1>
+            <p className="mam-section-desc">
+              Processo auxiliar Python local (JSON-RPC 2.0 stdio) — sem downloads automáticos.
+            </p>
+            <div className="mam-toolbar-row">
+              <button className="mam-btn mam-btn-primary" onClick={handleVerificarAi}>
+                Verificar Status do AI Engine
+              </button>
               <input
-                placeholder="Link do capítulo/obra (mangadex.org, mangafire.to, etc.)"
-                value={extUrl}
-                onChange={(e) => setExtUrl(e.target.value)}
-                style={{ minWidth: 320 }}
+                className="mam-input mam-search-input"
+                placeholder="Diretório de modelos locais (.onnx / .pt)"
+                value={diretorioModelos}
+                onChange={(e) => setDiretorioModelos(e.target.value)}
               />
+              <button className="mam-btn" onClick={handleListarModelos}>
+                Listar Modelos Locais
+              </button>
             </div>
-            <textarea
-              placeholder="Lista ordenada de URLs de páginas (uma por linha, opcional)"
-              value={extUrlsTexto}
-              onChange={(e) => setExtUrlsTexto(e.target.value)}
-              rows={3}
-            />
-            <textarea
-              placeholder="HTML da página do capítulo (opcional — útil para MangaFire/sites dinâmicos)"
-              value={extHtml}
-              onChange={(e) => setExtHtml(e.target.value)}
-              rows={3}
-            />
-            <div>
-              <button type="submit">Importar e Gerar CBZ na Biblioteca</button>
-            </div>
-          </form>
-          {resultadoImportacao && (
-            <pre style={{ background: '#f4f4f6', padding: '0.75rem', borderRadius: 6 }}>
-              {JSON.stringify(resultadoImportacao, null, 2)}
-            </pre>
-          )}
-        </section>
-      )}
+            {aiStatus && <pre className="mam-pre">{JSON.stringify(aiStatus, null, 2)}</pre>}
+            {modelos.map((m) => (
+              <div key={m.caminho} className="mam-row-card">
+                <span>{m.nome}</span>
+                <span className="mam-pill-badge">
+                  {m.formato} • {m.tamanho_bytes} bytes
+                </span>
+              </div>
+            ))}
+          </section>
+        )}
+      </main>
 
-      {abaAtiva === 'transferencia' && (
-        <section style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          <h2>Transferência e Sincronização Portátil</h2>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <input
-              placeholder="Caminho da biblioteca origem"
-              value={origemTransfer}
-              onChange={(e) => setOrigemTransfer(e.target.value)}
-              style={{ minWidth: 260 }}
-            />
-            <input
-              placeholder="Caminho da biblioteca destino"
-              value={destinoTransfer}
-              onChange={(e) => setDestinoTransfer(e.target.value)}
-              style={{ minWidth: 260 }}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <button onClick={handleCompararBibliotecas}>Comparar Bibliotecas</button>
-            <button onClick={() => handleSincronizar(false)}>Sincronizar (Sem Sobrescrita)</button>
-            <button onClick={handleCopiaIntegral}>Cópia Integral (SHA-256)</button>
-          </div>
-          {diferenca && (
-            <pre style={{ background: '#f4f4f6', padding: '0.75rem', borderRadius: 6 }}>
-              {JSON.stringify(diferenca, null, 2)}
-            </pre>
-          )}
-          {relatorioTransfer && (
-            <pre style={{ background: '#f4f4f6', padding: '0.75rem', borderRadius: 6 }}>
-              {JSON.stringify(relatorioTransfer, null, 2)}
-            </pre>
-          )}
-        </section>
-      )}
-
-      {abaAtiva === 'ai' && (
-        <section style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          <h2>Manga AI Engine (Local — JSON-RPC stdio)</h2>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <button onClick={handleVerificarAi}>Verificar Status do AI Engine</button>
-            <input
-              placeholder="Diretório de modelos locais (opcional)"
-              value={diretorioModelos}
-              onChange={(e) => setDiretorioModelos(e.target.value)}
-              style={{ minWidth: 260 }}
-            />
-            <button onClick={handleListarModelos}>Listar Modelos Locais</button>
-          </div>
-          {aiStatus && (
-            <pre style={{ background: '#f4f4f6', padding: '0.75rem', borderRadius: 6 }}>
-              {JSON.stringify(aiStatus, null, 2)}
-            </pre>
-          )}
-          {modelos.length > 0 && (
-            <ul>
-              {modelos.map((m) => (
-                <li key={m.caminho}>
-                  {m.nome} ({m.formato}, {m.tamanho_bytes} bytes)
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
+      <footer className="mam-statusbar">
+        <span>MAM v0.1.0 • Portátil</span>
+        <span className="mam-status-ready">
+          <span className="mam-status-dot" />
+          System Ready
+        </span>
+      </footer>
     </div>
   )
 }
