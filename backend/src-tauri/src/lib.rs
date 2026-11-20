@@ -14,7 +14,7 @@ use mam_library::{DetalhesObra, LibraryManager};
 use mam_interface::{archive_criar_cbz as if_archive_criar_cbz, archive_ler_cbz as if_archive_ler_cbz, archive_validar_cbz as if_archive_validar_cbz};
 use mam_interface::{source_listar_fontes as if_source_listar_fontes, source_buscar_obras as if_source_buscar_obras};
 use mam_interface::{source_listar_capitulos as if_source_listar_capitulos, source_verificar_duplicatas as if_source_verificar_duplicatas};
-use mam_interface::{source_arquivar_capitulos as if_source_arquivar_capitulos};
+use mam_interface::{source_arquivar_capitulos as if_source_arquivar_capitulos, source_status_operacao as if_source_status_operacao};
 use mam_interface::{
     MarcadorPagina,
     reader_obter_pagina as if_reader_obter_pagina,
@@ -34,7 +34,8 @@ use mam_interface::{
 use mam_ai_engine::{AiEngineManager, ModeloInfo};
 use mam_transfer::{DiferencaBibliotecas, RelatorioTransferencia, TransferManager};
 use mam_source_integration::SourceIntegrationManager;
-use mam_source_integration::{FonteInfo, ObraBuscaResultado, CapituloBuscaResultado};
+use mam_source_integration::mangadex::MangaDexFonte;
+use mam_source_integration::{FonteInfo, ObraBuscaResultado, CapituloBuscaResultado, StatusOperacao};
 
 #[tauri::command]
 fn health_check() -> String {
@@ -178,10 +179,25 @@ async fn source_verificar_duplicatas(
 #[tauri::command]
 async fn source_arquivar_capitulos(
     source_manager: tauri::State<'_, Arc<SourceIntegrationManager>>,
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
     obra_titulo: String,
     capitulos: Vec<CapituloBuscaResultado>,
 ) -> Result<String, String> {
-    if_source_arquivar_capitulos(source_manager.inner().clone(), obra_titulo, capitulos).await
+    if_source_arquivar_capitulos(
+        source_manager.inner().clone(),
+        library_manager.inner().clone(),
+        obra_titulo,
+        capitulos,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn source_status_operacao(
+    source_manager: tauri::State<'_, Arc<SourceIntegrationManager>>,
+    id_operacao: String,
+) -> Result<Option<StatusOperacao>, String> {
+    if_source_status_operacao(source_manager.inner().clone(), id_operacao).await
 }
 
 #[tauri::command]
@@ -328,6 +344,7 @@ pub fn run() {
       source_listar_capitulos,
       source_verificar_duplicatas,
       source_arquivar_capitulos,
+      source_status_operacao,
       reader_obter_pagina,
       reader_salvar_progresso,
       reader_obter_progresso,
@@ -382,8 +399,13 @@ pub fn run() {
       let archive_manager = ArchiveManager::nova(db_arc.clone());
       app.manage(Arc::new(archive_manager));
 
-      // Inicializa o SourceIntegrationManager como estado
+      // Inicializa o SourceIntegrationManager com fonte pública autorizada
       let source_manager = SourceIntegrationManager::nova(db_arc);
+      let _ = tokio::runtime::Runtime::new().unwrap().block_on(async {
+        source_manager
+          .registrar_fonte(Arc::new(MangaDexFonte::nova()))
+          .await
+      });
       app.manage(Arc::new(source_manager));
 
       // Inicializa o TransferManager como estado

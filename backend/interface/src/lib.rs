@@ -15,7 +15,7 @@ use mam_database::Database;
 use mam_chapter::ChapterManager;
 use mam_archive::{ArchiveManager, PaginaExtraida};
 use mam_source_integration::SourceIntegrationManager;
-use mam_source_integration::{FonteInfo, ObraBuscaResultado, CapituloBuscaResultado};
+use mam_source_integration::{FonteInfo, ObraBuscaResultado, CapituloBuscaResultado, StatusOperacao};
 use mam_core::ObraId;
 use mam_database::models::{Obra, Volume};
 use mam_library::{DetalhesObra, LibraryManager};
@@ -226,14 +226,26 @@ pub async fn source_verificar_duplicatas(
         .map_err(|e| e.to_string())
 }
 
-/// Inicia uma operação de arquivamento de capítulos.
+/// Inicia uma operação de arquivamento real de capítulos para a biblioteca.
 pub async fn source_arquivar_capitulos(
     source_manager: Arc<SourceIntegrationManager>,
+    library_manager: Arc<LibraryManager>,
     obra_titulo: String,
     capitulos: Vec<CapituloBuscaResultado>,
 ) -> Result<String, String> {
     source_manager
-        .iniciar_operacao_arquivamento(obra_titulo, capitulos)
+        .arquivar_para_biblioteca(library_manager.raiz(), obra_titulo, capitulos)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Consulta o status de uma operação de arquivamento.
+pub async fn source_status_operacao(
+    source_manager: Arc<SourceIntegrationManager>,
+    id_operacao: String,
+) -> Result<Option<StatusOperacao>, String> {
+    source_manager
+        .status_operacao(&id_operacao)
         .await
         .map_err(|e| e.to_string())
 }

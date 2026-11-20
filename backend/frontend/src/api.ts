@@ -75,6 +75,38 @@ export interface ModeloInfo {
   disponivel: boolean
 }
 
+export interface FonteInfo {
+  id: string
+  nome: string
+  autorizada: boolean
+}
+
+export interface ObraBuscaResultado {
+  fonte_id: string
+  obra_id_fonte: string
+  titulo: string
+  autor?: string | null
+  descricao?: string | null
+}
+
+export interface CapituloBuscaResultado {
+  fonte_id: string
+  obra_id_fonte: string
+  capitulo_id_fonte: string
+  numero?: number | null
+  titulo?: string | null
+  url?: string | null
+}
+
+export interface StatusOperacao {
+  id: string
+  obra_titulo: string
+  total_capitulos: number
+  capitulos_processados: number
+  percentual: number
+  concluida: boolean
+}
+
 export const mamApi = {
   healthCheck: () => invoke<string>('health_check'),
   libraryRaiz: () => invoke<string>('library_raiz'),
@@ -122,4 +154,13 @@ export const mamApi = {
   aiHealth: () => invoke<Record<string, unknown>>('ai_health'),
   aiListarModelos: (diretorios: string[]) =>
     invoke<ModeloInfo[]>('ai_listar_modelos', { diretorios }),
+  sourceListarFontes: () => invoke<FonteInfo[]>('source_listar_fontes'),
+  sourceBuscarObras: (consulta: string) =>
+    invoke<ObraBuscaResultado[]>('source_buscar_obras', { consulta }),
+  sourceListarCapitulos: (fonteId: string, obraIdFonte: string) =>
+    invoke<CapituloBuscaResultado[]>('source_listar_capitulos', { fonteId, obraIdFonte }),
+  sourceArquivarCapitulos: (obraTitulo: string, capitulos: CapituloBuscaResultado[]) =>
+    invoke<string>('source_arquivar_capitulos', { obraTitulo, capitulos }),
+  sourceStatusOperacao: (idOperacao: string) =>
+    invoke<StatusOperacao | null>('source_status_operacao', { idOperacao }),
 }

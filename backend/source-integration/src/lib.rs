@@ -12,17 +12,20 @@ use tokio::sync::RwLock;
 
 use mam_database::Database;
 
-use crate::fonte::{Fonte, ObraEncontrada, CapituloEncontrado};
+use crate::fonte::{ObraEncontrada, CapituloEncontrado};
 use crate::operacao::OperacaoArquivamento;
 use crate::duplicatas::EstatisticasDuplicatas;
 
 use serde::{Deserialize, Serialize};
 
-mod fonte;
+pub mod fonte;
+pub mod mangadex;
 mod busca;
 mod capitulos;
 mod operacao;
 mod duplicatas;
+
+pub use fonte::Fonte;
 
 /// Erros do módulo de integração com fontes.
 #[derive(Debug, thiserror::Error)]
@@ -259,6 +262,116 @@ impl SourceIntegrationManager {
         }
         Ok(())
     }
+
+    /// Executa o arquivamento completo de uma lista de capítulos na biblioteca:
+    /// obtém bytes da fonte autorizada, grava `.cbz` atomicamente (`temp` + `rename`),
+    /// calcula SHA-256 e registra obra/capítulo/integridade no SQLite.
+    pub async fn arquivar_para_biblioteca(
+        &self,
+        raiz_biblioteca: &std::path::Path,
+        obra_titulo: String,
+        capitulos: Vec<CapituloBuscaResultado>,
+    ) -> Result<String, SourceError> {
+        let id_operacao = self
+            .iniciar_operacao_arquivamento(obra_titulo.clone(), capitulos.clone())
+            .await?;
+
+        let nome_pasta_obra = sanitizar_nome(&obra_titulo);
+        let caminho_rel_obra = format!("Manga/{}", nome_pasta_obra);
+
+        let obra = match self.db.buscar_obra_por_titulo(&obra_titulo).await? {
+            Some(o) => o,
+            None => {
+                self.db
+                    .criar_obra(
+                        mam_core::ObraId::new(),
+                        obra_titulo.clone(),
+                        mam_core::CaminhoRelativo::from_str(caminho_rel_obra.clone()),
+                        capitulos.first().map(|c| c.fonte_id.clone()),
+                    )
+                    .await?
+            }
+        };
+
+        for cap in capitulos {
+            let fonte = {
+                let fontes = self.fontes.read().await;
+                fontes
+                    .get(&cap.fonte_id)
+                    .cloned()
+                    .ok_or_else(|| SourceError::FonteNaoEncontrada(cap.fonte_id.clone()))?
+            };
+
+            if !fonte.eh_autorizada() {
+                return Err(SourceError::FonteNaoAutorizada(cap.fonte_id));
+            }
+
+            let cbz_bytes = fonte.obter_capitulo(&cap.capitulo_id_fonte).await?;
+            let numero = cap.numero.unwrap_or(0);
+            let nome_arquivo = format!("Capitulo_{:04}.cbz", numero);
+            let caminho_rel_cap = format!("{}/{}", caminho_rel_obra, nome_arquivo);
+            let caminho_abs = raiz_biblioteca.join(&caminho_rel_cap);
+
+            if let Some(pai) = caminho_abs.parent() {
+                std::fs::create_dir_all(pai).map_err(|e| SourceError::Operacao(e.to_string()))?;
+            }
+
+            let temp_path = caminho_abs.with_extension("cbz.mam_tmp");
+            std::fs::write(&temp_path, &cbz_bytes)
+                .map_err(|e| SourceError::Operacao(e.to_string()))?;
+            if caminho_abs.exists() {
+                std::fs::remove_file(&caminho_abs)
+                    .map_err(|e| SourceError::Operacao(e.to_string()))?;
+            }
+            std::fs::rename(&temp_path, &caminho_abs)
+                .map_err(|e| SourceError::Operacao(e.to_string()))?;
+
+            use sha2::Digest;
+            let hash = format!("{:x}", sha2::Sha256::digest(&cbz_bytes));
+            self.db
+                .registrar_integridade(&caminho_rel_cap, &hash, "valido")
+                .await?;
+
+            let qtd_paginas = contar_paginas_cbz_bytes(&cbz_bytes) as i32;
+            self.db
+                .criar_capitulo(
+                    mam_core::CapituloId::new(),
+                    None,
+                    obra.id,
+                    numero,
+                    cap.titulo.clone(),
+                    mam_core::CaminhoRelativo::from_str(caminho_rel_cap),
+                    qtd_paginas,
+                )
+                .await?;
+
+            self.arquivar_capitulo(&id_operacao, &cap.fonte_id, &cap)
+                .await?;
+        }
+
+        Ok(id_operacao)
+    }
+}
+
+fn sanitizar_nome(s: &str) -> String {
+    let limpo: String = s
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => c,
+        })
+        .collect();
+    let trimmed = limpo.trim();
+    if trimmed.is_empty() {
+        "Obra".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn contar_paginas_cbz_bytes(bytes: &[u8]) -> usize {
+    let cursor = std::io::Cursor::new(bytes);
+    zip::ZipArchive::new(cursor).map(|z| z.len()).unwrap_or(0)
 }
 
 /// Informação de uma fonte registrada.
@@ -307,5 +420,57 @@ mod tests {
         };
         assert_eq!(status.percentual, 30.0);
         assert!(!status.concluida);
+    }
+
+    #[tokio::test]
+    async fn arquivar_para_biblioteca_grava_cbz_e_sha256() {
+        use std::io::Write;
+        struct FonteMock;
+        #[async_trait::async_trait]
+        impl Fonte for FonteMock {
+            fn id(&self) -> &str { "mock" }
+            fn nome(&self) -> &str { "Mock Autorizada" }
+            fn eh_autorizada(&self) -> bool { true }
+            async fn buscar_obras(&self, _: &str) -> Result<Vec<ObraEncontrada>, crate::fonte::FonteError> { Ok(vec![]) }
+            async fn listar_capitulos(&self, _: &str) -> Result<Vec<CapituloEncontrado>, crate::fonte::FonteError> { Ok(vec![]) }
+            async fn obter_capitulo(&self, _: &str) -> Result<Vec<u8>, crate::fonte::FonteError> {
+                let mut cur = std::io::Cursor::new(Vec::new());
+                {
+                    let mut zw = zip::ZipWriter::new(&mut cur);
+                    zw.start_file("0001.jpg", zip::write::FileOptions::default()).unwrap();
+                    zw.write_all(b"JPG").unwrap();
+                    zw.finish().unwrap();
+                }
+                Ok(cur.into_inner())
+            }
+        }
+
+        let base = std::env::temp_dir().join(format!("mam_test_src_arch_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&base).unwrap();
+        let db = Arc::new(Database::abrir(base.join("db.sqlite"), base.clone()).await.unwrap());
+        let sm = SourceIntegrationManager::nova(db.clone());
+        sm.registrar_fonte(Arc::new(FonteMock)).await.unwrap();
+
+        let caps = vec![CapituloBuscaResultado {
+            fonte_id: "mock".to_string(),
+            obra_id_fonte: "obra-1".to_string(),
+            capitulo_id_fonte: "cap-1".to_string(),
+            numero: Some(1),
+            titulo: Some("Capítulo 1".to_string()),
+            url: None,
+        }];
+
+        let op_id = sm
+            .arquivar_para_biblioteca(&base, "Obra Web".to_string(), caps)
+            .await
+            .expect("arquivar para biblioteca");
+
+        let status = sm.status_operacao(&op_id).await.unwrap().unwrap();
+        assert!(status.concluida);
+        assert_eq!(status.percentual, 100.0);
+        assert!(base.join("Manga/Obra Web/Capitulo_0001.cbz").exists());
+        assert!(sm.capitulo_ja_arquivado("Manga/Obra Web/Capitulo_0001.cbz").await.unwrap());
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

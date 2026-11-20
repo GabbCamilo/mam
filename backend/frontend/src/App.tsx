@@ -1,16 +1,20 @@
 import { useEffect, useState } from 'react'
 import {
   Capitulo,
+  CapituloBuscaResultado,
   DetalhesObra,
   DiferencaBibliotecas,
+  FonteInfo,
   ModeloInfo,
   Obra,
+  ObraBuscaResultado,
   RelatorioTransferencia,
+  StatusOperacao,
   mamApi,
 } from './api'
 import { CbzReader } from './components/CbzReader'
 
-type AbaAtiva = 'biblioteca' | 'transferencia' | 'ai'
+type AbaAtiva = 'biblioteca' | 'fontes' | 'transferencia' | 'ai'
 
 function App() {
   const [abaAtiva, setAbaAtiva] = useState<AbaAtiva>('biblioteca')
@@ -30,6 +34,14 @@ function App() {
   const [aiStatus, setAiStatus] = useState<Record<string, unknown> | null>(null)
   const [diretorioModelos, setDiretorioModelos] = useState('')
   const [modelos, setModelos] = useState<ModeloInfo[]>([])
+
+  const [fontes, setFontes] = useState<FonteInfo[]>([])
+  const [consultaFonte, setConsultaFonte] = useState('')
+  const [obrasFonte, setObrasFonte] = useState<ObraBuscaResultado[]>([])
+  const [obraFonteSelecionada, setObraFonteSelecionada] = useState<ObraBuscaResultado | null>(null)
+  const [capitulosFonte, setCapitulosFonte] = useState<CapituloBuscaResultado[]>([])
+  const [selecionadosIds, setSelecionadosIds] = useState<string[]>([])
+  const [statusArquivamento, setStatusArquivamento] = useState<StatusOperacao | null>(null)
 
   async function carregarObras() {
     try {
@@ -133,6 +145,61 @@ function App() {
     }
   }
 
+  async function handleCarregarFontes() {
+    try {
+      const lista = await mamApi.sourceListarFontes()
+      setFontes(lista)
+    } catch (err) {
+      setMensagem(`Erro ao listar fontes: ${String(err)}`)
+    }
+  }
+
+  async function handleBuscarNaFonte(e: React.FormEvent) {
+    e.preventDefault()
+    if (!consultaFonte.trim()) return
+    try {
+      const res = await mamApi.sourceBuscarObras(consultaFonte.trim())
+      setObrasFonte(res)
+      setObraFonteSelecionada(null)
+      setCapitulosFonte([])
+      setSelecionadosIds([])
+      setMensagem(`${res.length} obra(s) encontrada(s).`)
+    } catch (err) {
+      setMensagem(`Erro na busca de fontes: ${String(err)}`)
+    }
+  }
+
+  async function handleSelecionarObraFonte(obra: ObraBuscaResultado) {
+    setObraFonteSelecionada(obra)
+    setSelecionadosIds([])
+    try {
+      const caps = await mamApi.sourceListarCapitulos(obra.fonte_id, obra.obra_id_fonte)
+      setCapitulosFonte(caps)
+    } catch (err) {
+      setMensagem(`Erro ao listar capítulos da fonte: ${String(err)}`)
+    }
+  }
+
+  function alternarCapituloSelecionado(id: string) {
+    setSelecionadosIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+    )
+  }
+
+  async function handleArquivarSelecionados() {
+    if (!obraFonteSelecionada || selecionadosIds.length === 0) return
+    const escolhidos = capitulosFonte.filter((c) => selecionadosIds.includes(c.capitulo_id_fonte))
+    try {
+      const opId = await mamApi.sourceArquivarCapitulos(obraFonteSelecionada.titulo, escolhidos)
+      const status = await mamApi.sourceStatusOperacao(opId)
+      setStatusArquivamento(status)
+      setMensagem(`Arquivamento concluído (operação ${opId}).`)
+      await carregarObras()
+    } catch (err) {
+      setMensagem(`Erro ao arquivar capítulos: ${String(err)}`)
+    }
+  }
+
   const todosCapitulosObra: Capitulo[] = detalhes
     ? [...detalhes.volumes.flatMap((v) => v.capitulos), ...detalhes.capitulos_avulsos].sort(
         (a, b) => a.numero - b.numero,
@@ -161,6 +228,14 @@ function App() {
 
       <nav style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
         <button onClick={() => setAbaAtiva('biblioteca')}>Biblioteca</button>
+        <button
+          onClick={() => {
+            setAbaAtiva('fontes')
+            handleCarregarFontes()
+          }}
+        >
+          Fontes & Importação
+        </button>
         <button onClick={() => setAbaAtiva('transferencia')}>Transferência & Sync</button>
         <button onClick={() => setAbaAtiva('ai')}>AI Engine</button>
       </nav>
@@ -249,6 +324,78 @@ function App() {
             </section>
           </div>
         </>
+      )}
+
+      {abaAtiva === 'fontes' && (
+        <section style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <h2>Fontes Autorizadas & Importação Web</h2>
+          <p style={{ color: '#555' }}>
+            Fontes ativas: {fontes.map((f) => f.nome).join(', ') || 'nenhuma'}
+          </p>
+          <form onSubmit={handleBuscarNaFonte} style={{ display: 'flex', gap: '0.5rem' }}>
+            <input
+              placeholder="Buscar obra pelo título..."
+              value={consultaFonte}
+              onChange={(e) => setConsultaFonte(e.target.value)}
+              style={{ minWidth: 280 }}
+            />
+            <button type="submit">Pesquisar</button>
+          </form>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1rem' }}>
+            <div>
+              <h3>Resultados ({obrasFonte.length})</h3>
+              <ul style={{ listStyle: 'none', padding: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                {obrasFonte.map((o) => (
+                  <li key={`${o.fonte_id}-${o.obra_id_fonte}`}>
+                    <button
+                      onClick={() => handleSelecionarObraFonte(o)}
+                      style={{ width: '100%', textAlign: 'left', padding: '0.4rem' }}
+                    >
+                      {o.titulo}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div>
+              {obraFonteSelecionada ? (
+                <>
+                  <h3>{obraFonteSelecionada.titulo}</h3>
+                  <button
+                    onClick={handleArquivarSelecionados}
+                    disabled={selecionadosIds.length === 0}
+                  >
+                    Arquivar Selecionados ({selecionadosIds.length})
+                  </button>
+                  {statusArquivamento && (
+                    <p>
+                      Progresso: {statusArquivamento.capitulos_processados}/
+                      {statusArquivamento.total_capitulos} ({statusArquivamento.percentual}%)
+                    </p>
+                  )}
+                  <ul style={{ listStyle: 'none', padding: 0, marginTop: '0.5rem' }}>
+                    {capitulosFonte.map((c) => (
+                      <li key={c.capitulo_id_fonte}>
+                        <label style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                          <input
+                            type="checkbox"
+                            checked={selecionadosIds.includes(c.capitulo_id_fonte)}
+                            onChange={() => alternarCapituloSelecionado(c.capitulo_id_fonte)}
+                          />
+                          Cap. {c.numero ?? '?'} {c.titulo ? `— ${c.titulo}` : ''}
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p>Pesquise e selecione uma obra para listar os capítulos disponíveis.</p>
+              )}
+            </div>
+          </div>
+        </section>
       )}
 
       {abaAtiva === 'transferencia' && (
