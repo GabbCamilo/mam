@@ -168,11 +168,11 @@ pub fn run() {
       app.manage(Arc::new(chapter_manager));
 
       // Inicializa o ArchiveManager como estado
-      let archive_manager = ArchiveManager::nova(db_arc);
+      let archive_manager = ArchiveManager::nova(db_arc.clone());
       app.manage(Arc::new(archive_manager));
 
       // Inicializa o SourceIntegrationManager como estado
-      let source_manager = SourceIntegrationManager::nova(db_arc.clone());
+      let source_manager = SourceIntegrationManager::nova(db_arc);
       app.manage(Arc::new(source_manager));
 
       Ok(())

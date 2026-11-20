@@ -136,6 +136,7 @@ mod tests {
     /// Fonte fictícia para testes (autorizada).
     struct FonteTeste;
 
+    #[async_trait]
     impl Fonte for FonteTeste {
         fn id(&self) -> &str {
             "fonte-teste"
@@ -227,6 +228,7 @@ mod tests {
     #[test]
     fn fonte_nao_autorizada_nao_aparece_autorizadas() {
         struct FonteNaoAutorizada;
+        #[async_trait]
         impl Fonte for FonteNaoAutorizada {
             fn id(&self) -> &str {
                 "nao-autorizada"

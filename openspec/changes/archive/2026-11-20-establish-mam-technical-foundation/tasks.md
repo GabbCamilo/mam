@@ -54,10 +54,10 @@
 
 ## 7. Validação do OpenSpec
 
-- [ ] 7.1 Executar `openspec validate establish-mam-technical-foundation`
-- [ ] 7.2 Verificar status do change com `openspec status`
+- [x] 7.1 Executar `openspec validate establish-mam-technical-foundation`
+- [x] 7.2 Verificar status do change com `openspec status`
 
 ## 8. Roadmap da Fase 1
 
-- [ ] 8.1 Documentar roadmap (Fase 1: fundação e infraestrutura → … → empacotamento)
-- [ ] 8.2 Apresentar relatório final da primeira execução
+- [x] 8.1 Documentar roadmap (Fase 1: fundação e infraestrutura → … → empacotamento)
+- [x] 8.2 Apresentar relatório final da primeira execução
