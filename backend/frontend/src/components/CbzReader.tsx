@@ -229,35 +229,80 @@ export function CbzReader({
           <strong>Resultados de IA — Página {indiceAtual + 1}</strong>
           {resultadosIa
             .filter((r) => r.pagina_numero === indiceAtual)
-            .map((r) => (
-              <div key={r.id} style={{ marginTop: '0.5rem' }}>
-                <span>
-                  Estado: <code>{r.estado_revisao}</code> | Modelo: {r.modelo_id}
-                </span>
-                <pre style={{ background: '#fff', padding: '0.5rem', borderRadius: 4 }}>
-                  {r.resultado_json}
-                </pre>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <input
-                    placeholder="JSON/texto revisado..."
-                    value={textoRevisao}
-                    onChange={(e) => setTextoRevisao(e.target.value)}
-                    style={{ minWidth: 260 }}
-                  />
-                  <button
-                    onClick={async () => {
-                      if (!textoRevisao.trim()) return
-                      await mamApi.aiRevisarResultado(r.id, textoRevisao.trim())
-                      const atualizados = await mamApi.aiListarResultadosCapitulo(capitulo.id)
-                      setResultadosIa(atualizados)
-                      setTextoRevisao('')
-                    }}
-                  >
-                    Salvar Revisão
-                  </button>
+            .map((r) => {
+              let parsedRegioes: Array<{
+                bbox?: [number, number, number, number]
+                texto_original?: string
+                texto_traduzido?: string
+              }> = []
+              try {
+                const p = JSON.parse(r.resultado_json) as { regioes?: typeof parsedRegioes }
+                parsedRegioes = p.regioes ?? []
+              } catch {
+                parsedRegioes = []
+              }
+
+              return (
+                <div key={r.id} style={{ marginTop: '0.5rem' }}>
+                  <span>
+                    Estado: <code>{r.estado_revisao}</code> | Modelo: {r.modelo_id}
+                  </span>
+                  {parsedRegioes.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.4rem' }}>
+                      {parsedRegioes.map((reg, idx) => (
+                        <div key={idx} style={{ background: '#fff', padding: '0.4rem', borderRadius: 4 }}>
+                          <small>Região #{idx + 1} — Original: {reg.texto_original || '(vazio)'}</small>
+                          <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.25rem' }}>
+                            <input
+                              defaultValue={reg.texto_traduzido || ''}
+                              placeholder="Tradução revisada..."
+                              onChange={(e) => {
+                                reg.texto_traduzido = e.target.value
+                              }}
+                              style={{ minWidth: 240 }}
+                            />
+                            <button
+                              onClick={async () => {
+                                const obj = JSON.parse(r.resultado_json) as Record<string, unknown>
+                                obj.regioes = parsedRegioes
+                                obj.estado_revisao = 'revisado'
+                                await mamApi.aiRevisarResultado(r.id, JSON.stringify(obj))
+                                const atualizados = await mamApi.aiListarResultadosCapitulo(capitulo.id)
+                                setResultadosIa(atualizados)
+                              }}
+                            >
+                              Salvar Região
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <pre style={{ background: '#fff', padding: '0.5rem', borderRadius: 4 }}>
+                    {r.resultado_json}
+                  </pre>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input
+                      placeholder="JSON/texto revisado..."
+                      value={textoRevisao}
+                      onChange={(e) => setTextoRevisao(e.target.value)}
+                      style={{ minWidth: 260 }}
+                    />
+                    <button
+                      onClick={async () => {
+                        if (!textoRevisao.trim()) return
+                        await mamApi.aiRevisarResultado(r.id, textoRevisao.trim())
+                        const atualizados = await mamApi.aiListarResultadosCapitulo(capitulo.id)
+                        setResultadosIa(atualizados)
+                        setTextoRevisao('')
+                      }}
+                    >
+                      Salvar Revisão
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           {resultadosIa.filter((r) => r.pagina_numero === indiceAtual).length === 0 && (
             <p style={{ margin: '0.4rem 0 0' }}>Nenhum resultado de IA salvo para esta página.</p>
           )}

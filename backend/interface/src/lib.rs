@@ -480,8 +480,30 @@ pub async fn ai_revisar_resultado(
         .map_err(|e| e.to_string())
 }
 
-/// Processa uma página de um CBZ com o Manga AI Engine e persiste em `resultados_ia` (`nao_revisado`),
-/// utilizando arquivo temporário efêmero e preservando o `.cbz` original intacto.
+/// Calcula chave determinística de cache de IA (L3) com hash SHA-256 da imagem e parâmetros do pipeline.
+pub fn calcular_chave_cache_ia(
+    bytes_imagem: &[u8],
+    modelo: &str,
+    versao_pipeline: &str,
+    idioma_origem: &str,
+    idioma_destino: &str,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes_imagem);
+    hasher.update(b"|");
+    hasher.update(modelo.as_bytes());
+    hasher.update(b"|");
+    hasher.update(versao_pipeline.as_bytes());
+    hasher.update(b"|");
+    hasher.update(idioma_origem.as_bytes());
+    hasher.update(b"|");
+    hasher.update(idioma_destino.as_bytes());
+    format!("ai:cache:{:x}", hasher.finalize())
+}
+
+/// Processa uma página de um CBZ com o Manga AI Engine (com reuso de cache L3 por SHA-256)
+/// e persiste em `resultados_ia` (`nao_revisado`), preservando o `.cbz` original intacto.
 #[allow(clippy::too_many_arguments)]
 pub async fn ai_processar_e_salvar_pagina(
     ai_manager: Arc<AiEngineManager>,
@@ -498,29 +520,58 @@ pub async fn ai_processar_e_salvar_pagina(
 ) -> Result<ResultadoIA, String> {
     let pagina = reader_obter_pagina(archive_manager, library_manager, cache, caminho_cbz, indice).await?;
     let bytes = decodificar_base64(&pagina.dados_base64);
-    let ext = pagina.nome.rsplit('.').next().unwrap_or("jpg");
-    let temp_img = std::env::temp_dir().join(format!("mam_ai_page_{}.{}", uuid::Uuid::new_v4(), ext));
-    std::fs::write(&temp_img, &bytes).map_err(|e| e.to_string())?;
+    let modelo_chave = caminho_modelo.as_deref().unwrap_or("padrao");
+    let chave_cache_ia = calcular_chave_cache_ia(
+        &bytes,
+        modelo_chave,
+        "1.0",
+        &idioma_origem,
+        &idioma_destino,
+    );
 
-    let resultado_val = ai_manager
-        .processar_pagina(
-            &temp_img,
-            &idioma_origem,
-            &idioma_destino,
-            caminho_modelo.as_deref(),
-        )
-        .await;
+    let (provedor, resultado_json) = if let Some(cached_json) = db
+        .obter_configuracao(&chave_cache_ia)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        let parsed: serde_json::Value =
+            serde_json::from_str(&cached_json).unwrap_or(serde_json::Value::Null);
+        let prov = parsed["provedor"]
+            .as_str()
+            .unwrap_or("cache-ia")
+            .to_string();
+        (prov, cached_json)
+    } else {
+        let ext = pagina.nome.rsplit('.').next().unwrap_or("jpg");
+        let temp_img =
+            std::env::temp_dir().join(format!("mam_ai_page_{}.{}", uuid::Uuid::new_v4(), ext));
+        std::fs::write(&temp_img, &bytes).map_err(|e| e.to_string())?;
 
-    let _ = std::fs::remove_file(&temp_img);
-    let resultado = resultado_val.map_err(|e| e.to_string())?;
-    let provedor = resultado["provedor"].as_str().unwrap_or("cpu-fallback");
-    let resultado_json = serde_json::to_string(&resultado).map_err(|e| e.to_string())?;
+        let resultado_val = ai_manager
+            .processar_pagina(
+                &temp_img,
+                &idioma_origem,
+                &idioma_destino,
+                caminho_modelo.as_deref(),
+            )
+            .await;
+
+        let _ = std::fs::remove_file(&temp_img);
+        let resultado = resultado_val.map_err(|e| e.to_string())?;
+        let prov = resultado["provedor"]
+            .as_str()
+            .unwrap_or("cpu-fallback")
+            .to_string();
+        let json_str = serde_json::to_string(&resultado).map_err(|e| e.to_string())?;
+        let _ = db.salvar_configuracao(&chave_cache_ia, &json_str).await;
+        (prov, json_str)
+    };
 
     let cap_id = CapituloId::from_string(capitulo_id);
     db.salvar_resultado_ia(
         cap_id,
         indice as i32,
-        provedor,
+        &provedor,
         "1.0",
         "process_page",
         &resultado_json,
@@ -675,5 +726,16 @@ mod tests {
         assert_eq!(bytes_decodificados, b"FAKEJPGDATA");
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn cache_ia_deterministico_e_invalida_por_parametros() {
+        let k1 = calcular_chave_cache_ia(b"img1", "modelo-a", "1.0", "ja", "pt-BR");
+        let k2 = calcular_chave_cache_ia(b"img1", "modelo-a", "1.0", "ja", "pt-BR");
+        let k_idioma = calcular_chave_cache_ia(b"img1", "modelo-a", "1.0", "ja", "en");
+        let k_img = calcular_chave_cache_ia(b"img2", "modelo-a", "1.0", "ja", "pt-BR");
+        assert_eq!(k1, k2);
+        assert_ne!(k1, k_idioma);
+        assert_ne!(k1, k_img);
     }
 }

@@ -2243,6 +2243,7 @@ dependencies = [
  "mam-transfer",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "thiserror 1.0.69",
  "tokio",
