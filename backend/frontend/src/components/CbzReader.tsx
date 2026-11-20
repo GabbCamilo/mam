@@ -29,6 +29,7 @@ export function CbzReader({
   const [indiceAtual, setIndiceAtual] = useState(0)
   const [paginaPrincipal, setPaginaPrincipal] = useState<PaginaExtraida | null>(null)
   const [paginaSecundaria, setPaginaSecundaria] = useState<PaginaExtraida | null>(null)
+  const [paginasLongStrip, setPaginasLongStrip] = useState<PaginaExtraida[]>([])
   const [modo, setModo] = useState<ModoLeitura>('horizontal')
   const [ajuste, setAjuste] = useState<AjusteTela>('fit-width')
   const [zoom, setZoom] = useState(100)
@@ -92,10 +93,28 @@ export function CbzReader({
         setPaginaPrincipal(p1)
         await mamApi.salvarProgresso(capitulo.id, indiceAtual)
 
-        if (modo === 'dupla' && indiceAtual + 1 < p1.total_paginas) {
+        if (p1.total_paginas > 0 && indiceAtual >= p1.total_paginas - 1) {
+          await mamApi.marcarLido(capitulo.id, true)
+        }
+
+        if (modo === 'vertical') {
+          const todas: PaginaExtraida[] = []
+          for (let i = 0; i < p1.total_paginas; i++) {
+            if (!ativo) return
+            const p = i === indiceAtual ? p1 : await mamApi.obterPagina(capitulo.caminho_relativo, i)
+            todas.push(p)
+          }
+          if (ativo) {
+            setPaginasLongStrip(todas)
+            setPaginaSecundaria(null)
+            await mamApi.marcarLido(capitulo.id, true)
+          }
+        } else if (modo === 'dupla' && indiceAtual + 1 < p1.total_paginas) {
+          setPaginasLongStrip([])
           const p2 = await mamApi.obterPagina(capitulo.caminho_relativo, indiceAtual + 1)
           if (ativo) setPaginaSecundaria(p2)
         } else {
+          setPaginasLongStrip([])
           setPaginaSecundaria(null)
         }
       } catch (e) {
@@ -377,59 +396,74 @@ export function CbzReader({
 
       <div
         className="mam-reader-viewport"
-        style={{ flexDirection: modo === 'vertical' ? 'column' : 'row' }}
+        style={{
+          flexDirection: modo === 'vertical' ? 'column' : 'row',
+          alignItems: modo === 'vertical' ? 'center' : 'center',
+          justifyContent: modo === 'vertical' ? 'flex-start' : 'center',
+        }}
       >
         {carregando && <p style={{ color: '#94a3b8' }}>Carregando página...</p>}
 
-        {paginaPrincipal && (
-          <div style={{ position: 'relative', display: 'inline-block' }}>
+        {modo === 'vertical' && paginasLongStrip.length > 0 ? (
+          paginasLongStrip.map((pag, idx) => (
             <img
-              src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
-              alt={paginaPrincipal.nome}
-              style={estiloImagem}
+              key={pag.nome + idx}
+              src={`data:${pag.mime_type};base64,${pag.dados_base64}`}
+              alt={pag.nome}
+              style={{ ...estiloImagem, maxWidth: '100%' }}
             />
-            {mostrarSobreposicao &&
-              resultadosIa
-                .filter((r) => r.pagina_numero === indiceAtual)
-                .flatMap((r) => {
-                  try {
-                    const parsed = JSON.parse(r.resultado_json) as {
-                      regioes?: Array<{
-                        bbox?: [number, number, number, number]
-                        texto_traduzido?: string
-                        texto_original?: string
-                      }>
+          ))
+        ) : (
+          paginaPrincipal && (
+            <div style={{ position: 'relative', display: 'inline-block' }}>
+              <img
+                src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
+                alt={paginaPrincipal.nome}
+                style={estiloImagem}
+              />
+              {mostrarSobreposicao &&
+                resultadosIa
+                  .filter((r) => r.pagina_numero === indiceAtual)
+                  .flatMap((r) => {
+                    try {
+                      const parsed = JSON.parse(r.resultado_json) as {
+                        regioes?: Array<{
+                          bbox?: [number, number, number, number]
+                          texto_traduzido?: string
+                          texto_original?: string
+                        }>
+                      }
+                      return parsed.regioes ?? []
+                    } catch {
+                      return []
                     }
-                    return parsed.regioes ?? []
-                  } catch {
-                    return []
-                  }
-                })
-                .map((reg, idx) => {
-                  const [x, y, w, h] = reg.bbox ?? [0, 0, 0.2, 0.1]
-                  return (
-                    <div
-                      key={idx}
-                      style={{
-                        position: 'absolute',
-                        left: `${x * 100}%`,
-                        top: `${y * 100}%`,
-                        width: `${w * 100}%`,
-                        height: `${h * 100}%`,
-                        background: 'rgba(255, 255, 255, 0.9)',
-                        color: '#0f172a',
-                        padding: '2px 4px',
-                        fontSize: '0.8rem',
-                        borderRadius: 4,
-                        boxSizing: 'border-box',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {reg.texto_traduzido || reg.texto_original || ''}
-                    </div>
-                  )
-                })}
-          </div>
+                  })
+                  .map((reg, idx) => {
+                    const [x, y, w, h] = reg.bbox ?? [0, 0, 0.2, 0.1]
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          position: 'absolute',
+                          left: `${x * 100}%`,
+                          top: `${y * 100}%`,
+                          width: `${w * 100}%`,
+                          height: `${h * 100}%`,
+                          background: 'rgba(255, 255, 255, 0.9)',
+                          color: '#0f172a',
+                          padding: '2px 4px',
+                          fontSize: '0.8rem',
+                          borderRadius: 4,
+                          boxSizing: 'border-box',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        {reg.texto_traduzido || reg.texto_original || ''}
+                      </div>
+                    )
+                  })}
+            </div>
+          )
         )}
 
         {modo === 'dupla' && paginaSecundaria && (

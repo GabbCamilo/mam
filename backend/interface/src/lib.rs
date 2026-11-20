@@ -622,6 +622,51 @@ pub async fn source_importar_extrator(
         .map_err(|e| e.to_string())
 }
 
+/// Exclui um capítulo arquivado do catálogo (e opcionalmente o arquivo `.cbz` se não houver outra referência).
+pub async fn library_excluir_capitulo(
+    db: Arc<Database>,
+    library_manager: Arc<LibraryManager>,
+    capitulo_id: String,
+    remover_arquivo: bool,
+) -> Result<(), String> {
+    let id = CapituloId::from_string(capitulo_id);
+    let caminho_orfao = db.excluir_capitulo(id).await.map_err(|e| e.to_string())?;
+    if remover_arquivo {
+        if let Some(rel) = caminho_orfao {
+            let abs = library_manager.raiz().join(rel);
+            if abs.exists() {
+                let _ = std::fs::remove_file(abs);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Marca ou desmarca um capítulo como lido na biblioteca.
+pub async fn reader_marcar_lido(
+    db: Arc<Database>,
+    capitulo_id: String,
+    lido: bool,
+) -> Result<(), String> {
+    let chave = format!("reader:lido:{}", capitulo_id);
+    db.salvar_configuracao(&chave, if lido { "true" } else { "false" })
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Lista os IDs de capítulos marcados como lidos.
+pub async fn reader_listar_lidos(db: Arc<Database>) -> Result<Vec<String>, String> {
+    let itens = db
+        .listar_configuracoes_por_prefixo("reader:lido:")
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(itens
+        .into_iter()
+        .filter(|(_, v)| v == "true")
+        .filter_map(|(k, _)| k.strip_prefix("reader:lido:").map(|s| s.to_string()))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

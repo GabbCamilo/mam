@@ -36,6 +36,9 @@ use mam_interface::{
     CachePaginas,
     source_listar_extratores as if_source_listar_extratores,
     source_importar_extrator as if_source_importar_extrator,
+    library_excluir_capitulo as if_library_excluir_capitulo,
+    reader_marcar_lido as if_reader_marcar_lido,
+    reader_listar_lidos as if_reader_listar_lidos,
 };
 use mam_source_integration::extractors::{EntradaImportacao, ExtratorInfo, ResultadoImportacao};
 use mam_storage::CacheL1Lru;
@@ -393,6 +396,38 @@ async fn source_importar_extrator(
     if_source_importar_extrator(db.inner().clone(), library_manager.inner().clone(), entrada).await
 }
 
+#[tauri::command]
+async fn library_excluir_capitulo(
+    db: tauri::State<'_, Arc<Database>>,
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    capitulo_id: String,
+    remover_arquivo: bool,
+) -> Result<(), String> {
+    if_library_excluir_capitulo(
+        db.inner().clone(),
+        library_manager.inner().clone(),
+        capitulo_id,
+        remover_arquivo,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn reader_marcar_lido(
+    db: tauri::State<'_, Arc<Database>>,
+    capitulo_id: String,
+    lido: bool,
+) -> Result<(), String> {
+    if_reader_marcar_lido(db.inner().clone(), capitulo_id, lido).await
+}
+
+#[tauri::command]
+async fn reader_listar_lidos(
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<Vec<String>, String> {
+    if_reader_listar_lidos(db.inner().clone()).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -435,6 +470,9 @@ pub fn run() {
       ai_processar_e_salvar_pagina,
       source_listar_extratores,
       source_importar_extrator,
+      library_excluir_capitulo,
+      reader_marcar_lido,
+      reader_listar_lidos,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

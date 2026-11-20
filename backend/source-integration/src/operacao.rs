@@ -139,6 +139,7 @@ mod tests {
                     numero: Some(1),
                     titulo: Some("Cap 1".to_string()),
                     url: None,
+                    idioma: None,
                 },
                 crate::CapituloBuscaResultado {
                     fonte_id: "f1".to_string(),
@@ -147,6 +148,7 @@ mod tests {
                     numero: Some(2),
                     titulo: Some("Cap 2".to_string()),
                     url: None,
+                    idioma: None,
                 },
             ],
         );

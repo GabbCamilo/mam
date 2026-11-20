@@ -56,6 +56,8 @@ pub struct ObraBuscaResultado {
     pub titulo: String,
     pub autor: Option<String>,
     pub descricao: Option<String>,
+    #[serde(default)]
+    pub capa_url: Option<String>,
 }
 
 /// Resultado de listagem de capítulos em uma fonte.
@@ -67,6 +69,8 @@ pub struct CapituloBuscaResultado {
     pub numero: Option<i32>,
     pub titulo: Option<String>,
     pub url: Option<String>,
+    #[serde(default)]
+    pub idioma: Option<String>,
 }
 
 /// Gerenciador de integração com fontes.
@@ -134,6 +138,7 @@ impl SourceIntegrationManager {
                             titulo: obra.titulo,
                             autor: obra.autor,
                             descricao: obra.descricao,
+                            capa_url: obra.capa_url,
                         });
                     }
                 }
@@ -173,6 +178,7 @@ impl SourceIntegrationManager {
                 numero: c.numero,
                 titulo: c.titulo,
                 url: c.url,
+                idioma: c.idioma,
             })
             .collect())
     }
@@ -457,6 +463,7 @@ mod tests {
             numero: Some(1),
             titulo: Some("Capítulo 1".to_string()),
             url: None,
+            idioma: Some("PT".to_string()),
         }];
 
         let op_id = sm

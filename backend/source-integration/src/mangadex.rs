@@ -41,6 +41,22 @@ struct ListaResponse<T> {
 struct MangaItem {
     id: String,
     attributes: MangaAttrs,
+    #[serde(default)]
+    relationships: Vec<RelationshipItem>,
+}
+
+#[derive(Deserialize)]
+struct RelationshipItem {
+    #[serde(rename = "type")]
+    rel_type: String,
+    #[serde(default)]
+    attributes: Option<CoverAttrs>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CoverAttrs {
+    file_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -57,9 +73,11 @@ struct FeedItem {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct FeedAttrs {
     chapter: Option<String>,
     title: Option<String>,
+    translated_language: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -100,7 +118,7 @@ impl Fonte for MangaDexFonte {
         let resp = self
             .client
             .get(format!("{}/manga", API_BASE))
-            .query(&[("title", consulta), ("limit", "15")])
+            .query(&[("title", consulta), ("limit", "15"), ("includes[]", "cover_art")])
             .send()
             .await
             .map_err(|e| FonteError::Rede(e.to_string()))?;
@@ -117,11 +135,23 @@ impl Fonte for MangaDexFonte {
         Ok(body
             .data
             .into_iter()
-            .map(|m| ObraEncontrada {
-                obra_id_fonte: m.id,
-                titulo: escolher_texto(&m.attributes.title).unwrap_or_else(|| "Sem título".to_string()),
-                autor: None,
-                descricao: escolher_texto(&m.attributes.description),
+            .map(|m| {
+                let capa_url = m
+                    .relationships
+                    .iter()
+                    .find(|r| r.rel_type == "cover_art")
+                    .and_then(|r| r.attributes.as_ref())
+                    .and_then(|a| a.file_name.as_ref())
+                    .map(|fname| {
+                        format!("https://uploads.mangadex.org/covers/{}/{}.256.jpg", m.id, fname)
+                    });
+                ObraEncontrada {
+                    obra_id_fonte: m.id,
+                    titulo: escolher_texto(&m.attributes.title).unwrap_or_else(|| "Sem título".to_string()),
+                    autor: None,
+                    descricao: escolher_texto(&m.attributes.description),
+                    capa_url,
+                }
             })
             .collect())
     }
@@ -162,11 +192,20 @@ impl Fonte for MangaDexFonte {
                     .as_deref()
                     .and_then(|s| s.parse::<f32>().ok())
                     .map(|n| n.round() as i32);
+                let idioma = c.attributes.translated_language.as_deref().map(|lang| {
+                    match lang.to_lowercase().as_str() {
+                        "en" => "ENG".to_string(),
+                        "pt-br" | "pt" => "PT".to_string(),
+                        "ja" | "jp" => "JPN".to_string(),
+                        outro => outro.to_uppercase(),
+                    }
+                });
                 CapituloEncontrado {
                     capitulo_id_fonte: c.id.clone(),
                     numero: num,
                     titulo: c.attributes.title,
                     url: Some(format!("https://mangadex.org/chapter/{}", c.id)),
+                    idioma,
                 }
             })
             .collect())

@@ -459,6 +459,36 @@ impl Database {
         )?;
         Ok(())
     }
+
+    /// Exclui um capítulo do catálogo e retorna o caminho relativo caso nenhum outro capítulo o referencie.
+    pub async fn excluir_capitulo(&self, capitulo_id: CapituloId) -> DbResult<Option<String>> {
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction()?;
+        let caminho: Option<String> = {
+            let mut stmt = tx.prepare("SELECT caminho_relativo FROM capitulos WHERE id = ?1")?;
+            let mut rows = stmt.query_map(params![capitulo_id.to_string()], |row| row.get(0))?;
+            rows.next().transpose()?
+        };
+
+        tx.execute(
+            "DELETE FROM capitulos WHERE id = ?1",
+            params![capitulo_id.to_string()],
+        )?;
+
+        let pode_remover_arquivo = if let Some(ref rel) = caminho {
+            let restantes: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM capitulos WHERE caminho_relativo = ?1",
+                params![rel],
+                |row| row.get(0),
+            )?;
+            restantes == 0
+        } else {
+            false
+        };
+
+        tx.commit()?;
+        Ok(if pode_remover_arquivo { caminho } else { None })
+    }
 }
 
 #[cfg(test)]

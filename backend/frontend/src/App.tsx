@@ -9,6 +9,7 @@ import {
   ModeloInfo,
   Obra,
   ObraBuscaResultado,
+  PaginaExtraida,
   RelatorioTransferencia,
   ResultadoImportacao,
   StatusOperacao,
@@ -29,6 +30,8 @@ function App() {
   const [buscaCapitulo, setBuscaCapitulo] = useState('')
   const [ordemCaps, setOrdemCaps] = useState<'desc' | 'asc'>('desc')
   const [detalhes, setDetalhes] = useState<DetalhesObra | null>(null)
+  const [capaBiblioteca, setCapaBiblioteca] = useState<PaginaExtraida | null>(null)
+  const [capitulosLidos, setCapitulosLidos] = useState<string[]>([])
   const [capituloAtivo, setCapituloAtivo] = useState<Capitulo | null>(null)
   const [tituloNovaObra, setTituloNovaObra] = useState('')
   const [caminhoNovaObra, setCaminhoNovaObra] = useState('')
@@ -50,6 +53,8 @@ function App() {
   const [capitulosFonte, setCapitulosFonte] = useState<CapituloBuscaResultado[]>([])
   const [selecionadosIds, setSelecionadosIds] = useState<string[]>([])
   const [statusArquivamento, setStatusArquivamento] = useState<StatusOperacao | null>(null)
+
+  const [modalImportarUrlAberto, setModalImportarUrlAberto] = useState(false)
   const [extratores, setExtratores] = useState<ExtratorInfo[]>([])
   const [extObraTitulo, setExtObraTitulo] = useState('')
   const [extNumeroCap, setExtNumeroCap] = useState('1')
@@ -64,9 +69,14 @@ function App() {
 
   async function carregarObras() {
     try {
-      const [lista, raiz] = await Promise.all([mamApi.listarObras(), mamApi.libraryRaiz()])
+      const [lista, raiz, lidos] = await Promise.all([
+        mamApi.listarObras(),
+        mamApi.libraryRaiz(),
+        mamApi.listarLidos(),
+      ])
       setObras(lista)
       setRaizBiblioteca(raiz)
+      setCapitulosLidos(lidos)
     } catch (e) {
       setMensagem(`Erro ao listar obras: ${String(e)}`)
     }
@@ -101,12 +111,55 @@ function App() {
   }
 
   async function handleSelecionarObra(obraId: string) {
+    if (detalhes?.obra.id === obraId) {
+      setDetalhes(null)
+      setCapaBiblioteca(null)
+      return
+    }
     try {
       const d = await mamApi.obterDetalhesObra(obraId)
       setDetalhes(d)
       setCapituloAtivo(null)
+      const primeiroCap = d.volumes[0]?.capitulos[0] ?? d.capitulos_avulsos[0] ?? null
+      if (primeiroCap) {
+        try {
+          const capa = await mamApi.obterPagina(primeiroCap.caminho_relativo, 0)
+          setCapaBiblioteca(capa)
+        } catch {
+          setCapaBiblioteca(null)
+        }
+      } else {
+        setCapaBiblioteca(null)
+      }
     } catch (err) {
       setMensagem(`Erro ao carregar detalhes: ${String(err)}`)
+    }
+  }
+
+  async function handleExcluirCapitulo(e: React.MouseEvent, capId: string) {
+    e.stopPropagation()
+    try {
+      await mamApi.excluirCapitulo(capId, true)
+      setMensagem('Capítulo excluído da biblioteca.')
+      if (detalhes) {
+        const d = await mamApi.obterDetalhesObra(detalhes.obra.id)
+        setDetalhes(d)
+      }
+      await carregarObras()
+    } catch (err) {
+      setMensagem(`Erro ao excluir capítulo: ${String(err)}`)
+    }
+  }
+
+  async function handleAlternarLido(e: React.MouseEvent, capId: string) {
+    e.stopPropagation()
+    const jaLido = capitulosLidos.includes(capId)
+    try {
+      await mamApi.marcarLido(capId, !jaLido)
+      const atualizados = await mamApi.listarLidos()
+      setCapitulosLidos(atualizados)
+    } catch (err) {
+      setMensagem(`Erro ao atualizar leitura: ${String(err)}`)
     }
   }
 
@@ -219,6 +272,12 @@ function App() {
   }
 
   async function handleSelecionarObraFonte(obra: ObraBuscaResultado) {
+    if (obraFonteSelecionada?.obra_id_fonte === obra.obra_id_fonte) {
+      setObraFonteSelecionada(null)
+      setCapitulosFonte([])
+      setSelecionadosIds([])
+      return
+    }
     setObraFonteSelecionada(obra)
     setSelecionadosIds([])
     try {
@@ -233,6 +292,14 @@ function App() {
     setSelecionadosIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
     )
+  }
+
+  function alternarSelecionarTodosCapitulos() {
+    if (selecionadosIds.length === capitulosFonte.length) {
+      setSelecionadosIds([])
+    } else {
+      setSelecionadosIds(capitulosFonte.map((c) => c.capitulo_id_fonte))
+    }
   }
 
   async function handleArquivarSelecionados() {
@@ -275,7 +342,10 @@ function App() {
         capitulosDisponiveis={todosCapitulosObra}
         volumesDisponiveis={detalhes?.volumes ?? []}
         onSelecionarCapitulo={setCapituloAtivo}
-        onFechar={() => setCapituloAtivo(null)}
+        onFechar={async () => {
+          setCapituloAtivo(null)
+          await carregarObras()
+        }}
       />
     )
   }
@@ -304,8 +374,8 @@ function App() {
         <button
           className="mam-btn mam-btn-primary"
           onClick={() => {
-            setAbaAtiva('fontes')
             handleCarregarFontes()
+            setModalImportarUrlAberto(true)
           }}
         >
           + Importar URL
@@ -416,9 +486,24 @@ function App() {
                 {detalhes ? (
                   <>
                     <div className="mam-section-header">
-                      <div>
-                        <h2 className="mam-section-title">{detalhes.obra.titulo}</h2>
-                        <p className="mam-section-desc">{detalhes.obra.caminho_relativo}</p>
+                      <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'center' }}>
+                        {capaBiblioteca && (
+                          <img
+                            src={`data:${capaBiblioteca.mime_type};base64,${capaBiblioteca.dados_base64}`}
+                            alt={detalhes.obra.titulo}
+                            style={{
+                              width: 56,
+                              height: 78,
+                              objectFit: 'cover',
+                              borderRadius: 8,
+                              border: '1px solid var(--border-subtle)',
+                            }}
+                          />
+                        )}
+                        <div>
+                          <h2 className="mam-section-title">{detalhes.obra.titulo}</h2>
+                          <p className="mam-section-desc">{detalhes.obra.caminho_relativo}</p>
+                        </div>
                       </div>
                       <div className="mam-segmented">
                         <button
@@ -456,28 +541,51 @@ function App() {
                         {capitulosFiltrados.length === 0 ? (
                           <p className="mam-section-desc">Nenhum capítulo cadastrado nesta obra.</p>
                         ) : (
-                          capitulosFiltrados.map((cap) => (
-                            <div
-                              key={cap.id}
-                              className="mam-row-card"
-                              onClick={() => setCapituloAtivo(cap)}
-                            >
-                              <div>
-                                <strong>Cap. {cap.numero}</strong>
-                                {cap.titulo_original && (
-                                  <span style={{ color: 'var(--text-secondary)' }}>
-                                    {' '}
-                                    • {cap.titulo_original}
-                                  </span>
-                                )}
-                                <div className="mam-brand-sub">{cap.caminho_relativo}</div>
+                          capitulosFiltrados.map((cap) => {
+                            const lido = capitulosLidos.includes(cap.id)
+                            return (
+                              <div
+                                key={cap.id}
+                                className="mam-row-card"
+                                onClick={() => setCapituloAtivo(cap)}
+                              >
+                                <div>
+                                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <strong>Cap. {cap.numero}</strong>
+                                    {cap.titulo_original && (
+                                      <span style={{ color: 'var(--text-secondary)' }}>
+                                        • {cap.titulo_original}
+                                      </span>
+                                    )}
+                                    <button
+                                      className={`mam-pill-badge ${lido ? '' : ''}`}
+                                      style={{
+                                        cursor: 'pointer',
+                                        background: lido ? 'rgba(34, 197, 94, 0.16)' : 'rgba(148, 163, 184, 0.12)',
+                                        color: lido ? 'var(--success)' : 'var(--text-secondary)',
+                                        borderColor: lido ? 'rgba(34, 197, 94, 0.35)' : 'var(--border-subtle)',
+                                      }}
+                                      onClick={(e) => handleAlternarLido(e, cap.id)}
+                                    >
+                                      {lido ? '✓ Lido' : '○ Não lido'}
+                                    </button>
+                                  </div>
+                                  <div className="mam-brand-sub">{cap.caminho_relativo}</div>
+                                </div>
+                                <div className="mam-toolbar-row">
+                                  <span className="mam-pill-badge">{cap.quantidade_paginas} págs</span>
+                                  <button
+                                    className="mam-btn"
+                                    onClick={(e) => handleExcluirCapitulo(e, cap.id)}
+                                    title="Excluir capítulo arquivado"
+                                  >
+                                    🗑
+                                  </button>
+                                  <button className="mam-btn mam-btn-primary">Ler</button>
+                                </div>
                               </div>
-                              <div className="mam-toolbar-row">
-                                <span className="mam-pill-badge">{cap.quantidade_paginas} págs</span>
-                                <button className="mam-btn mam-btn-primary">Ler</button>
-                              </div>
-                            </div>
-                          ))
+                            )
+                          })
                         )}
                       </>
                     ) : (
@@ -497,7 +605,15 @@ function App() {
                                 <span>
                                   Cap. {cap.numero} ({cap.quantidade_paginas} págs)
                                 </span>
-                                <button className="mam-btn mam-btn-primary">Ler</button>
+                                <div className="mam-toolbar-row">
+                                  <button
+                                    className="mam-btn"
+                                    onClick={(e) => handleExcluirCapitulo(e, cap.id)}
+                                  >
+                                    🗑
+                                  </button>
+                                  <button className="mam-btn mam-btn-primary">Ler</button>
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -530,6 +646,12 @@ function App() {
                   {extratores.map((e) => e.id).join(', ') || '...'}
                 </p>
               </div>
+              <button
+                className="mam-btn mam-btn-primary"
+                onClick={() => setModalImportarUrlAberto(true)}
+              >
+                + Importar por Link / HTML
+              </button>
             </div>
 
             <form onSubmit={handleBuscarNaFonte} className="mam-panel">
@@ -555,7 +677,16 @@ function App() {
                     className={`mam-row-card ${obraFonteSelecionada?.obra_id_fonte === o.obra_id_fonte ? 'mam-row-card-active' : ''}`}
                     onClick={() => handleSelecionarObraFonte(o)}
                   >
-                    <span>{o.titulo}</span>
+                    <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center' }}>
+                      {o.capa_url && (
+                        <img
+                          src={o.capa_url}
+                          alt={o.titulo}
+                          style={{ width: 38, height: 54, objectFit: 'cover', borderRadius: 6 }}
+                        />
+                      )}
+                      <span>{o.titulo}</span>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -564,14 +695,30 @@ function App() {
                 {obraFonteSelecionada ? (
                   <>
                     <div className="mam-section-header">
-                      <strong>{obraFonteSelecionada.titulo}</strong>
-                      <button
-                        className="mam-btn mam-btn-primary"
-                        onClick={handleArquivarSelecionados}
-                        disabled={selecionadosIds.length === 0}
-                      >
-                        Arquivar Selecionados ({selecionadosIds.length})
-                      </button>
+                      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                        {obraFonteSelecionada.capa_url && (
+                          <img
+                            src={obraFonteSelecionada.capa_url}
+                            alt={obraFonteSelecionada.titulo}
+                            style={{ width: 48, height: 68, objectFit: 'cover', borderRadius: 8 }}
+                          />
+                        )}
+                        <strong>{obraFonteSelecionada.titulo}</strong>
+                      </div>
+                      <div className="mam-toolbar-row">
+                        <button className="mam-btn" onClick={alternarSelecionarTodosCapitulos}>
+                          {selecionadosIds.length === capitulosFonte.length && capitulosFonte.length > 0
+                            ? 'Desmarcar Todas'
+                            : 'Selecionar Todas'}
+                        </button>
+                        <button
+                          className="mam-btn mam-btn-primary"
+                          onClick={handleArquivarSelecionados}
+                          disabled={selecionadosIds.length === 0}
+                        >
+                          Arquivar Selecionados ({selecionadosIds.length})
+                        </button>
+                      </div>
                     </div>
                     {statusArquivamento && (
                       <div className="mam-alert">
@@ -587,66 +734,21 @@ function App() {
                             checked={selecionadosIds.includes(c.capitulo_id_fonte)}
                             onChange={() => alternarCapituloSelecionado(c.capitulo_id_fonte)}
                           />
-                          Cap. {c.numero ?? '?'} {c.titulo ? `— ${c.titulo}` : ''}
+                          {c.idioma && <span className="mam-pill-badge">{c.idioma}</span>}
+                          <span>
+                            Cap. {c.numero ?? '?'} {c.titulo ? `— ${c.titulo}` : ''}
+                          </span>
                         </span>
                       </label>
                     ))}
                   </>
                 ) : (
                   <p className="mam-section-desc">
-                    Pesquise e selecione uma obra para listar os capítulos disponíveis.
+                    Pesquise e selecione uma obra para listar os capítulos disponíveis (clique novamente na obra para recolher).
                   </p>
                 )}
               </div>
             </div>
-
-            <form onSubmit={handleImportarExtrator} className="mam-panel">
-              <strong>Importar por Link Direto / HTML / Lista Ordenada (Extratores Modulares)</strong>
-              <div className="mam-toolbar-row">
-                <input
-                  className="mam-input mam-search-input"
-                  placeholder="Título da obra (ex: Medaka Box)"
-                  value={extObraTitulo}
-                  onChange={(e) => setExtObraTitulo(e.target.value)}
-                />
-                <input
-                  className="mam-input"
-                  type="number"
-                  placeholder="Cap."
-                  value={extNumeroCap}
-                  onChange={(e) => setExtNumeroCap(e.target.value)}
-                  style={{ width: 90 }}
-                />
-                <input
-                  className="mam-input mam-search-input"
-                  placeholder="Link (mangadex.org/chapter/..., mangafire.to/...)"
-                  value={extUrl}
-                  onChange={(e) => setExtUrl(e.target.value)}
-                />
-              </div>
-              <textarea
-                className="mam-textarea"
-                placeholder="Lista ordenada de URLs de páginas (uma por linha, opcional)"
-                value={extUrlsTexto}
-                onChange={(e) => setExtUrlsTexto(e.target.value)}
-                rows={3}
-              />
-              <textarea
-                className="mam-textarea"
-                placeholder="HTML da página do capítulo (opcional — útil para MangaFire/sites dinâmicos)"
-                value={extHtml}
-                onChange={(e) => setExtHtml(e.target.value)}
-                rows={3}
-              />
-              <div>
-                <button className="mam-btn mam-btn-primary" type="submit">
-                  Importar e Gerar CBZ na Biblioteca
-                </button>
-              </div>
-              {resultadoImportacao && (
-                <pre className="mam-pre">{JSON.stringify(resultadoImportacao, null, 2)}</pre>
-              )}
-            </form>
           </>
         )}
 
@@ -720,6 +822,83 @@ function App() {
           </section>
         )}
       </main>
+
+      {/* Modal flutuante de Importação por Link Direto / HTML / Lista Ordenada */}
+      {modalImportarUrlAberto && (
+        <div className="mam-modal-backdrop" onClick={() => setModalImportarUrlAberto(false)}>
+          <form
+            className="mam-modal"
+            style={{ maxWidth: 620 }}
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleImportarExtrator}
+          >
+            <div className="mam-modal-header">
+              <strong>Importar por Link Direto / HTML / Lista Ordenada</strong>
+              <button
+                type="button"
+                className="mam-btn"
+                onClick={() => setModalImportarUrlAberto(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <p className="mam-section-desc">
+              Extratores ativos: {extratores.map((e) => e.id).join(', ') || 'mangadex, mangafire, generico'}
+            </p>
+            <div className="mam-toolbar-row">
+              <input
+                className="mam-input mam-search-input"
+                placeholder="Título da obra (ex: Medaka Box)"
+                value={extObraTitulo}
+                onChange={(e) => setExtObraTitulo(e.target.value)}
+              />
+              <input
+                className="mam-input"
+                type="number"
+                placeholder="Cap."
+                value={extNumeroCap}
+                onChange={(e) => setExtNumeroCap(e.target.value)}
+                style={{ width: 90 }}
+              />
+            </div>
+            <input
+              className="mam-input"
+              placeholder="Link (mangadex.org/chapter/..., mangafire.to/...)"
+              value={extUrl}
+              onChange={(e) => setExtUrl(e.target.value)}
+            />
+            <textarea
+              className="mam-textarea"
+              placeholder="Lista ordenada de URLs de páginas (uma por linha, opcional)"
+              value={extUrlsTexto}
+              onChange={(e) => setExtUrlsTexto(e.target.value)}
+              rows={3}
+            />
+            <textarea
+              className="mam-textarea"
+              placeholder="HTML da página do capítulo (opcional — útil para MangaFire/sites dinâmicos)"
+              value={extHtml}
+              onChange={(e) => setExtHtml(e.target.value)}
+              rows={3}
+            />
+            <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="mam-btn"
+                onClick={() => setModalImportarUrlAberto(false)}
+              >
+                Fechar
+              </button>
+              <button className="mam-btn mam-btn-primary" type="submit">
+                Importar e Gerar CBZ
+              </button>
+            </div>
+            {resultadoImportacao && (
+              <pre className="mam-pre">{JSON.stringify(resultadoImportacao, null, 2)}</pre>
+            )}
+          </form>
+        </div>
+      )}
 
       <footer className="mam-statusbar">
         <span>MAM v0.1.0 • Portátil</span>

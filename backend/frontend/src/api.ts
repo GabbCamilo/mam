@@ -87,6 +87,7 @@ export interface ObraBuscaResultado {
   titulo: string
   autor?: string | null
   descricao?: string | null
+  capa_url?: string | null
 }
 
 export interface CapituloBuscaResultado {
@@ -96,6 +97,7 @@ export interface CapituloBuscaResultado {
   numero?: number | null
   titulo?: string | null
   url?: string | null
+  idioma?: string | null
 }
 
 export interface StatusOperacao {
@@ -221,4 +223,9 @@ export const mamApi = {
   sourceListarExtratores: () => invoke<ExtratorInfo[]>('source_listar_extratores'),
   sourceImportarExtrator: (entrada: EntradaImportacao) =>
     invoke<ResultadoImportacao>('source_importar_extrator', { entrada }),
+  excluirCapitulo: (capituloId: string, removerArquivo: boolean) =>
+    invoke<void>('library_excluir_capitulo', { capituloId, removerArquivo }),
+  marcarLido: (capituloId: string, lido: boolean) =>
+    invoke<void>('reader_marcar_lido', { capituloId, lido }),
+  listarLidos: () => invoke<string[]>('reader_listar_lidos'),
 }

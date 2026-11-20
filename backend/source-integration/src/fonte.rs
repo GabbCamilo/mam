@@ -29,6 +29,8 @@ pub struct ObraEncontrada {
     pub titulo: String,
     pub autor: Option<String>,
     pub descricao: Option<String>,
+    #[serde(default)]
+    pub capa_url: Option<String>,
 }
 
 /// Capítulo encontrado em uma fonte externa.
@@ -38,6 +40,8 @@ pub struct CapituloEncontrado {
     pub numero: Option<i32>,
     pub titulo: Option<String>,
     pub url: Option<String>,
+    #[serde(default)]
+    pub idioma: Option<String>,
 }
 
 /// Informação de uma fonte cadastrada.
@@ -162,6 +166,7 @@ mod tests {
                 titulo: consulta.to_string(),
                 autor: Some("Autor Teste".to_string()),
                 descricao: Some("Descrição de teste".to_string()),
+                capa_url: None,
             }])
         }
 
@@ -178,12 +183,14 @@ mod tests {
                     numero: Some(1),
                     titulo: Some("Capítulo 1".to_string()),
                     url: Some("https://exemplo.com/cap1".to_string()),
+                    idioma: Some("PT".to_string()),
                 },
                 CapituloEncontrado {
                     capitulo_id_fonte: "cap-2".to_string(),
                     numero: Some(2),
                     titulo: Some("Capítulo 2".to_string()),
                     url: Some("https://exemplo.com/cap2".to_string()),
+                    idioma: Some("ENG".to_string()),
                 },
             ])
         }

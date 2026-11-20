@@ -37,6 +37,7 @@ impl SourceIntegrationManager {
                 titulo: obra.titulo,
                 autor: obra.autor,
                 descricao: obra.descricao,
+                capa_url: obra.capa_url,
             })
             .collect())
     }
