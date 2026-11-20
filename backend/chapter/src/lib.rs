@@ -14,7 +14,6 @@ use mam_database::Database;
 use crate::detector::detectar_cbzs;
 use crate::parser::extrair_paginas;
 use crate::integrity::calcular_sha256;
-use crate::operations::registrar_capitulo_detectado;
 
 use serde::{Deserialize, Serialize};
 

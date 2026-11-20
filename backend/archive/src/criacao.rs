@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::fs::File;
-use std::io::{BufReader, Read, Write};
+use std::io::{Read, Write};
 use zip::ZipWriter;
 use zip::write::FileOptions;
 
@@ -13,7 +13,7 @@ use super::ArchiveError;
 /// O arquivo é escrito no caminho `destino` (deve ser um arquivo temporário;
 /// o rename atômico é feito pelo chamador).
 pub fn criar_cbz(
-    imagens_dir: &Path,
+    _imagens_dir: &Path,
     imagens: &[PathBuf],
     destino: &Path,
 ) -> Result<(usize, u64), ArchiveError> {

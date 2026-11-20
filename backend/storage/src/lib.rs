@@ -42,7 +42,7 @@ impl StorageManager {
     pub fn identificar_biblioteca(raiz: &Path) -> Result<BibliotecaMam, StorageError> {
         let sistema_dir = raiz.join("System");
         let caminho_banco = sistema_dir.join("database.db");
-        let caminho_config = sistema_dir.join("library_config.json");
+        let _caminho_config = sistema_dir.join("library_config.json");
 
         if !caminho_banco.exists() {
             return Err(StorageError::BibliotecaNaoEncontrada(raiz.to_path_buf()));

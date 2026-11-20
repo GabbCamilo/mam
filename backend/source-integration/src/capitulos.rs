@@ -1,6 +1,6 @@
 //! Listagem de capítulos de uma obra em uma fonte.
 
-use super::{SourceError, SourceIntegrationManager, CapituloBuscaResultado};
+use super::{SourceError, SourceIntegrationManager};
 
 impl SourceIntegrationManager {
     /// Lista capítulos de uma obra em uma fonte específica,

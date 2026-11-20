@@ -2,11 +2,6 @@
 //! Detecta arquivos corrompidos e páginas ausentes.
 
 use std::path::Path;
-use std::fs::File;
-use std::io::BufReader;
-use zip::ZipArchive;
-use zip::write::ZipWriter;
-use zip::write::FileOptions;
 
 use super::ArchiveError;
 
@@ -48,7 +43,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::io::Write;
-    use zip::write::FileOptions;
+    use zip::write::{FileOptions, ZipWriter};
 
     #[test]
     fn validar_cbz_valido() {

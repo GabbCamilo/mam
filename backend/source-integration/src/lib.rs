@@ -12,9 +12,6 @@ use tokio::sync::RwLock;
 
 use mam_database::Database;
 
-use crate::fonte::{ObraEncontrada, CapituloEncontrado};
-use crate::operacao::OperacaoArquivamento;
-use crate::duplicatas::EstatisticasDuplicatas;
 
 use serde::{Deserialize, Serialize};
 
@@ -254,7 +251,7 @@ impl SourceIntegrationManager {
     pub async fn arquivar_capitulo(
         &self,
         id_operacao: &str,
-        fonte_id: &str,
+        _fonte_id: &str,
         capitulo: &CapituloBuscaResultado,
     ) -> Result<(), SourceError> {
         let mut operacoes = self.operacoes.write().await;
@@ -426,6 +423,7 @@ mod tests {
     #[tokio::test]
     async fn arquivar_para_biblioteca_grava_cbz_e_sha256() {
         use std::io::Write;
+        use crate::fonte::{CapituloEncontrado, ObraEncontrada};
         struct FonteMock;
         #[async_trait::async_trait]
         impl Fonte for FonteMock {

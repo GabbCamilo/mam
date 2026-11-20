@@ -9,7 +9,7 @@
 //! O macro #[command] é aplicado no src-tauri via wrappers.
 
 use std::sync::Arc;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use mam_database::Database;
 use mam_chapter::ChapterManager;

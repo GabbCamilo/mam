@@ -5,10 +5,9 @@
 //! Nunca modifica arquivos CBZ originais (leitura apenas para validação).
 //! Geração utiliza arquivos temporários e operações de escrita seguras.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
-use mam_core::CaminhoRelativo;
 use mam_database::Database;
 
 use crate::criacao::criar_cbz;

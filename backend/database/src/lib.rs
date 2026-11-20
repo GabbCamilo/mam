@@ -14,8 +14,6 @@ mod migrations;
 pub mod models;
 mod operations;
 
-use crate::models::*;
-use crate::schema::SCHEMA_SQL;
 use crate::migrations::run_migrations;
 
 use mam_core::CaminhoRelativo;

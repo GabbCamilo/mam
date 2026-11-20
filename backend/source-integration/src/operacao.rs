@@ -3,7 +3,6 @@
 //! acompanhar o progresso do arquivamento de capítulos.
 
 use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 
 use super::CapituloBuscaResultado;
 

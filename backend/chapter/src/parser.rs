@@ -4,7 +4,6 @@
 
 use std::path::Path;
 use zip::ZipArchive;
-use zip::write::FileOptions;
 use std::fs::File;
 use std::io::BufReader;
 

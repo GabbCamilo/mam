@@ -3,7 +3,6 @@
 //! no banco de dados local para evitar downloads desnecessários.
 
 use super::SourceIntegrationManager;
-use mam_core::CaminhoRelativo;
 
 impl SourceIntegrationManager {
     /// Verifica se uma obra já está arquivada por título.
@@ -87,6 +86,7 @@ pub struct EstatisticasDuplicatas {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mam_core::CaminhoRelativo;
     use mam_database::Database;
     use std::sync::Arc;
     use std::env;

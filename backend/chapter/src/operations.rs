@@ -14,7 +14,7 @@ pub async fn registrar_capitulo_detectado(
     detectado: &CapituloDetectado,
 ) -> Result<(), ChapterError> {
     // Verificar se a obra já existe por título
-    let obra_id = match db.buscar_obra_por_titulo(&detectado.obra_titulo).await? {
+    let _obra_id = match db.buscar_obra_por_titulo(&detectado.obra_titulo).await? {
         Some(obra) => obra.id,
         None => {
             let id = mam_core::ObraId::new();
