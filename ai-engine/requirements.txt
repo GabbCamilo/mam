@@ -1,0 +1,4 @@
+# Dependências do runtime Python do Manga AI Engine
+# ONNX Runtime é prioritário; PyTorch é complementar e opcional.
+onnxruntime>=1.18.0
+pillow>=10.0.0
