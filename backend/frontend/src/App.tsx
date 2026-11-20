@@ -74,7 +74,6 @@ function App() {
   const [capitulosFonte, setCapitulosFonte] = useState<CapituloBuscaResultado[]>([])
   const [filtroIdiomaFonte, setFiltroIdiomaFonte] = useState<string>('TODOS')
   const [selecionadosIds, setSelecionadosIds] = useState<string[]>([])
-  const [statusArquivamento, setStatusArquivamento] = useState<StatusOperacao | null>(null)
   const [operacoesDownload, setOperacoesDownload] = useState<StatusOperacao[]>([])
   const [popupDownload, setPopupDownload] = useState<{ obra: string; total: number } | null>(null)
   const [downloadsLog, setDownloadsLog] = useState<DownloadLogItem[]>([])
@@ -294,7 +293,6 @@ function App() {
       setObraFonteSelecionada(null)
       setCapitulosFonte([])
       setSelecionadosIds([])
-      setMensagem(`${res.length} obra(s) encontrada(s).`)
 
       // Carrega capas em segundo plano pelo backend Rust (evita bloqueio de Referer/CSP)
       for (const item of res) {
@@ -422,7 +420,7 @@ function App() {
     if (!obraFonteSelecionada || selecionadosIds.length === 0) return
     const escolhidos = capitulosFonte.filter((c) => selecionadosIds.includes(c.capitulo_id_fonte))
     try {
-      const opId = await mamApi.sourceIniciarArquivamento(
+      await mamApi.sourceIniciarArquivamento(
         obraFonteSelecionada.titulo,
         escolhidos,
         obraFonteSelecionada.capa_url ?? null,
@@ -431,11 +429,7 @@ function App() {
         obra: obraFonteSelecionada.titulo,
         total: escolhidos.length,
       })
-      const [status, ops] = await Promise.all([
-        mamApi.sourceStatusOperacao(opId),
-        mamApi.sourceListarOperacoes(),
-      ])
-      setStatusArquivamento(status)
+      const ops = await mamApi.sourceListarOperacoes()
       setOperacoesDownload(ops)
     } catch (err) {
       setMensagem(`Erro ao arquivar capítulos: ${String(err)}`)
@@ -1001,12 +995,6 @@ function App() {
                         </button>
                       </div>
                     </div>
-                    {statusArquivamento && (
-                      <div className="mam-alert">
-                        Progresso: {statusArquivamento.capitulos_processados}/
-                        {statusArquivamento.total_capitulos} ({statusArquivamento.percentual}%)
-                      </div>
-                    )}
                     {capitulosFonteFiltrados.map((c) => (
                       <label key={c.capitulo_id_fonte} className="mam-row-card">
                         <span style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
