@@ -77,7 +77,12 @@ function App() {
   const [operacoesDownload, setOperacoesDownload] = useState<StatusOperacao[]>([])
   const [popupDownload, setPopupDownload] = useState<{ obra: string; total: number } | null>(null)
   const [downloadsLog, setDownloadsLog] = useState<DownloadLogItem[]>([])
+  const [exclusoesLog, setExclusoesLog] = useState<DownloadLogItem[]>([])
+  const [subAbaLogs, setSubAbaLogs] = useState<'downloads' | 'exclusoes'>('downloads')
   const [gruposLogAbertos, setGruposLogAbertos] = useState<Record<string, boolean>>({})
+  const [volNumero, setVolNumero] = useState('1')
+  const [volTitulo, setVolTitulo] = useState('')
+  const [volCapitulosIds, setVolCapitulosIds] = useState<string[]>([])
 
   const [modalImportarUrlAberto, setModalImportarUrlAberto] = useState(false)
   const [extratores, setExtratores] = useState<ExtratorInfo[]>([])
@@ -94,16 +99,18 @@ function App() {
 
   async function carregarObras() {
     try {
-      const [lista, raiz, lidos, logs] = await Promise.all([
+      const [lista, raiz, lidos, logs, exclusoes] = await Promise.all([
         mamApi.libraryListarObrasResumo(),
         mamApi.libraryRaiz(),
         mamApi.listarLidos(),
         mamApi.sourceListarHistoricoDownloads(),
+        mamApi.listarHistoricoExclusoes(),
       ])
       setObrasResumo(lista)
       setRaizBiblioteca(raiz)
       setCapitulosLidos(lidos)
       setDownloadsLog(logs)
+      setExclusoesLog(exclusoes)
     } catch (e) {
       setMensagem(`Erro ao listar obras: ${String(e)}`)
     }
@@ -176,6 +183,87 @@ function App() {
       await carregarObras()
     } catch (err) {
       setMensagem(`Erro ao excluir capítulo: ${String(err)}`)
+    }
+  }
+
+  async function handleExcluirObra(e: React.MouseEvent, obraId: string, titulo: string) {
+    e.stopPropagation()
+    if (!window.confirm(`Excluir a obra "${titulo}" e todos os seus arquivos da biblioteca?`)) {
+      return
+    }
+    try {
+      await mamApi.excluirObra(obraId, true)
+      if (detalhes?.obra.id === obraId) {
+        setDetalhes(null)
+        setCapaBiblioteca(null)
+      }
+      setMensagem(`Obra "${titulo}" excluída da biblioteca.`)
+      await carregarObras()
+    } catch (err) {
+      setMensagem(`Erro ao excluir obra: ${String(err)}`)
+    }
+  }
+
+  async function handleRenomearCapitulo(e: React.MouseEvent, cap: Capitulo) {
+    e.stopPropagation()
+    const novo = window.prompt('Novo título do capítulo:', cap.titulo_original ?? '')
+    if (novo === null) return
+    try {
+      await mamApi.renomearCapitulo(cap.id, novo.trim() || null)
+      if (detalhes) {
+        const d = await mamApi.obterDetalhesObra(detalhes.obra.id)
+        setDetalhes(d)
+      }
+      setMensagem('Título do capítulo atualizado.')
+    } catch (err) {
+      setMensagem(`Erro ao renomear capítulo: ${String(err)}`)
+    }
+  }
+
+  async function handleCriarVolumeComCapitulos(e: React.FormEvent) {
+    e.preventDefault()
+    if (!detalhes) return
+    const num = Number.parseInt(volNumero, 10)
+    if (Number.isNaN(num)) {
+      setMensagem('Informe um número de ordem válido para o volume.')
+      return
+    }
+    try {
+      await mamApi.criarVolumeComCapitulos(
+        detalhes.obra.id,
+        num,
+        volTitulo.trim() || null,
+        volCapitulosIds,
+      )
+      setVolTitulo('')
+      setVolCapitulosIds([])
+      const d = await mamApi.obterDetalhesObra(detalhes.obra.id)
+      setDetalhes(d)
+      setMensagem(`Volume ${num} criado com sucesso.`)
+    } catch (err) {
+      setMensagem(`Erro ao formar volume: ${String(err)}`)
+    }
+  }
+
+  async function handleRenomearVolume(vol: { id: string; numero: number; titulo?: string | null }) {
+    const novoTitulo = window.prompt('Nome do volume:', vol.titulo ?? '')
+    if (novoTitulo === null) return
+    const novoNumStr = window.prompt('Número de ordem do volume:', String(vol.numero))
+    if (novoNumStr === null) return
+    const novoNum = Number.parseInt(novoNumStr, 10)
+    if (Number.isNaN(novoNum)) {
+      setMensagem('Número de ordem inválido.')
+      return
+    }
+    try {
+      await mamApi.renomearVolume(vol.id, novoNum, novoTitulo.trim() || null)
+      if (detalhes) {
+        const d = await mamApi.obterDetalhesObra(detalhes.obra.id)
+        setDetalhes(d)
+      }
+      setMensagem('Volume renomeado com sucesso.')
+    } catch (err) {
+      setMensagem(`Erro ao renomear volume: ${String(err)}`)
     }
   }
 
@@ -680,7 +768,16 @@ function App() {
                           <div className="mam-brand-sub">{item.obra.caminho_relativo}</div>
                         </div>
                       </div>
-                      <span className="mam-pill-badge">{item.total_capitulos} cap(s)</span>
+                      <div className="mam-toolbar-row">
+                        <span className="mam-pill-badge">{item.total_capitulos} cap(s)</span>
+                        <button
+                          className="mam-btn"
+                          title="Excluir obra da biblioteca"
+                          onClick={(e) => handleExcluirObra(e, item.obra.id, item.obra.titulo)}
+                        >
+                          🗑
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}
@@ -709,7 +806,15 @@ function App() {
                           <p className="mam-section-desc">{detalhes.obra.caminho_relativo}</p>
                         </div>
                       </div>
-                      <div className="mam-segmented">
+                      <div className="mam-toolbar-row">
+                        <button
+                          className="mam-btn"
+                          onClick={(e) => handleExcluirObra(e, detalhes.obra.id, detalhes.obra.titulo)}
+                          title="Excluir obra inteira da biblioteca"
+                        >
+                          🗑 Excluir Obra
+                        </button>
+                        <div className="mam-segmented">
                         <button
                           className={`mam-segmented-btn ${subAbaObra === 'capitulos' ? 'active' : ''}`}
                           onClick={() => setSubAbaObra('capitulos')}
@@ -722,6 +827,7 @@ function App() {
                         >
                           Volumes ({detalhes.volumes.length})
                         </button>
+                        </div>
                       </div>
                     </div>
 
@@ -827,6 +933,13 @@ function App() {
                                       <span className="mam-pill-badge">{cap.quantidade_paginas} págs</span>
                                       <button
                                         className="mam-btn"
+                                        onClick={(e) => handleRenomearCapitulo(e, cap)}
+                                        title="Renomear título do capítulo"
+                                      >
+                                        ✏️
+                                      </button>
+                                      <button
+                                        className="mam-btn"
                                         onClick={(e) => handleExcluirCapitulo(e, cap.id)}
                                         title="Excluir capítulo arquivado"
                                       >
@@ -843,12 +956,86 @@ function App() {
                       </>
                     ) : (
                       <>
+                        <form onSubmit={handleCriarVolumeComCapitulos} className="mam-panel" style={{ marginBottom: '1rem' }}>
+                          <strong style={{ display: 'block', marginBottom: '0.5rem' }}>
+                            Formar Volume a partir dos capítulos
+                          </strong>
+                          <div className="mam-toolbar-row" style={{ marginBottom: '0.6rem' }}>
+                            <input
+                              className="mam-input"
+                              type="number"
+                              placeholder="Nº ordem"
+                              value={volNumero}
+                              onChange={(e) => setVolNumero(e.target.value)}
+                              style={{ width: 110 }}
+                              required
+                            />
+                            <input
+                              className="mam-input mam-search-input"
+                              placeholder="Nome do volume (ex.: Arco Inicial)"
+                              value={volTitulo}
+                              onChange={(e) => setVolTitulo(e.target.value)}
+                            />
+                            <button className="mam-btn mam-btn-primary" type="submit">
+                              Formar Volume ({volCapitulosIds.length})
+                            </button>
+                          </div>
+                          {todosCapitulosObra.length > 0 && (
+                            <div
+                              style={{
+                                display: 'grid',
+                                gap: '0.35rem',
+                                maxHeight: 190,
+                                overflowY: 'auto',
+                                padding: '0.4rem',
+                                border: '1px solid var(--border-subtle)',
+                                borderRadius: 8,
+                              }}
+                            >
+                              {todosCapitulosObra.map((cap) => {
+                                const lang = obterIdiomaCapitulo(cap)
+                                return (
+                                  <label
+                                    key={cap.id}
+                                    style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', cursor: 'pointer' }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={volCapitulosIds.includes(cap.id)}
+                                      onChange={() =>
+                                        setVolCapitulosIds((prev) =>
+                                          prev.includes(cap.id)
+                                            ? prev.filter((id) => id !== cap.id)
+                                            : [...prev, cap.id],
+                                        )
+                                      }
+                                    />
+                                    {lang && <span className="mam-pill-badge">{lang}</span>}
+                                    <span>
+                                      Cap. {cap.numero}
+                                      {cap.titulo_original ? ` — ${cap.titulo_original}` : ''}
+                                    </span>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </form>
+
                         {detalhes.volumes.map((vc) => (
                           <div key={vc.volume.id} className="mam-panel">
-                            <strong>
-                              Volume {vc.volume.numero}{' '}
-                              {vc.volume.titulo ? `— ${vc.volume.titulo}` : ''}
-                            </strong>
+                            <div className="mam-section-header" style={{ marginBottom: '0.5rem' }}>
+                              <strong>
+                                Volume {vc.volume.numero}{' '}
+                                {vc.volume.titulo ? `— ${vc.volume.titulo}` : ''}
+                              </strong>
+                              <button
+                                className="mam-btn"
+                                onClick={() => handleRenomearVolume(vc.volume)}
+                              >
+                                ✏️ Renomear
+                              </button>
+                            </div>
                             {vc.capitulos.map((cap) => (
                               <div
                                 key={cap.id}
@@ -856,9 +1043,17 @@ function App() {
                                 onClick={() => setCapituloAtivo(cap)}
                               >
                                 <span>
-                                  Cap. {cap.numero} ({cap.quantidade_paginas} págs)
+                                  Cap. {cap.numero}
+                                  {cap.titulo_original ? ` — ${cap.titulo_original}` : ''} ({cap.quantidade_paginas} págs)
                                 </span>
                                 <div className="mam-toolbar-row">
+                                  <button
+                                    className="mam-btn"
+                                    onClick={(e) => handleRenomearCapitulo(e, cap)}
+                                    title="Renomear título do capítulo"
+                                  >
+                                    ✏️
+                                  </button>
                                   <button
                                     className="mam-btn"
                                     onClick={(e) => handleExcluirCapitulo(e, cap.id)}
@@ -873,7 +1068,7 @@ function App() {
                         ))}
                         {detalhes.volumes.length === 0 && (
                           <p className="mam-section-desc">
-                            Nenhum volume agrupado; capítulos listados na aba Capítulos.
+                            Nenhum volume agrupado; selecione os capítulos acima para formar um volume.
                           </p>
                         )}
                       </>
@@ -1025,26 +1220,62 @@ function App() {
           <section className="mam-panel">
             <div className="mam-section-header">
               <div>
-                <h1 className="mam-section-title">LOG DE DOWNLOADS</h1>
+                <h1 className="mam-section-title">
+                  {subAbaLogs === 'downloads' ? 'LOG DE DOWNLOADS' : 'LOG DE EXCLUSÕES'}
+                </h1>
                 <p className="mam-section-desc">
-                  Clique em qualquer conjunto para expandir ou recolher os capítulos baixados e abrir a leitura diretamente.
+                  {subAbaLogs === 'downloads'
+                    ? 'Clique em qualquer conjunto para expandir ou recolher os capítulos baixados e abrir a leitura diretamente.'
+                    : 'Histórico de capítulos e obras removidos da biblioteca com nome, pasta e data/hora.'}
                 </p>
               </div>
-              <button
-                className="mam-btn"
-                onClick={async () => {
-                  const [ops] = await Promise.all([
-                    mamApi.sourceListarOperacoes(),
-                    carregarObras(),
-                  ])
-                  setOperacoesDownload(ops)
-                }}
-              >
-                Atualizar Log
-              </button>
+              <div className="mam-toolbar-row">
+                <div className="mam-segmented">
+                  <button
+                    className={`mam-segmented-btn ${subAbaLogs === 'downloads' ? 'active' : ''}`}
+                    onClick={() => setSubAbaLogs('downloads')}
+                  >
+                    Downloads ({downloadsLog.length})
+                  </button>
+                  <button
+                    className={`mam-segmented-btn ${subAbaLogs === 'exclusoes' ? 'active' : ''}`}
+                    onClick={() => setSubAbaLogs('exclusoes')}
+                  >
+                    Exclusões ({exclusoesLog.length})
+                  </button>
+                </div>
+                <button
+                  className="mam-btn"
+                  onClick={async () => {
+                    const [ops] = await Promise.all([
+                      mamApi.sourceListarOperacoes(),
+                      carregarObras(),
+                    ])
+                    setOperacoesDownload(ops)
+                  }}
+                >
+                  Atualizar Log
+                </button>
+              </div>
             </div>
 
-            {(() => {
+            {subAbaLogs === 'exclusoes' ? (
+              exclusoesLog.length === 0 ? (
+                <p className="mam-section-desc">Nenhuma exclusão registrada até o momento.</p>
+              ) : (
+                <div style={{ display: 'grid', gap: '0.5rem' }}>
+                  {exclusoesLog.map((item) => (
+                    <div key={item.id} className="mam-row-card">
+                      <div>
+                        <strong>🗑 {item.nome}</strong>
+                        <div className="mam-brand-sub">Caminho: {item.pasta_destino}</div>
+                      </div>
+                      <span className="mam-pill-badge">{item.data_hora}</span>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : (() => {
               type GrupoDownload = {
                 id: string
                 titulo: string

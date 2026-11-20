@@ -536,17 +536,18 @@ impl Database {
         Ok(mapa)
     }
 
-    /// Lista registros de downloads ordenados do mais recente para o mais antigo.
-    pub async fn listar_historico_downloads(
+    /// Lista registros de histórico por tipo (`download`, `exclusao`, etc.) do mais recente ao mais antigo.
+    pub async fn listar_historico_por_tipo(
         &self,
+        tipo: &str,
     ) -> DbResult<Vec<(String, Option<String>, Option<String>, String)>> {
         let conn = self.conn.lock().await;
         let mut stmt = conn.prepare(
             "SELECT id, alvo_caminho, detalhes_json, criado_em FROM historico_operacoes
-             WHERE tipo = 'download' ORDER BY criado_em DESC LIMIT 200",
+             WHERE tipo = ?1 ORDER BY criado_em DESC LIMIT 200",
         )?;
         let itens = stmt
-            .query_map([], |row| {
+            .query_map(params![tipo], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, Option<String>>(1)?,
@@ -556,6 +557,111 @@ impl Database {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(itens)
+    }
+
+    /// Lista registros de downloads ordenados do mais recente para o mais antigo.
+    pub async fn listar_historico_downloads(
+        &self,
+    ) -> DbResult<Vec<(String, Option<String>, Option<String>, String)>> {
+        self.listar_historico_por_tipo("download").await
+    }
+
+    /// Lista registros de exclusões ordenados do mais recente para o mais antigo.
+    pub async fn listar_historico_exclusoes(
+        &self,
+    ) -> DbResult<Vec<(String, Option<String>, Option<String>, String)>> {
+        self.listar_historico_por_tipo("exclusao").await
+    }
+
+    /// Obtém um capítulo pelo ID.
+    pub async fn obter_capitulo_por_id(&self, capitulo_id: CapituloId) -> DbResult<Option<Capitulo>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, volume_id, obra_id, numero, titulo_original, caminho_relativo, quantidade_paginas, idioma, data_arquivamento, estado_integridade FROM capitulos WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![capitulo_id.to_string()], |row| {
+            Ok(Capitulo {
+                id: CapituloId::from_string(row.get(0)?),
+                volume_id: row.get::<_, Option<String>>(1)?.map(VolumeId::from_string),
+                obra_id: ObraId::from_string(row.get(2)?),
+                numero: row.get(3)?,
+                titulo_original: row.get(4)?,
+                caminho_relativo: CaminhoRelativo::from_str(row.get(5)?),
+                quantidade_paginas: row.get(6)?,
+                idioma: row.get(7)?,
+                data_arquivamento: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or(Utc::now()),
+                estado_integridade: EstadoIntegridade::from_str(&row.get::<_, String>(9)?),
+            })
+        })?;
+        Ok(rows.next().transpose()?)
+    }
+
+    /// Exclui uma obra inteira do catálogo (CASCADE remove volumes e capítulos) e retorna `(titulo, caminho_relativo)`.
+    pub async fn excluir_obra(&self, obra_id: ObraId) -> DbResult<Option<(String, String)>> {
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction()?;
+        let info: Option<(String, String)> = {
+            let mut stmt = tx.prepare("SELECT titulo, caminho_relativo FROM obras WHERE id = ?1")?;
+            let mut rows = stmt.query_map(params![obra_id.to_string()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            rows.next().transpose()?
+        };
+        if info.is_some() {
+            tx.execute("DELETE FROM obras WHERE id = ?1", params![obra_id.to_string()])?;
+        }
+        tx.commit()?;
+        Ok(info)
+    }
+
+    /// Atualiza número e título de um volume.
+    pub async fn atualizar_volume(
+        &self,
+        volume_id: VolumeId,
+        numero: i32,
+        titulo: Option<String>,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE volumes SET numero = ?1, titulo = ?2 WHERE id = ?3",
+            params![numero, titulo, volume_id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// Vincula uma lista de capítulos a um volume (ou `None` para desvincular).
+    pub async fn vincular_capitulos_volume(
+        &self,
+        volume_id: Option<VolumeId>,
+        capitulo_ids: &[CapituloId],
+    ) -> DbResult<()> {
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction()?;
+        let vol_str = volume_id.map(|v| v.to_string());
+        for cap_id in capitulo_ids {
+            tx.execute(
+                "UPDATE capitulos SET volume_id = ?1 WHERE id = ?2",
+                params![vol_str, cap_id.to_string()],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Renomeia o título de um capítulo baixado.
+    pub async fn renomear_capitulo(
+        &self,
+        capitulo_id: CapituloId,
+        novo_titulo: Option<String>,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE capitulos SET titulo_original = ?1 WHERE id = ?2",
+            params![novo_titulo, capitulo_id.to_string()],
+        )?;
+        Ok(())
     }
 }
 

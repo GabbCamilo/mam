@@ -454,6 +454,68 @@ async fn source_importar_extrator(
 }
 
 #[tauri::command]
+async fn library_excluir_obra(
+    db: tauri::State<'_, Arc<Database>>,
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    obra_id: String,
+    remover_arquivos: bool,
+) -> Result<(), String> {
+    mam_interface::library_excluir_obra(
+        db.inner().clone(),
+        library_manager.inner().clone(),
+        obra_id,
+        remover_arquivos,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn library_criar_volume_com_capitulos(
+    db: tauri::State<'_, Arc<Database>>,
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    obra_id: String,
+    numero: i32,
+    titulo: Option<String>,
+    capitulo_ids: Vec<String>,
+) -> Result<Volume, String> {
+    mam_interface::library_criar_volume_com_capitulos(
+        db.inner().clone(),
+        library_manager.inner().clone(),
+        obra_id,
+        numero,
+        titulo,
+        capitulo_ids,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn library_renomear_volume(
+    db: tauri::State<'_, Arc<Database>>,
+    volume_id: String,
+    numero: i32,
+    titulo: Option<String>,
+) -> Result<(), String> {
+    mam_interface::library_renomear_volume(db.inner().clone(), volume_id, numero, titulo).await
+}
+
+#[tauri::command]
+async fn library_renomear_capitulo(
+    db: tauri::State<'_, Arc<Database>>,
+    capitulo_id: String,
+    novo_titulo: Option<String>,
+) -> Result<(), String> {
+    mam_interface::library_renomear_capitulo(db.inner().clone(), capitulo_id, novo_titulo).await
+}
+
+#[tauri::command]
+async fn library_listar_historico_exclusoes(
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<Vec<DownloadLogItem>, String> {
+    mam_interface::library_listar_historico_exclusoes(db.inner().clone()).await
+}
+
+#[tauri::command]
 async fn library_excluir_capitulo(
     db: tauri::State<'_, Arc<Database>>,
     library_manager: tauri::State<'_, Arc<LibraryManager>>,
@@ -530,6 +592,11 @@ pub fn run() {
       source_listar_extratores,
       source_importar_extrator,
       library_excluir_capitulo,
+      library_excluir_obra,
+      library_criar_volume_com_capitulos,
+      library_renomear_volume,
+      library_renomear_capitulo,
+      library_listar_historico_exclusoes,
       reader_marcar_lido,
       reader_listar_lidos,
       source_obter_capa,

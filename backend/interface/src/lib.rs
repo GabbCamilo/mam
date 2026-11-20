@@ -795,16 +795,171 @@ pub async fn library_excluir_capitulo(
     remover_arquivo: bool,
 ) -> Result<(), String> {
     let id = CapituloId::from_string(capitulo_id);
+    let cap_info = db.obter_capitulo_por_id(id).await.map_err(|e| e.to_string())?;
     let caminho_orfao = db.excluir_capitulo(id).await.map_err(|e| e.to_string())?;
     if remover_arquivo {
-        if let Some(rel) = caminho_orfao {
+        if let Some(ref rel) = caminho_orfao {
             let abs = library_manager.raiz().join(rel);
             if abs.exists() {
                 let _ = std::fs::remove_file(abs);
             }
         }
     }
+    if let Some(cap) = cap_info {
+        let pasta = std::path::Path::new(cap.caminho_relativo.as_str())
+            .parent()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|| cap.caminho_relativo.as_str().to_string());
+        let titulo_cap = cap
+            .titulo_original
+            .as_deref()
+            .filter(|t| !t.trim().is_empty())
+            .map(|t| format!("Cap. {} — {}", cap.numero, t))
+            .unwrap_or_else(|| format!("Cap. {}", cap.numero));
+        let detalhes = serde_json::json!({
+            "nome": titulo_cap,
+            "pasta": pasta,
+            "caminho_relativo": cap.caminho_relativo.as_str(),
+        })
+        .to_string();
+        let _ = db
+            .registrar_operacao(
+                "exclusao".to_string(),
+                Some(cap.caminho_relativo.as_str().to_string()),
+                Some(detalhes),
+                None,
+            )
+            .await;
+    }
     Ok(())
+}
+
+/// Exclui uma obra inteira da biblioteca (banco e pasta local) e registra no log de exclusões.
+pub async fn library_excluir_obra(
+    db: Arc<Database>,
+    library_manager: Arc<LibraryManager>,
+    obra_id: String,
+    remover_arquivos: bool,
+) -> Result<(), String> {
+    let id = ObraId::from_string(obra_id);
+    let info = db.excluir_obra(id).await.map_err(|e| e.to_string())?;
+    if let Some((titulo, caminho_rel)) = info {
+        if remover_arquivos && !caminho_rel.trim().is_empty() {
+            let abs = library_manager.raiz().join(&caminho_rel);
+            if abs.exists() {
+                let _ = std::fs::remove_dir_all(abs);
+            }
+        }
+        let detalhes = serde_json::json!({
+            "nome": format!("Obra: {}", titulo),
+            "pasta": caminho_rel,
+            "caminho_relativo": caminho_rel,
+        })
+        .to_string();
+        let _ = db
+            .registrar_operacao("exclusao".to_string(), Some(caminho_rel), Some(detalhes), None)
+            .await;
+    }
+    Ok(())
+}
+
+/// Cria um volume com número de ordem e nome, vinculando os capítulos selecionados a ele.
+pub async fn library_criar_volume_com_capitulos(
+    db: Arc<Database>,
+    library_manager: Arc<LibraryManager>,
+    obra_id: String,
+    numero: i32,
+    titulo: Option<String>,
+    capitulo_ids: Vec<String>,
+) -> Result<Volume, String> {
+    let id_obra = ObraId::from_string(obra_id);
+    let detalhes = library_manager
+        .obter_detalhes_obra(id_obra)
+        .await
+        .map_err(|e| e.to_string())?;
+    let caminho_rel = format!(
+        "{}/Vol_{:03}",
+        detalhes.obra.caminho_relativo.as_str().trim_end_matches('/'),
+        numero.max(0)
+    );
+    let vol = library_manager
+        .criar_volume(id_obra, numero, titulo, caminho_rel)
+        .await
+        .map_err(|e| e.to_string())?;
+    let ids: Vec<CapituloId> = capitulo_ids
+        .into_iter()
+        .map(CapituloId::from_string)
+        .collect();
+    if !ids.is_empty() {
+        db.vincular_capitulos_volume(Some(vol.id), &ids)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(vol)
+}
+
+/// Renomeia um volume (nome e número de ordem).
+pub async fn library_renomear_volume(
+    db: Arc<Database>,
+    volume_id: String,
+    numero: i32,
+    titulo: Option<String>,
+) -> Result<(), String> {
+    db.atualizar_volume(mam_core::VolumeId::from_string(volume_id), numero, titulo)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Renomeia o título de um capítulo baixado.
+pub async fn library_renomear_capitulo(
+    db: Arc<Database>,
+    capitulo_id: String,
+    novo_titulo: Option<String>,
+) -> Result<(), String> {
+    db.renomear_capitulo(CapituloId::from_string(capitulo_id), novo_titulo)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Lista os registros de exclusão no histórico do SQLite.
+pub async fn library_listar_historico_exclusoes(
+    db: Arc<Database>,
+) -> Result<Vec<DownloadLogItem>, String> {
+    let rows = db
+        .listar_historico_exclusoes()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, alvo, detalhes, criado_em)| {
+            let parsed = detalhes
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+            let nome = parsed
+                .as_ref()
+                .and_then(|v| v["nome"].as_str())
+                .map(|s| s.to_string())
+                .or_else(|| alvo.clone())
+                .unwrap_or_else(|| "Exclusão".to_string());
+            let pasta_destino = parsed
+                .as_ref()
+                .and_then(|v| v["pasta"].as_str())
+                .map(|s| s.to_string())
+                .or_else(|| alvo.clone())
+                .unwrap_or_default();
+            DownloadLogItem {
+                id,
+                nome,
+                pasta_destino,
+                data_hora: criado_em,
+                operacao_id: None,
+                obra_id: None,
+                obra_titulo: None,
+                capitulo_id: None,
+                caminho_relativo: alvo,
+            }
+        })
+        .collect())
 }
 
 /// Marca ou desmarca um capítulo como lido na biblioteca.

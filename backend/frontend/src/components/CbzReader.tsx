@@ -413,6 +413,59 @@ export function CbzReader({
               style={{ ...estiloImagem, maxWidth: '100%' }}
             />
           ))
+        ) : modo === 'dupla' ? (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: paginaSecundaria ? '1fr 1fr' : '1fr',
+              gap: '8px',
+              width: '100%',
+              maxWidth: '100%',
+              alignItems: 'center',
+              justifyItems: 'center',
+            }}
+          >
+            {paginaPrincipal && (
+              <div
+                style={{
+                  position: 'relative',
+                  width: '100%',
+                  display: 'flex',
+                  justifyContent: 'center',
+                }}
+              >
+                <img
+                  src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
+                  alt={paginaPrincipal.nome}
+                  style={{
+                    width: '100%',
+                    maxHeight: `${0.82 * zoom}vh`,
+                    objectFit: 'contain',
+                  }}
+                />
+              </div>
+            )}
+            {paginaSecundaria && (
+              <div
+                style={{
+                  position: 'relative',
+                  width: '100%',
+                  display: 'flex',
+                  justifyContent: 'center',
+                }}
+              >
+                <img
+                  src={`data:${paginaSecundaria.mime_type};base64,${paginaSecundaria.dados_base64}`}
+                  alt={paginaSecundaria.nome}
+                  style={{
+                    width: '100%',
+                    maxHeight: `${0.82 * zoom}vh`,
+                    objectFit: 'contain',
+                  }}
+                />
+              </div>
+            )}
+          </div>
         ) : (
           paginaPrincipal && (
             <div style={{ position: 'relative', display: 'inline-block' }}>
@@ -464,14 +517,6 @@ export function CbzReader({
                   })}
             </div>
           )
-        )}
-
-        {modo === 'dupla' && paginaSecundaria && (
-          <img
-            src={`data:${paginaSecundaria.mime_type};base64,${paginaSecundaria.dados_base64}`}
-            alt={paginaSecundaria.nome}
-            style={estiloImagem}
-          />
         )}
       </div>
 

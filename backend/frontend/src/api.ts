@@ -267,6 +267,26 @@ export const mamApi = {
     invoke<ResultadoImportacao>('source_importar_extrator', { entrada }),
   excluirCapitulo: (capituloId: string, removerArquivo: boolean) =>
     invoke<void>('library_excluir_capitulo', { capituloId, removerArquivo }),
+  excluirObra: (obraId: string, removerArquivos: boolean) =>
+    invoke<void>('library_excluir_obra', { obraId, removerArquivos }),
+  criarVolumeComCapitulos: (
+    obraId: string,
+    numero: number,
+    titulo: string | null,
+    capituloIds: string[],
+  ) =>
+    invoke<Volume>('library_criar_volume_com_capitulos', {
+      obraId,
+      numero,
+      titulo,
+      capituloIds,
+    }),
+  renomearVolume: (volumeId: string, numero: number, titulo: string | null) =>
+    invoke<void>('library_renomear_volume', { volumeId, numero, titulo }),
+  renomearCapitulo: (capituloId: string, novoTitulo: string | null) =>
+    invoke<void>('library_renomear_capitulo', { capituloId, novoTitulo }),
+  listarHistoricoExclusoes: () =>
+    invoke<DownloadLogItem[]>('library_listar_historico_exclusoes'),
   marcarLido: (capituloId: string, lido: boolean) =>
     invoke<void>('reader_marcar_lido', { capituloId, lido }),
   listarLidos: () => invoke<string[]>('reader_listar_lidos'),
