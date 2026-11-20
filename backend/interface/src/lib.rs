@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 use mam_database::Database;
 use mam_chapter::ChapterManager;
 use mam_archive::ArchiveManager;
+use mam_source_integration::SourceIntegrationManager;
+use mam_source_integration::{FonteInfo, ObraBuscaResultado, CapituloBuscaResultado};
 
 /// Retorna o status do banco de dados.
 pub async fn db_health() -> String {
@@ -111,6 +113,59 @@ pub async fn archive_validar_cbz(
 ) -> Result<bool, String> {
     archive_manager
         .validar_cbz(Path::new(&caminho_cbz))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Lista fontes registradas no gerenciador de integração.
+pub async fn source_listar_fontes(
+    source_manager: Arc<SourceIntegrationManager>,
+) -> Result<Vec<FonteInfo>, String> {
+    Ok(source_manager.listar_fontes().await)
+}
+
+/// Busca obras por título em fontes autorizadas.
+pub async fn source_buscar_obras(
+    source_manager: Arc<SourceIntegrationManager>,
+    consulta: String,
+) -> Result<Vec<ObraBuscaResultado>, String> {
+    source_manager
+        .buscar_obras(&consulta)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Lista capítulos de uma obra em uma fonte específica.
+pub async fn source_listar_capitulos(
+    source_manager: Arc<SourceIntegrationManager>,
+    fonte_id: String,
+    obra_id_fonte: String,
+) -> Result<Vec<CapituloBuscaResultado>, String> {
+    source_manager
+        .listar_capitulos(&fonte_id, &obra_id_fonte)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Verifica se um capítulo já está arquivado (detecção de duplicata).
+pub async fn source_verificar_duplicatas(
+    source_manager: Arc<SourceIntegrationManager>,
+    caminho_relativo: String,
+) -> Result<bool, String> {
+    source_manager
+        .capitulo_ja_arquivado(&caminho_relativo)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Inicia uma operação de arquivamento de capítulos.
+pub async fn source_arquivar_capitulos(
+    source_manager: Arc<SourceIntegrationManager>,
+    obra_titulo: String,
+    capitulos: Vec<CapituloBuscaResultado>,
+) -> Result<String, String> {
+    source_manager
+        .iniciar_operacao_arquivamento(obra_titulo, capitulos)
         .await
         .map_err(|e| e.to_string())
 }

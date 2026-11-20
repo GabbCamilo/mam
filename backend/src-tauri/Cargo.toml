@@ -28,3 +28,4 @@ mam-interface = { path = "../interface" }
 mam-database = { path = "../database" }
 mam-chapter = { path = "../chapter" }
 mam-archive = { path = "../archive" }
+mam-source-integration = { path = "../source-integration" }

@@ -15,6 +15,7 @@ mam-core = { path = "../core" }
 mam-database = { path = "../database" }
 mam-chapter = { path = "../chapter" }
 mam-archive = { path = "../archive" }
+mam-source-integration = { path = "../source-integration" }
 
 [dev-dependencies]
 serde_json = "1"

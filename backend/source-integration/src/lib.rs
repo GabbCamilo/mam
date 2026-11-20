@@ -214,13 +214,16 @@ impl SourceIntegrationManager {
         id_operacao: &str,
     ) -> Result<Option<StatusOperacao>, SourceError> {
         let operacoes = self.operacoes.read().await;
-        Ok(operacoes.get(id_operacao).map(|o| StatusOperacao {
-            id: o.id.clone(),
-            obra_titulo: o.obra_titulo.clone(),
-            total_capitulos: o.total_capitulos(),
-            capitulos_processados: o.capitulos_processados(),
-            percentual: o.percentual(),
-            concluida: o.esta_concluida(),
+        Ok(operacoes.get(id_operacao).map(|o| {
+            let s = o.status();
+            StatusOperacao {
+                id: o.id.clone(),
+                obra_titulo: o.obra_titulo.clone(),
+                total_capitulos: s.total_capitulos,
+                capitulos_processados: s.capitulos_processados,
+                percentual: s.percentual,
+                concluida: s.concluida,
+            }
         }))
     }
 
@@ -229,13 +232,16 @@ impl SourceIntegrationManager {
         let operacoes = self.operacoes.read().await;
         operacoes
             .values()
-            .map(|o| StatusOperacao {
-                id: o.id.clone(),
-                obra_titulo: o.obra_titulo.clone(),
-                total_capitulos: o.total_capitulos(),
-                capitulos_processados: o.capitulos_processados(),
-                percentual: o.percentual(),
-                concluida: o.esta_concluida(),
+            .map(|o| {
+                let s = o.status();
+                StatusOperacao {
+                    id: o.id.clone(),
+                    obra_titulo: o.obra_titulo.clone(),
+                    total_capitulos: s.total_capitulos,
+                    capitulos_processados: s.capitulos_processados,
+                    percentual: s.percentual,
+                    concluida: s.concluida,
+                }
             })
             .collect()
     }
