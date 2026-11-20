@@ -78,6 +78,7 @@ function App() {
   const [operacoesDownload, setOperacoesDownload] = useState<StatusOperacao[]>([])
   const [popupDownload, setPopupDownload] = useState<{ obra: string; total: number } | null>(null)
   const [downloadsLog, setDownloadsLog] = useState<DownloadLogItem[]>([])
+  const [gruposLogAbertos, setGruposLogAbertos] = useState<Record<string, boolean>>({})
 
   const [modalImportarUrlAberto, setModalImportarUrlAberto] = useState(false)
   const [extratores, setExtratores] = useState<ExtratorInfo[]>([])
@@ -387,6 +388,35 @@ function App() {
     }, 900)
     return () => clearInterval(interval)
   }, [temDownloadAtivo])
+
+  async function handleAbrirCapituloDoLog(item: DownloadLogItem) {
+    try {
+      let obraId = item.obra_id ?? null
+      if (!obraId && item.pasta_destino) {
+        const encontrada = obrasResumo.find((r) =>
+          item.pasta_destino.startsWith(r.obra.caminho_relativo),
+        )
+        obraId = encontrada?.obra.id ?? null
+      }
+      if (!obraId) {
+        setMensagem('Não foi possível localizar a obra deste capítulo na biblioteca.')
+        return
+      }
+      const d = await mamApi.obterDetalhesObra(obraId)
+      setDetalhes(d)
+      const caps = [...d.volumes.flatMap((v) => v.capitulos), ...d.capitulos_avulsos]
+      const cap =
+        caps.find((c) => item.capitulo_id && c.id === item.capitulo_id) ??
+        caps.find((c) => item.caminho_relativo && c.caminho_relativo === item.caminho_relativo)
+      if (!cap) {
+        setMensagem('Capítulo não encontrado na biblioteca (pode ter sido excluído).')
+        return
+      }
+      setCapituloAtivo(cap)
+    } catch (err) {
+      setMensagem(`Erro ao abrir capítulo pelo log: ${String(err)}`)
+    }
+  }
 
   async function handleArquivarSelecionados() {
     if (!obraFonteSelecionada || selecionadosIds.length === 0) return
@@ -1009,7 +1039,7 @@ function App() {
               <div>
                 <h1 className="mam-section-title">LOG DE DOWNLOADS</h1>
                 <p className="mam-section-desc">
-                  Progresso dos downloads em andamento e histórico de capítulos baixados com nome, pasta de destino na biblioteca e hora.
+                  Clique em qualquer conjunto para expandir ou recolher os capítulos baixados e abrir a leitura diretamente.
                 </p>
               </div>
               <button
@@ -1026,57 +1056,185 @@ function App() {
               </button>
             </div>
 
-            {operacoesDownload.length > 0 && (
-              <div style={{ marginBottom: '1.25rem', display: 'grid', gap: '0.6rem' }}>
-                {operacoesDownload.map((op) => (
-                  <div
-                    key={op.id}
-                    className="mam-row-card"
-                    style={{ flexDirection: 'column', alignItems: 'stretch', gap: '0.45rem' }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <strong>
-                        {op.concluida ? '✓ Concluído' : '⬇️ Baixando conjunto'}: {op.obra_titulo}
-                      </strong>
-                      <span className="mam-pill-badge">
-                        {op.capitulos_processados}/{op.total_capitulos} ({Math.round(op.percentual)}%)
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        height: 6,
-                        borderRadius: 999,
-                        background: 'rgba(148, 163, 184, 0.18)',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${Math.min(100, Math.max(0, op.percentual))}%`,
-                          height: '100%',
-                          background: op.concluida ? 'var(--success)' : 'var(--accent)',
-                          transition: 'width 250ms ease',
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            {(() => {
+              type GrupoDownload = {
+                id: string
+                titulo: string
+                processados: number
+                total: number
+                percentual: number
+                concluida: boolean
+                itens: DownloadLogItem[]
+              }
 
-            {downloadsLog.length === 0 ? (
-              <p className="mam-section-desc">Nenhum download registrado até o momento.</p>
-            ) : (
-              downloadsLog.map((item) => (
-                <div key={item.id} className="mam-row-card">
-                  <div>
-                    <strong>{item.nome}</strong>
-                    <div className="mam-brand-sub">Pasta: {item.pasta_destino}</div>
-                  </div>
-                  <span className="mam-pill-badge">{item.data_hora}</span>
+              const grupos: GrupoDownload[] = []
+              const idsOperacoesVistas = new Set<string>()
+
+              for (const op of [...operacoesDownload].reverse()) {
+                idsOperacoesVistas.add(op.id)
+                grupos.push({
+                  id: op.id,
+                  titulo: op.obra_titulo,
+                  processados: op.capitulos_processados,
+                  total: op.total_capitulos,
+                  percentual: op.percentual,
+                  concluida: op.concluida,
+                  itens: downloadsLog.filter((item) => item.operacao_id === op.id),
+                })
+              }
+
+              const gruposHistoricos = new Map<string, DownloadLogItem[]>()
+              for (const item of downloadsLog) {
+                if (item.operacao_id && idsOperacoesVistas.has(item.operacao_id)) continue
+                const chave = item.operacao_id ?? 'historico-anterior'
+                const lista = gruposHistoricos.get(chave) ?? []
+                lista.push(item)
+                gruposHistoricos.set(chave, lista)
+              }
+
+              for (const [chave, itens] of gruposHistoricos.entries()) {
+                const tituloGrupo =
+                  chave === 'historico-anterior'
+                    ? 'Downloads anteriores'
+                    : (itens[0]?.obra_titulo ?? itens[0]?.pasta_destino ?? 'Conjunto baixado')
+                grupos.push({
+                  id: chave,
+                  titulo: tituloGrupo,
+                  processados: itens.length,
+                  total: itens.length,
+                  percentual: 100,
+                  concluida: true,
+                  itens,
+                })
+              }
+
+              if (grupos.length === 0) {
+                return <p className="mam-section-desc">Nenhum download registrado até o momento.</p>
+              }
+
+              return (
+                <div style={{ display: 'grid', gap: '0.75rem' }}>
+                  {grupos.map((grupo) => {
+                    const aberto = Boolean(gruposLogAbertos[grupo.id])
+                    return (
+                      <div
+                        key={grupo.id}
+                        style={{
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: 12,
+                          padding: '0.85rem 1rem',
+                          background: 'rgba(15, 23, 42, 0.35)',
+                        }}
+                      >
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={() =>
+                            setGruposLogAbertos((prev) => ({
+                              ...prev,
+                              [grupo.id]: !prev[grupo.id],
+                            }))
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              setGruposLogAbertos((prev) => ({
+                                ...prev,
+                                [grupo.id]: !prev[grupo.id],
+                              }))
+                            }
+                          }}
+                          style={{
+                            cursor: 'pointer',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.5rem',
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              gap: '0.75rem',
+                              flexWrap: 'wrap',
+                            }}
+                          >
+                            <strong>
+                              {aberto ? '▾' : '▸'}{' '}
+                              {grupo.concluida ? '✓ Concluído' : '⬇️ Baixando conjunto'}:{' '}
+                              {grupo.titulo}
+                            </strong>
+                            <span className="mam-pill-badge">
+                              {grupo.processados}/{grupo.total} ({Math.round(grupo.percentual)}%)
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              height: 6,
+                              borderRadius: 999,
+                              background: 'rgba(148, 163, 184, 0.18)',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: `${Math.min(100, Math.max(0, grupo.percentual))}%`,
+                                height: '100%',
+                                background: grupo.concluida ? 'var(--success)' : 'var(--accent)',
+                                transition: 'width 250ms ease',
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        {aberto && (
+                          <div
+                            style={{
+                              marginTop: '0.75rem',
+                              paddingTop: '0.75rem',
+                              borderTop: '1px solid var(--border-subtle)',
+                              display: 'grid',
+                              gap: '0.45rem',
+                            }}
+                          >
+                            {grupo.itens.length === 0 ? (
+                              <p className="mam-section-desc">
+                                Aguardando conclusão do primeiro capítulo deste conjunto...
+                              </p>
+                            ) : (
+                              grupo.itens.map((item) => (
+                                <div
+                                  key={item.id}
+                                  className="mam-row-card"
+                                  onClick={() => handleAbrirCapituloDoLog(item)}
+                                >
+                                  <div>
+                                    <strong>{item.nome}</strong>
+                                    <div className="mam-brand-sub">Pasta: {item.pasta_destino}</div>
+                                  </div>
+                                  <div className="mam-toolbar-row">
+                                    <span className="mam-pill-badge">{item.data_hora}</span>
+                                    <button
+                                      className="mam-btn mam-btn-primary"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleAbrirCapituloDoLog(item)
+                                      }}
+                                    >
+                                      Ler
+                                    </button>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
-              ))
-            )}
+              )
+            })()}
           </section>
         )}
 

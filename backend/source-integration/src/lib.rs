@@ -384,9 +384,10 @@ impl SourceIntegrationManager {
                 .await?;
 
             let qtd_paginas = contar_paginas_cbz_bytes(&cbz_bytes) as i32;
+            let cap_id = mam_core::CapituloId::new();
             self.db
                 .criar_capitulo_com_idioma(
-                    mam_core::CapituloId::new(),
+                    cap_id,
                     None,
                     obra.id,
                     numero,
@@ -398,6 +399,11 @@ impl SourceIntegrationManager {
                 .await?;
 
             let detalhes = serde_json::json!({
+                "operacao_id": id_operacao,
+                "obra_id": obra.id.to_string(),
+                "obra_titulo": obra_titulo,
+                "capitulo_id": cap_id.to_string(),
+                "caminho_relativo": caminho_rel_cap,
                 "nome": match &cap.idioma {
                     Some(lang) if !lang.trim().is_empty() => format!("{} — Cap. {} [{}]", obra_titulo, numero, lang),
                     _ => format!("{} — Cap. {}", obra_titulo, numero),

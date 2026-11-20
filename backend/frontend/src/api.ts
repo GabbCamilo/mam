@@ -156,6 +156,11 @@ export interface DownloadLogItem {
   nome: string
   pasta_destino: string
   data_hora: string
+  operacao_id?: string | null
+  obra_id?: string | null
+  obra_titulo?: string | null
+  capitulo_id?: string | null
+  caminho_relativo?: string | null
 }
 
 export const mamApi = {

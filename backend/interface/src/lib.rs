@@ -338,6 +338,11 @@ pub struct DownloadLogItem {
     pub nome: String,
     pub pasta_destino: String,
     pub data_hora: String,
+    pub operacao_id: Option<String>,
+    pub obra_id: Option<String>,
+    pub obra_titulo: Option<String>,
+    pub capitulo_id: Option<String>,
+    pub caminho_relativo: Option<String>,
 }
 
 /// Lista os downloads registrados no histórico do SQLite.
@@ -365,14 +370,40 @@ pub async fn source_listar_historico_downloads(
                 .as_ref()
                 .and_then(|v| v["pasta"].as_str())
                 .map(|s| s.to_string())
-                .or(alvo)
+                .or_else(|| alvo.clone())
                 .unwrap_or_default();
+            let operacao_id = parsed
+                .as_ref()
+                .and_then(|v| v["operacao_id"].as_str())
+                .map(|s| s.to_string());
+            let obra_id = parsed
+                .as_ref()
+                .and_then(|v| v["obra_id"].as_str())
+                .map(|s| s.to_string());
+            let obra_titulo = parsed
+                .as_ref()
+                .and_then(|v| v["obra_titulo"].as_str())
+                .map(|s| s.to_string());
+            let capitulo_id = parsed
+                .as_ref()
+                .and_then(|v| v["capitulo_id"].as_str())
+                .map(|s| s.to_string());
+            let caminho_relativo = parsed
+                .as_ref()
+                .and_then(|v| v["caminho_relativo"].as_str())
+                .map(|s| s.to_string())
+                .or(alvo);
 
             DownloadLogItem {
                 id,
                 nome,
                 pasta_destino,
                 data_hora: criado_em,
+                operacao_id,
+                obra_id,
+                obra_titulo,
+                capitulo_id,
+                caminho_relativo,
             }
         })
         .collect())
