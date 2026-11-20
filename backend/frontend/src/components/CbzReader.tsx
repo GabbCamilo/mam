@@ -33,7 +33,6 @@ export function CbzReader({
   const [modo, setModo] = useState<ModoLeitura>('horizontal')
   const [ajuste, setAjuste] = useState<AjusteTela>('fit-width')
   const [zoom, setZoom] = useState(100)
-  const [favorito, setFavorito] = useState(false)
   const [marcadores, setMarcadores] = useState<MarcadorPagina[]>([])
   const [erro, setErro] = useState<string | null>(null)
   const [carregando, setCarregando] = useState(false)
@@ -163,11 +162,6 @@ export function CbzReader({
     }
   }
 
-  async function handleFavorito() {
-    const novo = await mamApi.alternarFavorito(capitulo.id)
-    setFavorito(novo)
-  }
-
   async function handleAdicionarMarcador() {
     await mamApi.adicionarMarcador(capitulo.id, indiceAtual, `Página ${indiceAtual + 1}`)
     const atualizados = await mamApi.listarMarcadores(capitulo.id)
@@ -210,9 +204,6 @@ export function CbzReader({
         <div className="mam-toolbar-row">
           <button className="mam-btn" onClick={() => setModalLayoutAberto(true)}>
             ⚙ Layout
-          </button>
-          <button className="mam-btn" onClick={handleFavorito}>
-            {favorito ? '★ Favorito' : '☆ Favoritar'}
           </button>
           <button className="mam-btn" onClick={handleAdicionarMarcador}>
             🔖 Marcar
@@ -396,6 +387,13 @@ export function CbzReader({
 
       <div
         className="mam-reader-viewport"
+        onWheel={(e) => {
+          if (modo !== 'vertical' || e.ctrlKey) {
+            e.preventDefault()
+            const delta = e.deltaY < 0 ? 10 : -10
+            setZoom((z) => Math.min(250, Math.max(50, z + delta)))
+          }
+        }}
         style={{
           flexDirection: modo === 'vertical' ? 'column' : 'row',
           alignItems: modo === 'vertical' ? 'center' : 'center',
@@ -418,7 +416,7 @@ export function CbzReader({
             style={{
               display: 'grid',
               gridTemplateColumns: paginaSecundaria ? '1fr 1fr' : '1fr',
-              gap: '8px',
+              gap: '2px',
               width: '100%',
               maxWidth: '100%',
               alignItems: 'center',
@@ -431,16 +429,20 @@ export function CbzReader({
                   position: 'relative',
                   width: '100%',
                   display: 'flex',
-                  justifyContent: 'center',
+                  justifyContent: paginaSecundaria ? 'flex-end' : 'center',
                 }}
               >
                 <img
                   src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
                   alt={paginaPrincipal.nome}
+                  onClick={avancarPagina}
+                  title="Clique para ir para a próxima página"
                   style={{
                     width: '100%',
                     maxHeight: `${0.82 * zoom}vh`,
                     objectFit: 'contain',
+                    objectPosition: paginaSecundaria ? 'right center' : 'center',
+                    cursor: 'pointer',
                   }}
                 />
               </div>
@@ -451,16 +453,20 @@ export function CbzReader({
                   position: 'relative',
                   width: '100%',
                   display: 'flex',
-                  justifyContent: 'center',
+                  justifyContent: 'flex-start',
                 }}
               >
                 <img
                   src={`data:${paginaSecundaria.mime_type};base64,${paginaSecundaria.dados_base64}`}
                   alt={paginaSecundaria.nome}
+                  onClick={avancarPagina}
+                  title="Clique para ir para a próxima página"
                   style={{
                     width: '100%',
                     maxHeight: `${0.82 * zoom}vh`,
                     objectFit: 'contain',
+                    objectPosition: 'left center',
+                    cursor: 'pointer',
                   }}
                 />
               </div>
@@ -472,7 +478,9 @@ export function CbzReader({
               <img
                 src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
                 alt={paginaPrincipal.nome}
-                style={estiloImagem}
+                onClick={avancarPagina}
+                title="Clique para ir para a próxima página"
+                style={{ ...estiloImagem, cursor: 'pointer' }}
               />
               {mostrarSobreposicao &&
                 resultadosIa

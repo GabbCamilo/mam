@@ -475,6 +475,15 @@ function App() {
     return () => clearInterval(interval)
   }, [temDownloadAtivo])
 
+  function abrirCapituloParaLeitura(cap: Capitulo) {
+    try {
+      localStorage.setItem(`mam:ultimo_cap:${cap.obra_id}`, cap.id)
+    } catch {
+      // Ignora indisponibilidade de storage
+    }
+    setCapituloAtivo(cap)
+  }
+
   async function handleAbrirCapituloDoLog(item: DownloadLogItem) {
     try {
       let obraId = item.obra_id ?? null
@@ -499,6 +508,11 @@ function App() {
         return
       }
       setCapituloAtivo(cap)
+      try {
+        localStorage.setItem(`mam:ultimo_cap:${cap.obra_id}`, cap.id)
+      } catch {
+        // Ignora
+      }
     } catch (err) {
       setMensagem(`Erro ao abrir capítulo pelo log: ${String(err)}`)
     }
@@ -601,7 +615,7 @@ function App() {
           capitulosMesmoIdioma.length > 0 ? capitulosMesmoIdioma : todosCapitulosObra
         }
         volumesDisponiveis={detalhes?.volumes ?? []}
-        onSelecionarCapitulo={setCapituloAtivo}
+        onSelecionarCapitulo={abrirCapituloParaLeitura}
         onFechar={async () => {
           setCapituloAtivo(null)
           await carregarObras()
@@ -754,22 +768,29 @@ function App() {
                       key={item.obra.id}
                       onClick={() => handleSelecionarObra(item.obra.id)}
                       className={`mam-row-card ${detalhes?.obra.id === item.obra.id ? 'mam-row-card-active' : ''}`}
+                      style={{ flexWrap: 'nowrap', gap: '0.6rem' }}
                     >
-                      <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center', minWidth: 0, flex: 1 }}>
                         {item.capa_data_url && (
                           <img
                             src={item.capa_data_url}
                             alt={item.obra.titulo}
-                            style={{ width: 38, height: 54, objectFit: 'cover', borderRadius: 6 }}
+                            style={{ width: 38, height: 54, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }}
                           />
                         )}
-                        <div>
-                          <strong>{item.obra.titulo}</strong>
-                          <div className="mam-brand-sub">{item.obra.caminho_relativo}</div>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {item.obra.titulo}
+                          </div>
+                          <div className="mam-brand-sub" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {item.obra.caminho_relativo}
+                          </div>
                         </div>
                       </div>
-                      <div className="mam-toolbar-row">
-                        <span className="mam-pill-badge">{item.total_capitulos} cap(s)</span>
+                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexShrink: 0, flexWrap: 'nowrap' }}>
+                        <span className="mam-pill-badge" style={{ whiteSpace: 'nowrap' }}>
+                          {item.total_capitulos} cap(s)
+                        </span>
                         <button
                           className="mam-btn"
                           title="Excluir obra da biblioteca"
@@ -807,13 +828,32 @@ function App() {
                         </div>
                       </div>
                       <div className="mam-toolbar-row">
-                        <button
-                          className="mam-btn"
-                          onClick={(e) => handleExcluirObra(e, detalhes.obra.id, detalhes.obra.titulo)}
-                          title="Excluir obra inteira da biblioteca"
-                        >
-                          🗑 Excluir Obra
-                        </button>
+                        {(() => {
+                          let ultimoCap: Capitulo | undefined
+                          try {
+                            const salvoId = localStorage.getItem(`mam:ultimo_cap:${detalhes.obra.id}`)
+                            if (salvoId) {
+                              ultimoCap = todosCapitulosObra.find((c) => c.id === salvoId)
+                            }
+                          } catch {
+                            // Ignora
+                          }
+                          if (!ultimoCap) {
+                            const lidosDaObra = todosCapitulosObra.filter((c) =>
+                              capitulosLidos.includes(c.id),
+                            )
+                            ultimoCap =
+                              lidosDaObra[lidosDaObra.length - 1] ?? todosCapitulosObra[0]
+                          }
+                          return ultimoCap ? (
+                            <button
+                              className="mam-btn mam-btn-primary"
+                              onClick={() => abrirCapituloParaLeitura(ultimoCap!)}
+                            >
+                              ▶ Continuar Leitura (Cap. {ultimoCap.numero})
+                            </button>
+                          ) : null
+                        })()}
                         <div className="mam-segmented">
                         <button
                           className={`mam-segmented-btn ${subAbaObra === 'capitulos' ? 'active' : ''}`}
@@ -828,6 +868,13 @@ function App() {
                           Volumes ({detalhes.volumes.length})
                         </button>
                         </div>
+                        <button
+                          className="mam-btn"
+                          onClick={(e) => handleExcluirObra(e, detalhes.obra.id, detalhes.obra.titulo)}
+                          title="Excluir obra inteira da biblioteca"
+                        >
+                          🗑 Excluir Obra
+                        </button>
                       </div>
                     </div>
 
@@ -903,7 +950,7 @@ function App() {
                                   <div
                                     key={cap.id}
                                     className="mam-row-card"
-                                    onClick={() => setCapituloAtivo(cap)}
+                                    onClick={() => abrirCapituloParaLeitura(cap)}
                                   >
                                     <div>
                                       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1040,7 +1087,7 @@ function App() {
                               <div
                                 key={cap.id}
                                 className="mam-row-card"
-                                onClick={() => setCapituloAtivo(cap)}
+                                onClick={() => abrirCapituloParaLeitura(cap)}
                               >
                                 <span>
                                   Cap. {cap.numero}
