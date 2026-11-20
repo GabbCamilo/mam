@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 
 mod schema;
 mod migrations;
-mod models;
+pub mod models;
 mod operations;
 
 use crate::models::*;

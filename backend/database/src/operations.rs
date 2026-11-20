@@ -273,6 +273,67 @@ impl Database {
             titulo: Some(titulo),
         })
     }
+
+    pub async fn criar_volume_com_numero(
+        &self,
+        id: VolumeId,
+        obra_id: ObraId,
+        numero: i32,
+        titulo: Option<String>,
+        caminho_relativo: CaminhoRelativo,
+    ) -> DbResult<Volume> {
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO volumes (id, obra_id, numero, caminho_relativo, titulo)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                id.to_string(),
+                obra_id.to_string(),
+                numero,
+                caminho_relativo.as_str(),
+                titulo,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(Volume {
+            id,
+            obra_id,
+            numero,
+            caminho_relativo,
+            titulo,
+        })
+    }
+
+    pub async fn listar_volumes_obra(&self, obra_id: ObraId) -> DbResult<Vec<Volume>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, obra_id, numero, caminho_relativo, titulo FROM volumes WHERE obra_id = ?1 ORDER BY numero"
+        )?;
+        let volumes = stmt
+            .query_map(params![obra_id.to_string()], |row| {
+                Ok(Volume {
+                    id: VolumeId::from_string(row.get(0)?),
+                    obra_id: ObraId::from_string(row.get(1)?),
+                    numero: row.get(2)?,
+                    caminho_relativo: CaminhoRelativo::from_str(row.get(3)?),
+                    titulo: row.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(volumes)
+    }
+
+    pub async fn atualizar_metadados_obra(&self, id: ObraId, metadados_json: &str) -> DbResult<()> {
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE obras SET metadados_complementares = ?1, atualizado_em = datetime('now') WHERE id = ?2",
+            params![metadados_json, id.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

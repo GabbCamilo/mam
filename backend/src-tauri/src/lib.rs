@@ -8,7 +8,9 @@ use mam_chapter::ChapterManager;
 use mam_archive::ArchiveManager;
 use mam_interface::{db_health as if_db_health, db_list_obras as if_db_list_obras};
 use mam_interface::{chapter_detectar as if_chapter_detectar, chapter_listar_por_obra as if_chapter_listar_por_obra};
-use mam_interface::{library_raiz as if_library_raiz};
+use mam_interface::{library_raiz as if_library_raiz, library_criar_obra as if_library_criar_obra, library_listar_obras as if_library_listar_obras, library_obter_detalhes_obra as if_library_obter_detalhes_obra, library_criar_volume as if_library_criar_volume, library_atualizar_metadados as if_library_atualizar_metadados};
+use mam_database::models::{Obra, Volume};
+use mam_library::{DetalhesObra, LibraryManager};
 use mam_interface::{archive_criar_cbz as if_archive_criar_cbz, archive_ler_cbz as if_archive_ler_cbz, archive_validar_cbz as if_archive_validar_cbz};
 use mam_interface::{source_listar_fontes as if_source_listar_fontes, source_buscar_obras as if_source_buscar_obras};
 use mam_interface::{source_listar_capitulos as if_source_listar_capitulos, source_verificar_duplicatas as if_source_verificar_duplicatas};
@@ -49,6 +51,51 @@ async fn chapter_listar_por_obra(
 #[tauri::command]
 async fn library_raiz() -> Result<String, String> {
     if_library_raiz().await
+}
+
+#[tauri::command]
+async fn library_criar_obra(
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    titulo: String,
+    caminho_relativo: String,
+    origem: Option<String>,
+) -> Result<Obra, String> {
+    if_library_criar_obra(library_manager.inner().clone(), titulo, caminho_relativo, origem).await
+}
+
+#[tauri::command]
+async fn library_listar_obras(
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+) -> Result<Vec<Obra>, String> {
+    if_library_listar_obras(library_manager.inner().clone()).await
+}
+
+#[tauri::command]
+async fn library_obter_detalhes_obra(
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    obra_id: String,
+) -> Result<DetalhesObra, String> {
+    if_library_obter_detalhes_obra(library_manager.inner().clone(), obra_id).await
+}
+
+#[tauri::command]
+async fn library_criar_volume(
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    obra_id: String,
+    numero: i32,
+    titulo: Option<String>,
+    caminho_relativo: String,
+) -> Result<Volume, String> {
+    if_library_criar_volume(library_manager.inner().clone(), obra_id, numero, titulo, caminho_relativo).await
+}
+
+#[tauri::command]
+async fn library_atualizar_metadados(
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    obra_id: String,
+    metadados_json: String,
+) -> Result<(), String> {
+    if_library_atualizar_metadados(library_manager.inner().clone(), obra_id, metadados_json).await
 }
 
 #[tauri::command]
@@ -127,6 +174,11 @@ pub fn run() {
       chapter_detectar,
       chapter_listar_por_obra,
       library_raiz,
+      library_criar_obra,
+      library_listar_obras,
+      library_obter_detalhes_obra,
+      library_criar_volume,
+      library_atualizar_metadados,
       archive_criar_cbz,
       archive_ler_cbz,
       archive_validar_cbz,
@@ -164,8 +216,12 @@ pub fn run() {
       app.manage(db_arc.clone());
 
       // Inicializa o ChapterManager como estado
-      let chapter_manager = ChapterManager::nova(db_arc.clone(), raiz_biblioteca);
+      let chapter_manager = ChapterManager::nova(db_arc.clone(), raiz_biblioteca.clone());
       app.manage(Arc::new(chapter_manager));
+
+      // Inicializa o LibraryManager como estado
+      let library_manager = LibraryManager::nova(db_arc.clone(), raiz_biblioteca);
+      app.manage(Arc::new(library_manager));
 
       // Inicializa o ArchiveManager como estado
       let archive_manager = ArchiveManager::nova(db_arc.clone());

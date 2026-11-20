@@ -96,6 +96,7 @@ dependencies = [
  "mam-chapter",
  "mam-database",
  "mam-interface",
+ "mam-library",
  "mam-source-integration",
  "serde",
  "serde_json",
@@ -2236,6 +2237,7 @@ dependencies = [
  "mam-chapter",
  "mam-core",
  "mam-database",
+ "mam-library",
  "mam-source-integration",
  "serde",
  "serde_json",
@@ -2251,9 +2253,11 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "mam-core",
+ "mam-database",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tokio",
  "uuid",
 ]
 

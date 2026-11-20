@@ -16,6 +16,9 @@ use mam_chapter::ChapterManager;
 use mam_archive::ArchiveManager;
 use mam_source_integration::SourceIntegrationManager;
 use mam_source_integration::{FonteInfo, ObraBuscaResultado, CapituloBuscaResultado};
+use mam_core::ObraId;
+use mam_database::models::{Obra, Volume};
+use mam_library::{DetalhesObra, LibraryManager};
 
 /// Retorna o status do banco de dados.
 pub async fn db_health() -> String {
@@ -64,6 +67,69 @@ pub async fn chapter_listar_por_obra(
 /// Retorna o caminho da raiz da biblioteca configurada.
 pub async fn library_raiz() -> Result<String, String> {
     Ok(PathBuf::from("MAM_LIBRARY").to_string_lossy().to_string())
+}
+
+/// Cadastra uma nova obra na biblioteca.
+pub async fn library_criar_obra(
+    library_manager: Arc<LibraryManager>,
+    titulo: String,
+    caminho_relativo: String,
+    origem: Option<String>,
+) -> Result<Obra, String> {
+    library_manager
+        .criar_obra(titulo, caminho_relativo, origem)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Lista todas as obras cadastradas no catálogo da biblioteca.
+pub async fn library_listar_obras(
+    library_manager: Arc<LibraryManager>,
+) -> Result<Vec<Obra>, String> {
+    library_manager
+        .listar_obras()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Obtém os detalhes completos de uma obra (volumes + capítulos híbridos).
+pub async fn library_obter_detalhes_obra(
+    library_manager: Arc<LibraryManager>,
+    obra_id: String,
+) -> Result<DetalhesObra, String> {
+    let id = ObraId::from_string(obra_id);
+    library_manager
+        .obter_detalhes_obra(id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Cria um volume vinculado a uma obra existente.
+pub async fn library_criar_volume(
+    library_manager: Arc<LibraryManager>,
+    obra_id: String,
+    numero: i32,
+    titulo: Option<String>,
+    caminho_relativo: String,
+) -> Result<Volume, String> {
+    let id = ObraId::from_string(obra_id);
+    library_manager
+        .criar_volume(id, numero, titulo, caminho_relativo)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Atualiza os metadados complementares JSON de uma obra.
+pub async fn library_atualizar_metadados(
+    library_manager: Arc<LibraryManager>,
+    obra_id: String,
+    metadados_json: String,
+) -> Result<(), String> {
+    let id = ObraId::from_string(obra_id);
+    library_manager
+        .atualizar_metadados_obra(id, &metadados_json)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Cria um arquivo CBZ a partir de um diretório de imagens.
