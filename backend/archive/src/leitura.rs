@@ -22,20 +22,13 @@ pub struct PaginaExtraida {
 pub fn ler_cbz<P: AsRef<Path>>(caminho_cbz: P) -> Result<super::CbzLido, ArchiveError> {
     let file = File::open(caminho_cbz.as_ref()).map_err(ArchiveError::Io)?;
     let reader = BufReader::new(file);
-    let mut archive = ZipArchive::new(reader)
+    let archive = ZipArchive::new(reader)
         .map_err(|e| ArchiveError::CbzInvalido(format!("CBZ inválido: {}", e)))?;
 
-    let mut paginas: Vec<String> = (0..archive.len())
-        .filter_map(|i| {
-            archive.by_index(i).ok().and_then(|entry| {
-                let nome = entry.enclosed_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                if eh_imagem_entrada(&nome) {
-                    Some(nome)
-                } else {
-                    None
-                }
-            })
-        })
+    let mut paginas: Vec<String> = archive
+        .file_names()
+        .filter(|nome| eh_imagem_entrada(nome))
+        .map(|nome| nome.to_string())
         .collect();
 
     paginas.sort();
@@ -109,20 +102,10 @@ pub fn ler_pagina_cbz<P: AsRef<Path>>(
     let mut archive = ZipArchive::new(reader)
         .map_err(|e| ArchiveError::CbzInvalido(format!("CBZ inválido: {}", e)))?;
 
-    let mut paginas: Vec<String> = (0..archive.len())
-        .filter_map(|i| {
-            archive.by_index(i).ok().and_then(|entry| {
-                let nome = entry
-                    .enclosed_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                if eh_imagem_entrada(&nome) {
-                    Some(nome)
-                } else {
-                    None
-                }
-            })
-        })
+    let mut paginas: Vec<String> = archive
+        .file_names()
+        .filter(|nome| eh_imagem_entrada(nome))
+        .map(|nome| nome.to_string())
         .collect();
 
     paginas.sort();

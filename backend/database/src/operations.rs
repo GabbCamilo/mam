@@ -398,6 +398,41 @@ impl Database {
         Ok(itens)
     }
 
+    /// Lista todos os marcadores de todos os capítulos de uma obra em uma única consulta SQL.
+    pub async fn listar_marcadores_por_obra(
+        &self,
+        obra_id: ObraId,
+    ) -> DbResult<Vec<(String, usize, String)>> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT c.id, cfg.chave, cfg.valor
+             FROM configuracao_biblioteca cfg
+             INNER JOIN capitulos c
+               ON cfg.chave LIKE 'reader:marcador:' || c.id || ':%'
+             WHERE c.obra_id = ?1
+             ORDER BY c.numero ASC, cfg.chave ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![obra_id.to_string()], |row| {
+                let cap_id: String = row.get(0)?;
+                let chave: String = row.get(1)?;
+                let nota: String = row.get(2)?;
+                Ok((cap_id, chave, nota))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|(cap_id, chave, nota)| {
+                chave
+                    .rsplit(':')
+                    .next()
+                    .and_then(|p| p.parse::<usize>().ok())
+                    .map(|pagina| (cap_id, pagina, nota))
+            })
+            .collect())
+    }
+
     /// Remove uma chave de configuração pelo nome exato.
     pub async fn remover_configuracao(&self, chave: &str) -> DbResult<()> {
         let conn = self.conn.lock().await;

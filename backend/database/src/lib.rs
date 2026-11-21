@@ -49,10 +49,18 @@ impl Database {
         )
         .map_err(DatabaseError::Sql)?;
 
-        // Configurações de integridade e desempenho
+        // Configurações de integridade e desempenho (otimizadas para baixo uso de RAM e I/O)
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(DatabaseError::Sql)?;
+        conn.pragma_update(None, "synchronous", "NORMAL")
+            .map_err(DatabaseError::Sql)?;
         conn.pragma_update(None, "foreign_keys", "ON")
+            .map_err(DatabaseError::Sql)?;
+        conn.pragma_update(None, "busy_timeout", 5000)
+            .map_err(DatabaseError::Sql)?;
+        conn.pragma_update(None, "temp_store", "MEMORY")
+            .map_err(DatabaseError::Sql)?;
+        conn.pragma_update(None, "cache_size", -8000)
             .map_err(DatabaseError::Sql)?;
 
         // Executa migrações
@@ -80,6 +88,14 @@ impl Database {
         let resultado = f(&tx).map_err(DatabaseError::Sql)?;
         tx.commit().map_err(DatabaseError::Sql)?;
         Ok(resultado)
+    }
+
+    /// Executa checkpoint WAL truncando o arquivo auxiliar para manter o banco portátil em arquivo único.
+    pub async fn checkpoint_truncar(&self) -> Result<(), DatabaseError> {
+        let conn = self.conn.lock().await;
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .map_err(DatabaseError::Sql)?;
+        Ok(())
     }
 
     /// Caminho absoluto resolvido a partir de um caminho relativo da biblioteca.

@@ -47,6 +47,20 @@ if (-not (Test-Path $ExePath)) {
 }
 
 Write-Host "==> Montando pacote portátil em $StageDir..."
+$ExistingLib = Join-Path $StageDir "MAM_LIBRARY"
+$TempLibBackup = Join-Path $OutputDir "_MAM_LIBRARY_STAGE_BACKUP"
+$HasUserLibrary = $false
+if (Test-Path $ExistingLib) {
+    $HasDb = Test-Path (Join-Path $ExistingLib "System\database.db")
+    $HasManga = (Get-ChildItem (Join-Path $ExistingLib "Manga") -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
+    if ($HasDb -or $HasManga) {
+        $HasUserLibrary = $true
+        Write-Host "==> Preservando MAM_LIBRARY local existente durante o empacotamento..."
+        if (Test-Path $TempLibBackup) { Remove-Item $TempLibBackup -Recurse -Force }
+        Move-Item $ExistingLib $TempLibBackup -Force
+    }
+}
+
 if (Test-Path $StageDir) { Remove-Item $StageDir -Recurse -Force }
 New-Item -ItemType Directory -Path $StageDir -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $StageDir "ai-engine") -Force | Out-Null
@@ -75,6 +89,12 @@ if (-not [string]::IsNullOrWhiteSpace($PythonRuntimeDir) -and (Test-Path $Python
 
 if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
 Compress-Archive -Path (Join-Path $StageDir "*") -DestinationPath $ZipPath -CompressionLevel Optimal
+
+if ($HasUserLibrary -and (Test-Path $TempLibBackup)) {
+    Write-Host "==> Restaurando MAM_LIBRARY local preservada..."
+    if (Test-Path $ExistingLib) { Remove-Item $ExistingLib -Recurse -Force }
+    Move-Item $TempLibBackup $ExistingLib -Force
+}
 
 Write-Host "==> Montando pacote de atualização incremental (sem MAM_LIBRARY)..."
 if (Test-Path $UpdateStageDir) { Remove-Item $UpdateStageDir -Recurse -Force }

@@ -54,6 +54,12 @@ export interface MarcadorPagina {
   nota: string
 }
 
+export interface MarcadorObra {
+  capitulo_id: string
+  pagina: number
+  nota: string
+}
+
 export interface RelatorioTransferencia {
   operacao_id: string
   arquivos_copiados: string[]
@@ -232,6 +238,8 @@ export const mamApi = {
     invoke<void>('reader_remover_marcador', { capituloId, pagina }),
   listarMarcadores: (capituloId: string) =>
     invoke<MarcadorPagina[]>('reader_listar_marcadores', { capituloId }),
+  listarMarcadoresObra: (obraId: string) =>
+    invoke<MarcadorObra[]>('reader_listar_marcadores_obra', { obraId }),
   transferCopiaIntegral: (origem: string, destino: string) =>
     invoke<RelatorioTransferencia>('transfer_copia_integral', { origem, destino }),
   syncCompararBibliotecas: (origem: string, destino: string) =>

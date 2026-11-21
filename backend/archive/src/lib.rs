@@ -68,51 +68,59 @@ impl ArchiveManager {
         imagens_dir: &Path,
         caminho_destino: &Path,
     ) -> Result<CbzCriado, ArchiveError> {
-        // Listar imagens ordenadas
-        let imagens = listar_imagens_ordenadas(imagens_dir)?;
+        let imagens_dir = imagens_dir.to_path_buf();
+        let caminho_destino = caminho_destino.to_path_buf();
 
-        if imagens.is_empty() {
-            return Err(ArchiveError::CbzInvalido(
-                "nenhuma imagem encontrada no diretório de origem".to_string(),
-            ));
-        }
+        tokio::task::spawn_blocking(move || {
+            let imagens = listar_imagens_ordenadas(&imagens_dir)?;
 
-        // Escrita atômica: cria arquivo temporário no mesmo diretório do destino
-        let temp_path = {
-            let pai = caminho_destino.parent().unwrap_or(Path::new("."));
-            let nome_temp = formato_nome_temporario(caminho_destino)?;
-            pai.join(nome_temp)
-        };
+            if imagens.is_empty() {
+                return Err(ArchiveError::CbzInvalido(
+                    "nenhuma imagem encontrada no diretório de origem".to_string(),
+                ));
+            }
 
-        // Criar o CBZ
-        let (quantidade_paginas, tamanho_bytes) =
-            criar_cbz(imagens_dir, &imagens, &temp_path)?;
+            let temp_path = {
+                let pai = caminho_destino.parent().unwrap_or(Path::new("."));
+                let nome_temp = formato_nome_temporario(&caminho_destino)?;
+                pai.join(nome_temp)
+            };
 
-        // Renomear temp para destino (atômico no mesmo filesystem)
-        std::fs::rename(&temp_path, caminho_destino)
-            .map_err(ArchiveError::Io)?;
+            let (quantidade_paginas, tamanho_bytes) =
+                criar_cbz(&imagens_dir, &imagens, &temp_path)?;
 
-        // Calcular hash SHA-256 do CBZ criado
-        let hash = calcular_sha256_arquivo(caminho_destino)?;
+            std::fs::rename(&temp_path, &caminho_destino)
+                .map_err(ArchiveError::Io)?;
 
-        Ok(CbzCriado {
-            caminho_destino: caminho_destino
-                .to_string_lossy()
-                .replace('\\', "/"),
-            quantidade_paginas,
-            hash_sha256: hash,
-            tamanho_bytes,
+            let hash = calcular_sha256_arquivo(&caminho_destino)?;
+
+            Ok(CbzCriado {
+                caminho_destino: caminho_destino
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+                quantidade_paginas,
+                hash_sha256: hash,
+                tamanho_bytes,
+            })
         })
+        .await
+        .map_err(|e| ArchiveError::CbzInvalido(format!("Falha de tarefa em segundo plano: {}", e)))?
     }
 
     /// Lê um arquivo CBZ existente e retorna informações das páginas.
     pub async fn ler_cbz(&self, caminho_cbz: &Path) -> Result<CbzLido, ArchiveError> {
-        ler_cbz(caminho_cbz)
+        let caminho = caminho_cbz.to_path_buf();
+        tokio::task::spawn_blocking(move || ler_cbz(&caminho))
+            .await
+            .map_err(|e| ArchiveError::CbzInvalido(format!("Falha de tarefa em segundo plano: {}", e)))?
     }
 
     /// Valida a integridade de um arquivo CBZ existente.
     pub async fn validar_cbz(&self, caminho_cbz: &Path) -> Result<bool, ArchiveError> {
-        validar_cbz(caminho_cbz)
+        let caminho = caminho_cbz.to_path_buf();
+        tokio::task::spawn_blocking(move || validar_cbz(&caminho))
+            .await
+            .map_err(|e| ArchiveError::CbzInvalido(format!("Falha de tarefa em segundo plano: {}", e)))?
     }
 
     /// Detecta páginas ausentes em um CBZ.
@@ -120,7 +128,7 @@ impl ArchiveManager {
         &self,
         caminho_cbz: &Path,
     ) -> Result<Vec<i32>, ArchiveError> {
-        let cbz = ler_cbz(caminho_cbz)?;
+        let cbz = self.ler_cbz(caminho_cbz).await?;
         Ok(cbz.paginas_ausentes)
     }
 
@@ -130,7 +138,10 @@ impl ArchiveManager {
         caminho_cbz: &Path,
         indice: usize,
     ) -> Result<PaginaExtraida, ArchiveError> {
-        ler_pagina_cbz(caminho_cbz, indice)
+        let caminho = caminho_cbz.to_path_buf();
+        tokio::task::spawn_blocking(move || ler_pagina_cbz(&caminho, indice))
+            .await
+            .map_err(|e| ArchiveError::CbzInvalido(format!("Falha de tarefa em segundo plano: {}", e)))?
     }
 }
 

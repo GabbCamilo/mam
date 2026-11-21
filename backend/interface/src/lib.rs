@@ -465,12 +465,17 @@ pub async fn library_listar_obras_resumo(
         let total_capitulos = contagens.get(&obra.id.to_string()).copied().unwrap_or(0);
         let cover_path = raiz.join(obra.caminho_relativo.as_str()).join("cover.jpg");
         let capa_data_url = if cover_path.is_file() {
-            std::fs::read(&cover_path).ok().map(|bytes| {
-                format!(
-                    "data:image/jpeg;base64,{}",
-                    mam_source_integration::codificar_base64(&bytes)
-                )
-            })
+            let path_clone = cover_path.clone();
+            tokio::task::spawn_blocking(move || std::fs::read(&path_clone).ok())
+                .await
+                .ok()
+                .flatten()
+                .map(|bytes| {
+                    format!(
+                        "data:image/jpeg;base64,{}",
+                        mam_source_integration::codificar_base64(&bytes)
+                    )
+                })
         } else if total_capitulos > 0 {
             let mut fallback_url = None;
             if let Ok(caps) = db.listar_capitulos_obra(obra.id).await {
@@ -626,7 +631,8 @@ pub async fn reader_obter_pagina(
 
     {
         let mut guard = cache.lock().await;
-        guard.inserir(chave_cache, extraida.clone());
+        let peso_bytes = extraida.dados_base64.len();
+        guard.inserir_com_peso(chave_cache, extraida.clone(), peso_bytes);
     }
 
     Ok(extraida)
@@ -720,6 +726,35 @@ pub async fn reader_listar_marcadores(
                 .next()
                 .and_then(|p| p.parse::<usize>().ok())
                 .map(|pagina| MarcadorPagina { pagina, nota })
+        })
+        .collect())
+}
+
+/// Marcador de uma obra agrupado por capítulo.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MarcadorObra {
+    pub capitulo_id: String,
+    pub pagina: usize,
+    pub nota: String,
+}
+
+/// Lista todos os marcadores de uma obra em uma única consulta SQL.
+pub async fn reader_listar_marcadores_obra(
+    db: Arc<Database>,
+    obra_id: String,
+) -> Result<Vec<MarcadorObra>, String> {
+    let oid = ObraId::from_string(obra_id);
+    let itens = db
+        .listar_marcadores_por_obra(oid)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(itens
+        .into_iter()
+        .map(|(capitulo_id, pagina, nota)| MarcadorObra {
+            capitulo_id,
+            pagina,
+            nota,
         })
         .collect())
 }

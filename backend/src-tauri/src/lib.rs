@@ -21,6 +21,7 @@ use mam_interface::{
     source_status_operacao as if_source_status_operacao,
 };
 use mam_interface::{
+    MarcadorObra,
     MarcadorPagina,
     reader_obter_pagina as if_reader_obter_pagina,
     reader_salvar_progresso as if_reader_salvar_progresso,
@@ -28,6 +29,7 @@ use mam_interface::{
     reader_alternar_favorito as if_reader_alternar_favorito,
     reader_adicionar_marcador as if_reader_adicionar_marcador,
     reader_listar_marcadores as if_reader_listar_marcadores,
+    reader_listar_marcadores_obra as if_reader_listar_marcadores_obra,
     transfer_copia_integral as if_transfer_copia_integral,
     transfer_seletiva as if_transfer_seletiva,
     sync_comparar_bibliotecas as if_sync_comparar_bibliotecas,
@@ -436,6 +438,14 @@ async fn reader_listar_marcadores(
 }
 
 #[tauri::command]
+async fn reader_listar_marcadores_obra(
+    db: tauri::State<'_, Arc<Database>>,
+    obra_id: String,
+) -> Result<Vec<MarcadorObra>, String> {
+    if_reader_listar_marcadores_obra(db.inner().clone(), obra_id).await
+}
+
+#[tauri::command]
 async fn transfer_copia_integral(
     transfer_manager: tauri::State<'_, Arc<TransferManager>>,
     origem: String,
@@ -718,6 +728,7 @@ pub fn run() {
       reader_adicionar_marcador,
       reader_remover_marcador,
       reader_listar_marcadores,
+      reader_listar_marcadores_obra,
       transfer_copia_integral,
       transfer_seletiva,
       sync_comparar_bibliotecas,
@@ -782,8 +793,10 @@ pub fn run() {
       let db_arc = Arc::new(db);
       app.manage(db_arc.clone());
 
-      // Inicializa o Cache L1 LRU de páginas em memória (64 páginas)
-      let cache_paginas: Arc<CachePaginas> = Arc::new(tokio::sync::Mutex::new(CacheL1Lru::nova(64)));
+      // Inicializa o Cache L1 LRU de páginas em memória (máximo 64 páginas ou 64 MiB)
+      let cache_paginas: Arc<CachePaginas> = Arc::new(tokio::sync::Mutex::new(
+        CacheL1Lru::nova_com_limite_bytes(64, 64 * 1024 * 1024),
+      ));
       app.manage(cache_paginas);
 
       // Inicializa o ChapterManager como estado
@@ -832,6 +845,12 @@ pub fn run() {
           let ai = ai_manager.inner().clone();
           let _ = tauri::async_runtime::block_on(async move {
             let _ = ai.chamar("shutdown", serde_json::json!({})).await;
+          });
+        }
+        if let Some(db) = window.try_state::<Arc<Database>>() {
+          let db_ref = db.inner().clone();
+          let _ = tauri::async_runtime::block_on(async move {
+            let _ = db_ref.checkpoint_truncar().await;
           });
         }
         #[cfg(windows)]

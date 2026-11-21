@@ -31,7 +31,8 @@ export function CbzReader({
   const [indiceAtual, setIndiceAtual] = useState(0)
   const [paginaPrincipal, setPaginaPrincipal] = useState<PaginaExtraida | null>(null)
   const [paginaSecundaria, setPaginaSecundaria] = useState<PaginaExtraida | null>(null)
-  const [paginasLongStrip, setPaginasLongStrip] = useState<PaginaExtraida[]>([])
+  const [paginasLongStrip, setPaginasLongStrip] = useState<Record<number, PaginaExtraida>>({})
+  const [totalPaginasLongStrip, setTotalPaginasLongStrip] = useState(0)
   const [modo, setModo] = useState<ModoLeitura>('horizontal')
   const [ajuste, setAjuste] = useState<AjusteTela>('fit-width')
   const [zoom, setZoom] = useState(30)
@@ -46,8 +47,9 @@ export function CbzReader({
   const [paginaHover, setPaginaHover] = useState<number | null>(null)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const lastScrollTopRef = useRef(0)
-  const longStripPageRefs = useRef<(HTMLImageElement | null)[]>([])
+  const longStripPageRefs = useRef<(HTMLElement | null)[]>([])
   const longStripCapituloRef = useRef<string | null>(null)
+  const scrollRafRef = useRef<number | null>(null)
   const pendingScrollRatioRef = useRef<{ x: number; y: number } | null>(null)
   const [marcadores, setMarcadores] = useState<MarcadorPagina[]>([])
   const [erro, setErro] = useState<string | null>(null)
@@ -118,10 +120,43 @@ export function CbzReader({
   useEffect(() => {
     let ativo = true
     async function carregarPaginas() {
-      if (modo === 'vertical' && longStripCapituloRef.current === capitulo.caminho_relativo && paginasLongStrip.length > 0) {
+      const mudouCapitulo = longStripCapituloRef.current !== capitulo.caminho_relativo
+      if (modo === 'vertical' && !mudouCapitulo && totalPaginasLongStrip > 0) {
         await mamApi.salvarProgresso(capitulo.id, indiceAtual)
+        if (indiceAtual >= totalPaginasLongStrip - 1) {
+          await mamApi.marcarLido(capitulo.id, true)
+        }
+        const inicio = Math.max(0, indiceAtual - 2)
+        const fim = Math.min(totalPaginasLongStrip - 1, indiceAtual + 4)
+        const faltantes: number[] = []
+        for (let i = inicio; i <= fim; i++) {
+          if (!paginasLongStrip[i]) faltantes.push(i)
+        }
+        if (faltantes.length > 0) {
+          const carregadas = await Promise.all(
+            faltantes.map(async (i) => ({
+              i,
+              pag: await mamApi.obterPagina(capitulo.caminho_relativo, i),
+            })),
+          )
+          if (!ativo) return
+          setPaginasLongStrip((prev) => {
+            const next: Record<number, PaginaExtraida> = {}
+            for (const [k, v] of Object.entries(prev)) {
+              const idx = Number(k)
+              if (Math.abs(idx - indiceAtual) <= 10) {
+                next[idx] = v
+              }
+            }
+            for (const item of carregadas) {
+              next[item.i] = item.pag
+            }
+            return next
+          })
+        }
         return
       }
+
       setCarregando(true)
       setErro(null)
       try {
@@ -135,27 +170,44 @@ export function CbzReader({
         }
 
         if (modo === 'vertical') {
-          const todas: PaginaExtraida[] = []
-          for (let i = 0; i < p1.total_paginas; i++) {
-            if (!ativo) return
-            const p = i === indiceAtual ? p1 : await mamApi.obterPagina(capitulo.caminho_relativo, i)
-            todas.push(p)
+          const inicio = Math.max(0, indiceAtual - 2)
+          const fim = Math.min(p1.total_paginas - 1, indiceAtual + 4)
+          const mapaInicial: Record<number, PaginaExtraida> = { [indiceAtual]: p1 }
+          const indicesExtras: number[] = []
+          for (let i = inicio; i <= fim; i++) {
+            if (i !== indiceAtual) indicesExtras.push(i)
           }
-          if (ativo) {
-            longStripCapituloRef.current = capitulo.caminho_relativo
-            setPaginasLongStrip(todas)
-            setPaginaSecundaria(null)
-            await mamApi.marcarLido(capitulo.id, true)
+          const extras = await Promise.all(
+            indicesExtras.map(async (i) => ({
+              i,
+              pag: await mamApi.obterPagina(capitulo.caminho_relativo, i),
+            })),
+          )
+          if (!ativo) return
+          for (const item of extras) {
+            mapaInicial[item.i] = item.pag
           }
+          longStripCapituloRef.current = capitulo.caminho_relativo
+          setTotalPaginasLongStrip(p1.total_paginas)
+          setPaginasLongStrip(mapaInicial)
+          setPaginaSecundaria(null)
         } else if (modo === 'dupla' && indiceAtual + 1 < p1.total_paginas) {
           longStripCapituloRef.current = null
-          setPaginasLongStrip([])
+          setTotalPaginasLongStrip(0)
+          setPaginasLongStrip({})
           const p2 = await mamApi.obterPagina(capitulo.caminho_relativo, indiceAtual + 1)
           if (ativo) setPaginaSecundaria(p2)
+          if (indiceAtual + 2 < p1.total_paginas) {
+            mamApi.obterPagina(capitulo.caminho_relativo, indiceAtual + 2).catch(() => {})
+          }
         } else {
           longStripCapituloRef.current = null
-          setPaginasLongStrip([])
+          setTotalPaginasLongStrip(0)
+          setPaginasLongStrip({})
           setPaginaSecundaria(null)
+          if (indiceAtual + 1 < p1.total_paginas) {
+            mamApi.obterPagina(capitulo.caminho_relativo, indiceAtual + 1).catch(() => {})
+          }
         }
       } catch (e) {
         if (ativo) setErro(String(e))
@@ -553,27 +605,31 @@ export function CbzReader({
             }
             lastScrollTopRef.current = st
 
-            const vpRect = vpEl.getBoundingClientRect()
-            const alvoY = vpRect.top + vpRect.height * 0.35
-            let visivel = indiceAtual
-            let melhorDist = Number.POSITIVE_INFINITY
-            for (let i = 0; i < longStripPageRefs.current.length; i++) {
-              const el = longStripPageRefs.current[i]
-              if (!el) continue
-              const r = el.getBoundingClientRect()
-              if (r.top <= alvoY && r.bottom >= alvoY) {
-                visivel = i
-                break
+            if (scrollRafRef.current !== null) return
+            scrollRafRef.current = requestAnimationFrame(() => {
+              scrollRafRef.current = null
+              const vpRect = vpEl.getBoundingClientRect()
+              const alvoY = vpRect.top + vpRect.height * 0.35
+              let visivel = indiceAtual
+              let melhorDist = Number.POSITIVE_INFINITY
+              for (let i = 0; i < longStripPageRefs.current.length; i++) {
+                const el = longStripPageRefs.current[i]
+                if (!el) continue
+                const r = el.getBoundingClientRect()
+                if (r.top <= alvoY && r.bottom >= alvoY) {
+                  visivel = i
+                  break
+                }
+                const dist = Math.abs(r.top - alvoY)
+                if (dist < melhorDist) {
+                  melhorDist = dist
+                  visivel = i
+                }
               }
-              const dist = Math.abs(r.top - alvoY)
-              if (dist < melhorDist) {
-                melhorDist = dist
-                visivel = i
+              if (visivel !== indiceAtual) {
+                setIndiceAtual(visivel)
               }
-            }
-            if (visivel !== indiceAtual) {
-              setIndiceAtual(visivel)
-            }
+            })
           }
         }}
         onWheel={(e) => {
@@ -589,24 +645,47 @@ export function CbzReader({
           justifyContent: 'flex-start',
         }}
       >
-        {modo === 'vertical' && paginasLongStrip.length > 0 ? (
-          paginasLongStrip.map((pag, idx) => (
-            <img
-              key={pag.nome + idx}
-              ref={(el) => {
-                longStripPageRefs.current[idx] = el
-              }}
-              src={`data:${pag.mime_type};base64,${pag.dados_base64}`}
-              alt={pag.nome}
-              style={{
-                ...estiloImagem,
-                width: `${zoom}%`,
-                maxWidth: zoom <= 100 ? '100%' : 'none',
-                maxHeight: 'none',
-                flexShrink: 0,
-              }}
-            />
-          ))
+        {modo === 'vertical' && totalPaginasLongStrip > 0 ? (
+          Array.from({ length: totalPaginasLongStrip }, (_, idx) => {
+            const pag = paginasLongStrip[idx]
+            return pag ? (
+              <img
+                key={`${capitulo.id}-${idx}`}
+                ref={(el) => {
+                  longStripPageRefs.current[idx] = el
+                }}
+                src={`data:${pag.mime_type};base64,${pag.dados_base64}`}
+                alt={pag.nome}
+                decoding="async"
+                style={{
+                  ...estiloImagem,
+                  width: `${zoom}%`,
+                  maxWidth: zoom <= 100 ? '100%' : 'none',
+                  maxHeight: 'none',
+                  flexShrink: 0,
+                }}
+              />
+            ) : (
+              <div
+                key={`${capitulo.id}-placeholder-${idx}`}
+                ref={(el) => {
+                  longStripPageRefs.current[idx] = el
+                }}
+                style={{
+                  width: `${zoom}%`,
+                  minHeight: '60vh',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#64748b',
+                  fontSize: '0.85rem',
+                  flexShrink: 0,
+                }}
+              >
+                Página {idx + 1}
+              </div>
+            )
+          })
         ) : modo === 'dupla' ? (
           <div
             onClick={handleClickNavegacaoImagem}

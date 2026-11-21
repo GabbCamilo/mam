@@ -599,21 +599,25 @@ function App() {
 
   useEffect(() => {
     if (!temDownloadAtivo) return
+    let ultimoTotalProcessado = -1
     const interval = setInterval(async () => {
       try {
-        const [ops, logs] = await Promise.all([
-          mamApi.sourceListarOperacoes(),
-          mamApi.sourceListarHistoricoDownloads(),
-        ])
+        const ops = await mamApi.sourceListarOperacoes()
         setOperacoesDownload(ops)
-        setDownloadsLog(logs)
-        if (ops.length > 0 && ops.every((op) => op.concluida)) {
+        const totalProcessado = ops.reduce((acc, op) => acc + op.capitulos_processados, 0)
+        const todasConcluidas = ops.length > 0 && ops.every((op) => op.concluida)
+        if (totalProcessado !== ultimoTotalProcessado || todasConcluidas) {
+          ultimoTotalProcessado = totalProcessado
+          const logs = await mamApi.sourceListarHistoricoDownloads()
+          setDownloadsLog(logs)
+        }
+        if (todasConcluidas) {
           await carregarObras()
         }
       } catch {
         // Silencioso durante polling de progresso
       }
-    }, 900)
+    }, 1500)
     return () => clearInterval(interval)
   }, [temDownloadAtivo])
 
@@ -632,20 +636,21 @@ function App() {
       setMarcadoresObra([])
       return
     }
-    const caps = [...d.volumes.flatMap((v) => v.capitulos), ...d.capitulos_avulsos].sort(
-      (a, b) => a.numero - b.numero,
-    )
-    const listas = await Promise.all(
-      caps.map(async (cap) => {
-        try {
-          const ms = await mamApi.listarMarcadores(cap.id)
-          return ms.map((m) => ({ capitulo: cap, pagina: m.pagina, nota: m.nota }))
-        } catch {
-          return []
+    try {
+      const caps = [...d.volumes.flatMap((v) => v.capitulos), ...d.capitulos_avulsos]
+      const mapaCaps = new Map(caps.map((c) => [c.id, c]))
+      const lista = await mamApi.listarMarcadoresObra(d.obra.id)
+      const resultado: Array<{ capitulo: Capitulo; pagina: number; nota: string }> = []
+      for (const m of lista) {
+        const cap = mapaCaps.get(m.capitulo_id)
+        if (cap) {
+          resultado.push({ capitulo: cap, pagina: m.pagina, nota: m.nota })
         }
-      }),
-    )
-    setMarcadoresObra(listas.flat())
+      }
+      setMarcadoresObra(resultado)
+    } catch {
+      setMarcadoresObra([])
+    }
   }
 
   useEffect(() => {
