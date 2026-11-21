@@ -5,8 +5,6 @@ from __future__ import annotations
 import importlib.util
 from typing import Any
 
-from .bubble_detector import detectar_baloes_cpu
-from .context_translator import traduzir_balao_com_contexto, traduzir_baloes_pagina_com_contexto
 from .onnx_runtime import OnnxSessionAdapter, carregar_imagem_rgb
 
 
@@ -37,83 +35,31 @@ def executar_ocr(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def detectar_baloes(params: dict[str, Any]) -> dict[str, Any]:
-    """Detecta balões de fala na página mantendo originais intactos."""
+    """Ponto de extensão para detecção externa de balões de fala."""
     caminho_imagem = str(params.get("caminho_imagem", ""))
-    baloes = detectar_baloes_cpu(caminho_imagem)
     return {
         "tipo": "detect_bubbles",
         "caminho_imagem": caminho_imagem,
         "provedor": detectar_provedores_inferencia()["prioritario"],
-        "baloes": baloes,
+        "baloes": [],
         "estado_revisao": "nao_revisado",
     }
 
 
-def detectar_idioma_texto(texto: str) -> str:
-    """Identifica automaticamente o idioma predominante de um texto (estilo detector automático)."""
-    if not texto or not texto.strip():
-        return "auto"
-
-    tem_kana = any("\u3040" <= ch <= "\u30ff" for ch in texto)
-    if tem_kana:
-        return "ja"
-    tem_hangul = any("\uac00" <= ch <= "\ud7af" for ch in texto)
-    if tem_hangul:
-        return "ko"
-    tem_cjk = any("\u4e00" <= ch <= "\u9fff" for ch in texto)
-    if tem_cjk:
-        return "zh"
-
-    lower = f" {texto.lower()} "
-    if any(ch in lower for ch in "ãõçáéíóúâêôà"):
-        return "pt"
-    if any(w in lower for w in (" não ", " você ", " para ", " que ", " com ", " está ", " sim ")):
-        return "pt"
-    return "en"
-
-
-def normalizar_idioma_destino(idioma_destino: str) -> str:
-    """Normaliza o idioma de destino para as duas opções principais: 'pt-BR' ou 'en'."""
-    norm = (idioma_destino or "pt-BR").strip().lower()
-    if norm in ("en", "en-us", "en-gb", "eng", "english", "ingles", "inglês"):
-        return "en"
-    return "pt-BR"
-
-
-def traduzir_texto_isolado(texto: str, idioma_origem: str, idioma_destino: str) -> tuple[str, str]:
-    """Identifica o idioma do balão isolado e executa a tradução contextual para pt-BR ou en."""
-    res = traduzir_balao_com_contexto(
-        texto=texto,
-        idioma_origem=idioma_origem,
-        idioma_destino=idioma_destino,
-    )
-    return str(res["idioma_detectado"]), str(res["texto_traduzido"])
-
-
 def traduzir_regioes(params: dict[str, Any]) -> dict[str, Any]:
-    """Traduz textos reconhecidos com janela de contexto entre balões vizinhos."""
-    textos = [str(t) for t in (params.get("textos") or [])]
+    """Ponto de extensão para tradução externa de regiões/balões."""
+    textos = params.get("textos") or []
     idioma_origem = str(params.get("idioma_origem", "auto"))
-    idioma_destino = normalizar_idioma_destino(str(params.get("idioma_destino", "pt-BR")))
+    idioma_destino = str(params.get("idioma_destino", "pt-BR"))
     modalidade = str(params.get("modalidade", "sobreposicao"))
-
-    baloes_ctx = [{"texto_original": t} for t in textos]
-    processados = traduzir_baloes_pagina_com_contexto(
-        baloes_ctx,
-        idioma_origem=idioma_origem,
-        idioma_destino=idioma_destino,
-    )
 
     traducoes = [
         {
-            "original": item["texto_original"],
-            "traduzido": item["texto_traduzido"],
-            "idioma_detectado": item["idioma_detectado"],
-            "metodo_traducao": item["metodo_traducao"],
-            "analise_contexto": item["analise_contexto"],
+            "original": str(t),
+            "traduzido": str(t),
             "estado_revisao": "nao_revisado",
         }
-        for item in processados
+        for t in textos
     ]
 
     return {
@@ -128,10 +74,10 @@ def traduzir_regioes(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def processar_pagina_completa(params: dict[str, Any]) -> dict[str, Any]:
-    """Pipeline unificado (`process_page`) com dimensões reais da imagem e regiões normalizadas `[x,y,w,h]`."""
+    """Ponto de extensão (`process_page`) com dimensões reais da imagem para encaixe de IA externa."""
     caminho_imagem = str(params.get("caminho_imagem", ""))
     idioma_origem = str(params.get("idioma_origem", "auto"))
-    idioma_destino = normalizar_idioma_destino(str(params.get("idioma_destino", "pt-BR")))
+    idioma_destino = str(params.get("idioma_destino", "pt-BR"))
     caminho_modelo = params.get("caminho_modelo")
     usar_gpu = bool(params.get("usar_gpu", False))
 
@@ -140,41 +86,7 @@ def processar_pagina_completa(params: dict[str, Any]) -> dict[str, Any]:
         caminho_modelo=str(caminho_modelo) if caminho_modelo else None,
         usar_gpu_se_disponivel=usar_gpu,
     )
-    if adaptador.disponivel:
-        adaptador.carregar()
-    else:
-        # Registra motivo explícito sem lançar exceção quando onnxruntime/modelo não estiverem presentes
-        adaptador.carregar()
-
-    baloes = detectar_baloes_cpu(caminho_imagem)
-    baloes_ctx = traduzir_baloes_pagina_com_contexto(
-        baloes,
-        idioma_origem=idioma_origem,
-        idioma_destino=idioma_destino,
-        modelo_sessao=adaptador._sessao,
-    )
-    regioes = []
-    for idx, b in enumerate(baloes_ctx):
-        texto_orig = str(b.get("texto_original", ""))
-        texto_trad = str(b.get("texto_traduzido", ""))
-        if not texto_trad:
-            rotulo = "Bubble" if idioma_destino == "en" else "Balão"
-            texto_trad = f"[{rotulo} {idx + 1}]"
-        regioes.append(
-            {
-                "id": b["id"],
-                "bbox": b["bbox"],
-                "cor_mascara": b.get("cor_mascara", "#ffffff"),
-                "confianca": b.get("confianca", 0.7),
-                "texto_original": texto_orig,
-                "texto_traduzido": texto_trad,
-                "idioma_origem": b["idioma_detectado"],
-                "idioma_destino": idioma_destino,
-                "metodo_traducao": b["metodo_traducao"],
-                "analise_contexto": b["analise_contexto"],
-                "estado_revisao": "nao_revisado",
-            }
-        )
+    adaptador.carregar()
 
     return {
         "tipo": "process_page",
@@ -184,7 +96,7 @@ def processar_pagina_completa(params: dict[str, Any]) -> dict[str, Any]:
         "provedor": detectar_provedores_inferencia()["prioritario"],
         "dimensoes_imagem": dimensoes,
         "onnx_status": adaptador.info_status(),
-        "regioes": regioes,
+        "regioes": [],
         "estado_revisao": "nao_revisado",
     }
 

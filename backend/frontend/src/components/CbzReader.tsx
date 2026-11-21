@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import {
   Capitulo,
   MarcadorPagina,
   PaginaExtraida,
-  ResultadoIA,
   VolumeComCapitulos,
   mamApi,
 } from '../api'
@@ -18,6 +18,10 @@ interface CbzReaderProps {
   paginaInicial?: number | null
   onSelecionarCapitulo: (capitulo: Capitulo) => void
   onFechar: () => void
+  /** Lacuna de extensão para controles futuros de IA externa na barra do leitor. */
+  extraToolbarActions?: ReactNode
+  /** Lacuna de extensão para camada de sobreposição externa alinhada à imagem da página. */
+  renderOverlayPagina?: (paginaIndice: number) => ReactNode
 }
 
 export function CbzReader({
@@ -27,6 +31,8 @@ export function CbzReader({
   paginaInicial = null,
   onSelecionarCapitulo,
   onFechar,
+  extraToolbarActions,
+  renderOverlayPagina,
 }: CbzReaderProps) {
   const [indiceAtual, setIndiceAtual] = useState(0)
   const [paginaPrincipal, setPaginaPrincipal] = useState<PaginaExtraida | null>(null)
@@ -55,13 +61,6 @@ export function CbzReader({
   const [erro, setErro] = useState<string | null>(null)
   const [carregando, setCarregando] = useState(false)
 
-  const [mostrarIa, setMostrarIa] = useState(false)
-  const [mostrarSobreposicao, setMostrarSobreposicao] = useState(true)
-  const [idiomaDestinoIa, setIdiomaDestinoIa] = useState<'pt-BR' | 'en'>('pt-BR')
-  const [processandoIa, setProcessandoIa] = useState(false)
-  const [resultadosIa, setResultadosIa] = useState<ResultadoIA[]>([])
-  const [textoRevisao, setTextoRevisao] = useState('')
-
   const [modalLayoutAberto, setModalLayoutAberto] = useState(false)
   const [modalCapitulosAberto, setModalCapitulosAberto] = useState(false)
   const [abaModalCap, setAbaModalCap] = useState<'capitulos' | 'volumes'>('capitulos')
@@ -80,15 +79,13 @@ export function CbzReader({
     let ativo = true
     async function inicializar() {
       try {
-        const [progresso, listaMarcadores, listaIa] = await Promise.all([
+        const [progresso, listaMarcadores] = await Promise.all([
           mamApi.obterProgresso(capitulo.id),
           mamApi.listarMarcadores(capitulo.id),
-          mamApi.aiListarResultadosCapitulo(capitulo.id),
         ])
         if (!ativo) return
         setIndiceAtual(paginaInicial !== null && paginaInicial !== undefined ? paginaInicial : progresso)
         setMarcadores(listaMarcadores)
-        setResultadosIa(listaIa)
       } catch {
         if (!ativo) return
         setIndiceAtual(paginaInicial ?? 0)
@@ -377,65 +374,6 @@ export function CbzReader({
     )
     .sort((a, b) => (ordemModalCap === 'desc' ? b.numero - a.numero : a.numero - b.numero))
 
-  function renderizarSobreposicaoPagina(paginaIndice: number) {
-    if (!mostrarSobreposicao) return null
-    const regioes = resultadosIa
-      .filter((r) => r.pagina_numero === paginaIndice)
-      .flatMap((r) => {
-        try {
-          const parsed = JSON.parse(r.resultado_json) as {
-            regioes?: Array<{
-              bbox?: [number, number, number, number]
-              texto_traduzido?: string
-              texto_original?: string
-              cor_mascara?: string
-            }>
-          }
-          return parsed.regioes ?? []
-        } catch {
-          return []
-        }
-      })
-
-    if (regioes.length === 0) return null
-
-    return regioes.map((reg, idx) => {
-      const [x, y, w, h] = reg.bbox ?? [0, 0, 0.2, 0.1]
-      return (
-        <div
-          key={`${paginaIndice}-reg-${idx}`}
-          title={reg.texto_original || reg.texto_traduzido || 'Balão detectado'}
-          style={{
-            position: 'absolute',
-            left: `${x * 100}%`,
-            top: `${y * 100}%`,
-            width: `${w * 100}%`,
-            height: `${h * 100}%`,
-            background: reg.cor_mascara || '#ffffff',
-            color: '#0f172a',
-            border: '1.5px solid rgba(56, 189, 248, 0.85)',
-            boxShadow: '0 0 0 1px rgba(15, 23, 42, 0.12)',
-            padding: '2px 4px',
-            fontSize: 'clamp(9px, 1.05vw, 14px)',
-            fontWeight: 700,
-            lineHeight: 1.15,
-            borderRadius: '40%',
-            boxSizing: 'border-box',
-            overflow: 'hidden',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            textAlign: 'center',
-            pointerEvents: 'none',
-            zIndex: 4,
-          }}
-        >
-          {reg.texto_traduzido ?? reg.texto_original ?? ''}
-        </div>
-      )
-    })
-  }
-
   return (
     <div className="mam-reader-shell">
       {barraVisivel && (
@@ -472,52 +410,7 @@ export function CbzReader({
           >
             {paginaAtualMarcada ? '🔖 Desmarcar' : '🔖 Marcar'}
           </button>
-          <button
-            className={`mam-btn ${mostrarSobreposicao ? 'mam-btn-active' : ''}`}
-            onClick={() => setMostrarSobreposicao((v) => !v)}
-          >
-            Sobreposição: {mostrarSobreposicao ? 'ON' : 'OFF'}
-          </button>
-          <select
-            className="mam-select"
-            aria-label="Idioma de destino da tradução IA"
-            value={idiomaDestinoIa}
-            onChange={(e) => setIdiomaDestinoIa(e.target.value as 'pt-BR' | 'en')}
-            title="Idioma de destino para tradução dos balões (origem detectada automaticamente)"
-          >
-            <option value="pt-BR">Traduzir: PT-BR</option>
-            <option value="en">Traduzir: EN</option>
-          </select>
-          <button
-            className="mam-btn mam-btn-primary"
-            disabled={processandoIa}
-            onClick={async () => {
-              setProcessandoIa(true)
-              setErro(null)
-              try {
-                await mamApi.aiProcessarCapitulo({
-                  capituloId: capitulo.id,
-                  caminhoCbz: capitulo.caminho_relativo,
-                  totalPaginas: Math.max(1, totalPaginas),
-                  idiomaOrigem: capitulo.idioma || 'auto',
-                  idiomaDestino: idiomaDestinoIa,
-                })
-                const atualizados = await mamApi.aiListarResultadosCapitulo(capitulo.id)
-                setResultadosIa(atualizados)
-                setMostrarSobreposicao(true)
-                setMostrarIa(true)
-              } catch (e) {
-                setErro(String(e))
-              } finally {
-                setProcessandoIa(false)
-              }
-            }}
-          >
-            {processandoIa ? 'Processando IA...' : '✨ Processar IA'}
-          </button>
-          <button className="mam-btn" onClick={() => setMostrarIa((v) => !v)}>
-            {mostrarIa ? 'Ocultar IA' : 'Revisão IA'}
-          </button>
+          {extraToolbarActions}
         </div>
       </div>
       )}
@@ -541,110 +434,6 @@ export function CbzReader({
               {m.nota}
             </button>
           ))}
-        </div>
-      )}
-
-      {mostrarIa && (
-        <div
-          style={{
-            padding: '0.75rem 1rem',
-            background: '#111827',
-            borderBottom: '1px solid #1e293b',
-          }}
-        >
-          <strong>Resultados de IA — Página {indiceAtual + 1}</strong>
-          {resultadosIa
-            .filter((r) => r.pagina_numero === indiceAtual)
-            .map((r) => {
-              let parsedRegioes: Array<{
-                bbox?: [number, number, number, number]
-                texto_original?: string
-                texto_traduzido?: string
-              }> = []
-              try {
-                const p = JSON.parse(r.resultado_json) as { regioes?: typeof parsedRegioes }
-                parsedRegioes = p.regioes ?? []
-              } catch {
-                parsedRegioes = []
-              }
-
-              return (
-                <div key={r.id} style={{ marginTop: '0.5rem' }}>
-                  <span className="mam-pill-badge">
-                    {r.estado_revisao} • {r.modelo_id}
-                  </span>
-                  {parsedRegioes.length > 0 && (
-                    <div
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '0.4rem',
-                        marginTop: '0.4rem',
-                      }}
-                    >
-                      {parsedRegioes.map((reg, idx) => (
-                        <div key={idx} className="mam-panel">
-                          <small>
-                            Região #{idx + 1} — Original: {reg.texto_original || '(vazio)'}
-                          </small>
-                          <div className="mam-toolbar-row">
-                            <input
-                              className="mam-input mam-search-input"
-                              defaultValue={reg.texto_traduzido || ''}
-                              placeholder="Tradução revisada..."
-                              onChange={(e) => {
-                                reg.texto_traduzido = e.target.value
-                              }}
-                            />
-                            <button
-                              className="mam-btn mam-btn-primary"
-                              onClick={async () => {
-                                const obj = JSON.parse(r.resultado_json) as Record<string, unknown>
-                                obj.regioes = parsedRegioes
-                                obj.estado_revisao = 'revisado'
-                                await mamApi.aiRevisarResultado(r.id, JSON.stringify(obj))
-                                const atualizados = await mamApi.aiListarResultadosCapitulo(
-                                  capitulo.id,
-                                )
-                                setResultadosIa(atualizados)
-                              }}
-                            >
-                              Salvar Região
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <pre className="mam-pre" style={{ marginTop: '0.4rem' }}>
-                    {r.resultado_json}
-                  </pre>
-                  <div className="mam-toolbar-row" style={{ marginTop: '0.4rem' }}>
-                    <input
-                      className="mam-input mam-search-input"
-                      placeholder="JSON/texto revisado..."
-                      value={textoRevisao}
-                      onChange={(e) => setTextoRevisao(e.target.value)}
-                    />
-                    <button
-                      className="mam-btn mam-btn-primary"
-                      onClick={async () => {
-                        if (!textoRevisao.trim()) return
-                        await mamApi.aiRevisarResultado(r.id, textoRevisao.trim())
-                        const atualizados = await mamApi.aiListarResultadosCapitulo(capitulo.id)
-                        setResultadosIa(atualizados)
-                        setTextoRevisao('')
-                      }}
-                    >
-                      Salvar Revisão
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-          {resultadosIa.filter((r) => r.pagina_numero === indiceAtual).length === 0 && (
-            <p className="mam-section-desc">Nenhum resultado de IA salvo para esta página.</p>
-          )}
         </div>
       )}
 
@@ -745,7 +534,7 @@ export function CbzReader({
                     maxHeight: 'none',
                   }}
                 />
-                {renderizarSobreposicaoPagina(idx)}
+                {renderOverlayPagina?.(idx)}
               </div>
             ) : (
               <div
@@ -804,7 +593,7 @@ export function CbzReader({
                       display: 'block',
                     }}
                   />
-                  {renderizarSobreposicaoPagina(indiceAtual)}
+                  {renderOverlayPagina?.(indiceAtual)}
                 </div>
               </div>
             )}
@@ -828,7 +617,7 @@ export function CbzReader({
                       display: 'block',
                     }}
                   />
-                  {renderizarSobreposicaoPagina(indiceAtual + 1)}
+                  {renderOverlayPagina?.(indiceAtual + 1)}
                 </div>
               </div>
             )}
@@ -869,7 +658,7 @@ export function CbzReader({
                     cursor: 'pointer',
                   }}
                 />
-                {renderizarSobreposicaoPagina(indiceAtual)}
+                {renderOverlayPagina?.(indiceAtual)}
               </div>
             </div>
           )
