@@ -16,6 +16,7 @@ from .pipeline import (
     processar_pagina_completa,
     smart_discover_chapters,
     smart_extract_chapter_pages,
+    smart_search_works,
     traduzir_regioes,
 )
 from .protocol import (
@@ -48,6 +49,7 @@ def handle_request(req: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         "analyze_reader_dom": analyze_reader_dom,
         "smart_discover_chapters": smart_discover_chapters,
         "smart_extract_chapter_pages": smart_extract_chapter_pages,
+        "smart_search_works": smart_search_works,
         "models_list": lambda p: listar_modelos_locais(p.get("diretorios")),
         "models_inspect": lambda p: inspecionar_modelo(str(p.get("caminho_modelo", ""))),
     }

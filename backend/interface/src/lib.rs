@@ -197,6 +197,98 @@ pub async fn source_listar_fontes(
     Ok(source_manager.listar_fontes().await)
 }
 
+/// Busca obras por título usando um conector específico (`mangadex`, `mangafire` ou conector web com `url_busca`).
+pub async fn source_buscar_obras_por_conector(
+    source_manager: Arc<SourceIntegrationManager>,
+    library_manager: Arc<LibraryManager>,
+    conector_id: String,
+    consulta: String,
+) -> Result<Vec<ObraBuscaResultado>, String> {
+    if conector_id == "mangadex" {
+        return source_buscar_obras(source_manager, consulta).await;
+    }
+    let cat = mam_source_integration::connectors::GerenciadorConectores::carregar(Some(
+        library_manager.raiz(),
+    ));
+    let conector = cat
+        .sites
+        .into_iter()
+        .find(|s| s.id == conector_id)
+        .ok_or_else(|| format!("Conector '{}' não encontrado", conector_id))?;
+    mam_source_integration::connectors::GerenciadorConectores::buscar_obras_via_cdp(
+        &conector, &consulta,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Lista capítulos de uma obra a partir de um conector (`mangadex` via API ou conector web via CDP/HTML).
+pub async fn source_listar_capitulos_por_conector(
+    source_manager: Arc<SourceIntegrationManager>,
+    fonte_id: String,
+    obra_id_fonte: String,
+) -> Result<Vec<CapituloBuscaResultado>, String> {
+    if fonte_id == "mangadex" {
+        return source_listar_capitulos(source_manager, fonte_id, obra_id_fonte).await;
+    }
+    let res = mam_source_integration::extractors::descobrir_capitulos_por_link_com_opcoes(
+        &obra_id_fonte,
+        None,
+        Some("pt-br"),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(res.capitulos)
+}
+
+/// Lista os conectores declarativos ativos (`System/connectors/sites.json` > padrão).
+pub async fn source_listar_conectores(
+    library_manager: Arc<LibraryManager>,
+) -> Result<mam_source_integration::connectors::CatalogoConectores, String> {
+    Ok(mam_source_integration::connectors::GerenciadorConectores::carregar(Some(
+        library_manager.raiz(),
+    )))
+}
+
+/// Verifica se há atualização disponível para os conectores no manifesto oficial.
+pub async fn source_verificar_atualizacao_conectores(
+    library_manager: Arc<LibraryManager>,
+    manifest_url: Option<String>,
+) -> Result<mam_source_integration::connectors::StatusAtualizacaoConectores, String> {
+    mam_source_integration::connectors::GerenciadorConectores::verificar_atualizacao_remota(
+        Some(library_manager.raiz()),
+        manifest_url.as_deref(),
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Baixa e aplica atomicamente a atualização de conectores preservando toda a `MAM_LIBRARY`.
+pub async fn source_atualizar_conectores_remoto(
+    library_manager: Arc<LibraryManager>,
+    manifest_url: Option<String>,
+) -> Result<mam_source_integration::connectors::CatalogoConectores, String> {
+    mam_source_integration::connectors::GerenciadorConectores::atualizar_remoto(
+        library_manager.raiz(),
+        manifest_url.as_deref(),
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Importa manualmente um catálogo JSON de conectores (modo offline) preservando a biblioteca.
+pub async fn source_importar_conector_json(
+    library_manager: Arc<LibraryManager>,
+    conteudo_json: String,
+) -> Result<mam_source_integration::connectors::CatalogoConectores, String> {
+    mam_source_integration::connectors::GerenciadorConectores::salvar_catalogo_atomico(
+        library_manager.raiz(),
+        &conteudo_json,
+        None,
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// Busca obras por título em fontes autorizadas.
 pub async fn source_buscar_obras(
     source_manager: Arc<SourceIntegrationManager>,

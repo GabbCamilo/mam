@@ -14,6 +14,8 @@ import {
   RelatorioTransferencia,
   ResultadoImportacao,
   StatusOperacao,
+  CatalogoConectores,
+  StatusAtualizacaoConectores,
   mamApi,
 } from './api'
 import { CbzReader } from './components/CbzReader'
@@ -91,6 +93,11 @@ function App() {
 
   const [modalImportarUrlAberto, setModalImportarUrlAberto] = useState(false)
   const [modalInfoImportacaoAberto, setModalInfoImportacaoAberto] = useState(false)
+  const [conectoresCatalogo, setConectoresCatalogo] = useState<CatalogoConectores | null>(null)
+  const [conectorBuscaAtivo, setConectorBuscaAtivo] = useState('mangadex')
+  const [statusAtualizacaoConectores, setStatusAtualizacaoConectores] =
+    useState<StatusAtualizacaoConectores | null>(null)
+  const [conectorJsonManual, setConectorJsonManual] = useState('')
   const [modoImportacao, setModoImportacao] = useState<'obra' | 'capitulo'>('obra')
   const [extratores, setExtratores] = useState<ExtratorInfo[]>([])
   const [extObraTitulo, setExtObraTitulo] = useState('')
@@ -128,6 +135,14 @@ function App() {
 
   useEffect(() => {
     carregarObras()
+    mamApi
+      .sourceListarConectores()
+      .then(setConectoresCatalogo)
+      .catch(() => {})
+    mamApi
+      .sourceVerificarAtualizacaoConectores()
+      .then(setStatusAtualizacaoConectores)
+      .catch(() => {})
   }, [])
 
   async function handleCriarObra(e: React.FormEvent) {
@@ -475,7 +490,10 @@ function App() {
       return
     }
     try {
-      const res = await mamApi.sourceBuscarObras(consultaFonte.trim())
+      const res = await mamApi.sourceBuscarObrasPorConector(
+        conectorBuscaAtivo,
+        consultaFonte.trim(),
+      )
       setObrasFonte(res)
       setObraFonteSelecionada(null)
       setCapitulosFonte([])
@@ -1398,14 +1416,39 @@ function App() {
                   {extratores.map((e) => e.id).join(', ') || '...'}
                 </p>
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                {statusAtualizacaoConectores?.atualizacao_disponivel && (
+                  <button
+                    type="button"
+                    className="mam-pill-badge"
+                    style={{ cursor: 'pointer', border: '1px solid var(--accent-primary)' }}
+                    title={statusAtualizacaoConectores.notas ?? 'Nova versão de conectores disponível'}
+                    onClick={async () => {
+                      try {
+                        const cat = await mamApi.sourceAtualizarConectoresRemoto()
+                        setConectoresCatalogo(cat)
+                        setStatusAtualizacaoConectores({
+                          versao_atual: cat.version,
+                          versao_remota: cat.version,
+                          atualizacao_disponivel: false,
+                          notas: null,
+                        })
+                        setMensagem(`Conectores atualizados para v${cat.version} com segurança!`)
+                      } catch (err) {
+                        setMensagem(`Erro ao atualizar conectores: ${String(err)}`)
+                      }
+                    }}
+                  >
+                    🔄 Atualização de sites disponível (v{statusAtualizacaoConectores.versao_remota})
+                  </button>
+                )}
                 <button
                   type="button"
                   className="mam-btn"
-                  title="Como usar o Importar por Link e quais sites têm suporte direto"
+                  title="Como usar o Importar por Link, conectores ativos e atualização segura"
                   onClick={() => setModalInfoImportacaoAberto(true)}
                 >
-                  ⓘ Guia / Sites
+                  ⓘ Guia / Conectores
                 </button>
                 <button
                   className="mam-btn mam-btn-primary"
@@ -1418,9 +1461,32 @@ function App() {
 
             <form onSubmit={handleBuscarNaFonte} className="mam-panel">
               <div className="mam-toolbar-row">
+                <select
+                  className="mam-select"
+                  aria-label="Mecanismo de busca nativo"
+                  value={conectorBuscaAtivo}
+                  onChange={(e) => setConectorBuscaAtivo(e.target.value)}
+                >
+                  {(conectoresCatalogo?.sites ?? [])
+                    .filter((s) => s.id === 'mangadex' || Boolean(s.url_busca))
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.nome}
+                      </option>
+                    ))}
+                  {!conectoresCatalogo && (
+                    <>
+                      <option value="mangadex">MangaDex (API Pública)</option>
+                      <option value="mangafire">MangaFire (Web Inteligente)</option>
+                    </>
+                  )}
+                </select>
                 <input
                   className="mam-input mam-search-input"
-                  placeholder="🔍 Pesquisar obra por título no MangaDex..."
+                  placeholder={`🔍 Pesquisar obra por título em ${
+                    conectoresCatalogo?.sites.find((s) => s.id === conectorBuscaAtivo)?.nome ??
+                    conectorBuscaAtivo
+                  }...`}
                   value={consultaFonte}
                   onChange={(e) => {
                     const v = e.target.value
@@ -2104,25 +2170,70 @@ function App() {
                 específico pelo link direto, lista ordenada de URLs de imagens ou HTML copiado.
               </div>
               <div>
-                <strong>3. Sites com suporte direto:</strong>
+                <strong>3. Conectores ativos (v{conectoresCatalogo?.version ?? 'padrão'}):</strong>
                 <ul style={{ margin: '0.35rem 0 0 1.2rem', padding: 0 }}>
+                  {(conectoresCatalogo?.sites ?? []).map((s) => (
+                    <li key={s.id}>
+                      <strong>{s.nome}</strong> (<code>{s.dominios.join(', ')}</code> — modo{' '}
+                      <code>{s.tipo}</code>)
+                    </li>
+                  ))}
                   <li>
-                    <strong>MangaDex</strong> (API pública oficial via busca na barra principal ou
-                    link)
-                  </li>
-                  <li>
-                    <strong>MangaFire</strong> (<code>mangafire.to</code> — descoberta paginada
-                    automática e leitor SPA)
-                  </li>
-                  <li>
-                    <strong>MangaLivre</strong> (<code>mangalivre.to</code> — página central e
-                    capítulos)
-                  </li>
-                  <li>
-                    <strong>Genérico / Outros sites públicos</strong> (qualquer página com links{' '}
-                    <code>/chapter/</code>, <code>/capitulo-</code> ou HTML colado)
+                    <strong>Importar por Link / URL externa</strong> — conector adaptativo com
+                    Leitor Web Inteligente (CDP + IA)
                   </li>
                 </ul>
+              </div>
+              <div style={{ display: 'grid', gap: '0.4rem' }}>
+                <strong>Atualizar ou importar conector JSON (sem reinstalar o app):</strong>
+                <textarea
+                  className="mam-textarea"
+                  rows={3}
+                  placeholder="Opcional: cole aqui um catálogo JSON de conectores para importar offline..."
+                  value={conectorJsonManual}
+                  onChange={(e) => setConectorJsonManual(e.target.value)}
+                />
+                <div className="mam-toolbar-row" style={{ justifyContent: 'space-between' }}>
+                  <button
+                    type="button"
+                    className="mam-btn"
+                    onClick={async () => {
+                      try {
+                        const cat = await mamApi.sourceAtualizarConectoresRemoto()
+                        setConectoresCatalogo(cat)
+                        setStatusAtualizacaoConectores({
+                          versao_atual: cat.version,
+                          versao_remota: cat.version,
+                          atualizacao_disponivel: false,
+                          notas: null,
+                        })
+                        setMensagem(`Conectores atualizados para v${cat.version}!`)
+                      } catch (err) {
+                        setMensagem(`Erro ao atualizar conectores: ${String(err)}`)
+                      }
+                    }}
+                  >
+                    🔄 Atualizar Conectores Online
+                  </button>
+                  {conectorJsonManual.trim() && (
+                    <button
+                      type="button"
+                      className="mam-btn mam-btn-primary"
+                      onClick={async () => {
+                        try {
+                          const cat = await mamApi.sourceImportarConectorJson(conectorJsonManual)
+                          setConectoresCatalogo(cat)
+                          setConectorJsonManual('')
+                          setMensagem(`Conectores importados (v${cat.version})!`)
+                        } catch (err) {
+                          setMensagem(`JSON de conector inválido: ${String(err)}`)
+                        }
+                      }}
+                    >
+                      Importar JSON Offline
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
             <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end' }}>

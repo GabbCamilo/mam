@@ -113,6 +113,29 @@ export interface StatusOperacao {
   cancelada?: boolean
 }
 
+export interface ConectorSiteConfig {
+  id: string
+  nome: string
+  versao: string
+  tipo: string
+  dominios: string[]
+  url_busca?: string | null
+  padroes_url_capitulo: string[]
+}
+
+export interface CatalogoConectores {
+  schema_version: number
+  version: string
+  sites: ConectorSiteConfig[]
+}
+
+export interface StatusAtualizacaoConectores {
+  versao_atual: string
+  versao_remota?: string | null
+  atualizacao_disponivel: boolean
+  notas?: string | null
+}
+
 export interface ResultadoIA {
   id: string
   capitulo_id: string
@@ -291,6 +314,22 @@ export const mamApi = {
       html: html ?? null,
       idiomaPreferido: idiomaPreferido ?? null,
     }),
+  sourceBuscarObrasPorConector: (conectorId: string, consulta: string) =>
+    invoke<ObraBuscaResultado[]>('source_buscar_obras_por_conector', {
+      conectorId,
+      consulta,
+    }),
+  sourceListarConectores: () => invoke<CatalogoConectores>('source_listar_conectores'),
+  sourceVerificarAtualizacaoConectores: (manifestUrl?: string | null) =>
+    invoke<StatusAtualizacaoConectores>('source_verificar_atualizacao_conectores', {
+      manifestUrl: manifestUrl ?? null,
+    }),
+  sourceAtualizarConectoresRemoto: (manifestUrl?: string | null) =>
+    invoke<CatalogoConectores>('source_atualizar_conectores_remoto', {
+      manifestUrl: manifestUrl ?? null,
+    }),
+  sourceImportarConectorJson: (conteudoJson: string) =>
+    invoke<CatalogoConectores>('source_importar_conector_json', { conteudoJson }),
   sourceImportarExtrator: (entrada: EntradaImportacao) =>
     invoke<ResultadoImportacao>('source_importar_extrator', { entrada }),
   excluirCapitulo: (capituloId: string, removerArquivo: boolean) =>

@@ -601,3 +601,48 @@ def extract_chapter_pages(url: str) -> dict[str, Any]:
             time.sleep(0.45)
 
         return {"url": url, "paginas": urls_ordenadas}
+
+
+def search_works_cdp(url_busca: str, conector_id: str = "mangafire") -> list[dict[str, Any]]:
+    """Pesquisa obras por título em um conector web (ex.: MangaFire) via CDP."""
+    with _BrowserSession() as cdp:
+        cdp.call("Page.navigate", {"url": url_busca})
+        _wait_spa_settle(
+            cdp,
+            "document.querySelectorAll('a[href*=\"/title/\"], a[href*=\"/manga/\"]').length > 0",
+            max_wait_s=8.0,
+        )
+        items = cdp.eval_js(
+            """
+            const seen = new Set();
+            const out = [];
+            for (const a of document.querySelectorAll('a[href*="/title/"], a[href*="/manga/"]')) {
+              const href = (a.href || '').split('?')[0].split('#')[0];
+              if (!href || href.includes('/chapter') || seen.has(href)) continue;
+              const card = a.closest('article, .card, .unit, .manga-card, li, div') || a;
+              const img = card.querySelector('img');
+              const titleEl = card.querySelector('h3, h2, .title, .name, span') || a;
+              const titulo = (titleEl.textContent || a.getAttribute('title') || '').replace(/\\s+/g, ' ').trim();
+              if (!titulo || titulo.length < 2) continue;
+              seen.add(href);
+              out.push({
+                obra_id_fonte: href,
+                titulo,
+                capa_url: img ? (img.currentSrc || img.src || null) : null
+              });
+              if (out.length >= 20) break;
+            }
+            return out;
+            """
+        ) or []
+        return [
+            {
+                "fonte_id": conector_id,
+                "obra_id_fonte": it["obra_id_fonte"],
+                "titulo": it["titulo"],
+                "autor": None,
+                "descricao": None,
+                "capa_url": it.get("capa_url"),
+            }
+            for it in items
+        ]

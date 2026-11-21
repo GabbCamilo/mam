@@ -449,8 +449,18 @@ pub async fn renderizar_html_com_navegador(url: &str) -> Result<String, SourceEr
 }
 
 /// Extrai metadados e capítulos vinculados de um HTML de página principal de obra
-/// (suportando padrões como `mangafire.to/title/.../chapter/...` e `mangalivre.to/manga/.../capitulo-.../`).
+/// usando padrões padrão + padrões dinâmicos dos conectores carregados.
 pub fn extrair_capitulos_de_html(url_obra: &str, html: &str) -> ObraExtraidaPorLink {
+    let padroes = crate::connectors::GerenciadorConectores::padroes_capitulo_ativos(None);
+    extrair_capitulos_de_html_com_padroes(url_obra, html, &padroes)
+}
+
+/// Extrai metadados e capítulos vinculados de um HTML usando uma lista explícita de padrões de URL.
+pub fn extrair_capitulos_de_html_com_padroes(
+    url_obra: &str,
+    html: &str,
+    padroes_extra: &[String],
+) -> ObraExtraidaPorLink {
     let base_origin = extrair_origem(url_obra);
     let caminho_obra = extrair_caminho_url(url_obra);
     let titulo = extrair_titulo_obra(html, &caminho_obra);
@@ -487,7 +497,7 @@ pub fn extrair_capitulos_de_html(url_obra: &str, html: &str) -> ObraExtraidaPorL
         }
 
         let url_completa = resolver_url(href_trim, &base_origin, url_obra);
-        if !eh_link_capitulo(&url_completa, &caminho_obra) {
+        if !eh_link_capitulo(&url_completa, &caminho_obra, padroes_extra) {
             continue;
         }
         let normalizada = url_completa.trim_end_matches('/').to_string();
@@ -520,7 +530,7 @@ pub fn extrair_capitulos_de_html(url_obra: &str, html: &str) -> ObraExtraidaPorL
     // Camada 2: Varredura em JSON/scripts embutidos (ex.: __NEXT_DATA__ ou listas hidratadas)
     if capitulos.is_empty() && !caminho_obra.is_empty() {
         for cand in extrair_urls_scripts(html, &base_origin, url_obra) {
-            if !eh_link_capitulo(&cand, &caminho_obra) {
+            if !eh_link_capitulo(&cand, &caminho_obra, padroes_extra) {
                 continue;
             }
             let normalizada = cand.trim_end_matches('/').to_string();
@@ -693,7 +703,7 @@ fn extrair_atributo_href(tag: &str) -> Option<String> {
     }
 }
 
-fn eh_link_capitulo(url_completa: &str, caminho_obra: &str) -> bool {
+fn eh_link_capitulo(url_completa: &str, caminho_obra: &str, padroes_extra: &[String]) -> bool {
     let caminho = extrair_caminho_url(url_completa);
     if caminho.is_empty() || caminho == caminho_obra {
         return false;
@@ -709,7 +719,10 @@ fn eh_link_capitulo(url_completa: &str, caminho_obra: &str) -> bool {
         || caminho.contains("/capitulo-")
         || caminho.contains("/chapter-")
         || caminho.contains("/cap-")
-        || caminho.contains("/ch-");
+        || caminho.contains("/ch-")
+        || padroes_extra
+            .iter()
+            .any(|p| !p.is_empty() && caminho.contains(p.as_str()));
 
     if !caminho_obra.is_empty() && caminho.contains("/title/") {
         return prefixo_obra && tem_padrao_capitulo;

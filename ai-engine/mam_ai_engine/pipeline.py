@@ -261,3 +261,12 @@ def smart_extract_chapter_pages(params: dict[str, Any]) -> dict[str, Any]:
 
     url_capitulo = str(params.get("url_capitulo", "")).strip()
     return extract_chapter_pages(url_capitulo)
+
+
+def smart_search_works(params: dict[str, Any]) -> dict[str, Any]:
+    """Pesquisa obras por título em um conector web usando CDP."""
+    from .web_reader import search_works_cdp
+
+    url_busca = str(params.get("url_busca", "")).strip()
+    conector_id = str(params.get("conector_id") or "mangafire").strip()
+    return {"obras": search_works_cdp(url_busca, conector_id)}

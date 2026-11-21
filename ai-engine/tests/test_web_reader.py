@@ -9,6 +9,7 @@ from mam_ai_engine.pipeline import (
     analyze_reader_dom,
     smart_discover_chapters,
     smart_extract_chapter_pages,
+    smart_search_works,
 )
 from mam_ai_engine.web_reader import is_valid_reader_image_url
 
@@ -84,6 +85,15 @@ class TestWebReader(unittest.TestCase):
         })
         self.assertEqual(dom_res["perfil"]["dominio"], "mangafire.to")
         self.assertEqual(dom_res["perfil"]["padrao_capitulo"], "/chapter/")
+
+    def test_smart_search_works(self) -> None:
+        with patch(
+            "mam_ai_engine.web_reader.search_works_cdp",
+            return_value=[{"fonte_id": "mangafire", "obra_id_fonte": "https://mangafire.to/title/jw2-medaka-boxx", "titulo": "Medaka Box"}],
+        ):
+            res = smart_search_works({"url_busca": "https://mangafire.to/filter?keyword=medaka", "conector_id": "mangafire"})
+        self.assertEqual(len(res["obras"]), 1)
+        self.assertEqual(res["obras"][0]["fonte_id"], "mangafire")
 
 
 if __name__ == "__main__":

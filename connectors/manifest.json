@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "version": "2026.11.21.1",
+  "sites_url": "https://raw.githubusercontent.com/GabbCamilo/mam/main/connectors/default_sites.json",
+  "sha256": null,
+  "notas": "Conectores declarativos oficiais do MAM (MangaDex, MangaFire, MangaLivre)."
+}

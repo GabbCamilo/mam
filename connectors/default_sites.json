@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "version": "2026.11.21.1",
+  "sites": [
+    {
+      "id": "mangadex",
+      "nome": "MangaDex (API Pública)",
+      "versao": "1.0.0",
+      "tipo": "api",
+      "dominios": ["mangadex.org"],
+      "url_busca": null,
+      "padroes_url_capitulo": ["/chapter/"],
+      "seletor_link": null,
+      "seletor_idioma_linha": null,
+      "seletor_paginacao": null,
+      "requer_cdp": "false",
+      "seletores_imagem": [],
+      "rejeitar_tokens_imagem": []
+    },
+    {
+      "id": "mangafire",
+      "nome": "MangaFire (Web Inteligente)",
+      "versao": "1.0.0",
+      "tipo": "web-cdp",
+      "dominios": ["mangafire.to"],
+      "url_busca": "https://mangafire.to/filter?keyword={query}",
+      "padroes_url_capitulo": ["/chapter/"],
+      "seletor_link": "a.title-detail__row-link",
+      "seletor_idioma_linha": ".title-detail__row-flag",
+      "seletor_paginacao": ".npager__num.is-active",
+      "requer_cdp": "auto",
+      "seletores_imagem": ["img[src]", "img[data-src]"],
+      "rejeitar_tokens_imagem": ["logo", "avatar", "flag", "favicon", "banner"]
+    },
+    {
+      "id": "mangalivre",
+      "nome": "MangaLivre (Web)",
+      "versao": "1.0.0",
+      "tipo": "web",
+      "dominios": ["mangalivre.to"],
+      "url_busca": null,
+      "padroes_url_capitulo": ["/capitulo-"],
+      "seletor_link": null,
+      "seletor_idioma_linha": null,
+      "seletor_paginacao": null,
+      "requer_cdp": "auto",
+      "seletores_imagem": ["img[src]", "img[data-src]"],
+      "rejeitar_tokens_imagem": ["logo", "avatar", "favicon"]
+    }
+  ]
+}

@@ -17,6 +17,9 @@ if ([string]::IsNullOrWhiteSpace($OutputDir)) {
 
 $StageDir = Join-Path $OutputDir "MAM-windows-x86_64"
 $ZipPath = Join-Path $OutputDir "MAM-windows-x86_64.zip"
+$UpdateStageDir = Join-Path $OutputDir "MAM-windows-x86_64-update"
+$UpdateZipPath = Join-Path $OutputDir "MAM-windows-x86_64-update.zip"
+$ConnectorsDir = Join-Path $RepoRoot "connectors"
 
 if (-not $SkipBuild) {
     Write-Host "==> Compilando frontend React + TypeScript..."
@@ -47,6 +50,7 @@ Write-Host "==> Montando pacote portátil em $StageDir..."
 if (Test-Path $StageDir) { Remove-Item $StageDir -Recurse -Force }
 New-Item -ItemType Directory -Path $StageDir -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $StageDir "ai-engine") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $StageDir "connectors") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $StageDir "models") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $StageDir "MAM_LIBRARY\Manga") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $StageDir "MAM_LIBRARY\System") -Force | Out-Null
@@ -60,6 +64,9 @@ if (Test-Path $WebViewDll) {
 }
 Copy-Item (Join-Path $AiEngineDir "mam_ai_engine") (Join-Path $StageDir "ai-engine\mam_ai_engine") -Recurse -Force
 Copy-Item (Join-Path $AiEngineDir "requirements.txt") (Join-Path $StageDir "ai-engine\requirements.txt") -Force
+if (Test-Path $ConnectorsDir) {
+    Copy-Item (Join-Path $ConnectorsDir "*") (Join-Path $StageDir "connectors") -Recurse -Force
+}
 
 if (-not [string]::IsNullOrWhiteSpace($PythonRuntimeDir) -and (Test-Path $PythonRuntimeDir)) {
     Write-Host "==> Incluindo runtime Python portátil de $PythonRuntimeDir..."
@@ -69,4 +76,23 @@ if (-not [string]::IsNullOrWhiteSpace($PythonRuntimeDir) -and (Test-Path $Python
 if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
 Compress-Archive -Path (Join-Path $StageDir "*") -DestinationPath $ZipPath -CompressionLevel Optimal
 
+Write-Host "==> Montando pacote de atualização incremental (sem MAM_LIBRARY)..."
+if (Test-Path $UpdateStageDir) { Remove-Item $UpdateStageDir -Recurse -Force }
+New-Item -ItemType Directory -Path $UpdateStageDir -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $UpdateStageDir "ai-engine") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $UpdateStageDir "connectors") -Force | Out-Null
+Copy-Item $ExePath (Join-Path $UpdateStageDir "app.exe") -Force
+if (Test-Path $WebViewDll) {
+    Copy-Item $WebViewDll (Join-Path $UpdateStageDir "WebView2Loader.dll") -Force
+}
+Copy-Item (Join-Path $AiEngineDir "mam_ai_engine") (Join-Path $UpdateStageDir "ai-engine\mam_ai_engine") -Recurse -Force
+Copy-Item (Join-Path $AiEngineDir "requirements.txt") (Join-Path $UpdateStageDir "ai-engine\requirements.txt") -Force
+if (Test-Path $ConnectorsDir) {
+    Copy-Item (Join-Path $ConnectorsDir "*") (Join-Path $UpdateStageDir "connectors") -Recurse -Force
+}
+if (Test-Path $UpdateZipPath) { Remove-Item $UpdateZipPath -Force }
+Compress-Archive -Path (Join-Path $UpdateStageDir "*") -DestinationPath $UpdateZipPath -CompressionLevel Optimal
+Remove-Item $UpdateStageDir -Recurse -Force
+
 Write-Host "==> Pacote portátil Windows gerado com sucesso: $ZipPath"
+Write-Host "==> Pacote de atualização seguro (sem MAM_LIBRARY): $UpdateZipPath"

@@ -186,7 +186,68 @@ async fn source_listar_capitulos(
     fonte_id: String,
     obra_id_fonte: String,
 ) -> Result<Vec<CapituloBuscaResultado>, String> {
+    if fonte_id != "mangadex" {
+        return mam_interface::source_listar_capitulos_por_conector(
+            source_manager.inner().clone(),
+            fonte_id,
+            obra_id_fonte,
+        )
+        .await;
+    }
     if_source_listar_capitulos(source_manager.inner().clone(), fonte_id, obra_id_fonte).await
+}
+
+#[tauri::command]
+async fn source_buscar_obras_por_conector(
+    source_manager: tauri::State<'_, Arc<SourceIntegrationManager>>,
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    conector_id: String,
+    consulta: String,
+) -> Result<Vec<ObraBuscaResultado>, String> {
+    mam_interface::source_buscar_obras_por_conector(
+        source_manager.inner().clone(),
+        library_manager.inner().clone(),
+        conector_id,
+        consulta,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn source_listar_conectores(
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+) -> Result<mam_source_integration::connectors::CatalogoConectores, String> {
+    mam_interface::source_listar_conectores(library_manager.inner().clone()).await
+}
+
+#[tauri::command]
+async fn source_verificar_atualizacao_conectores(
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    manifest_url: Option<String>,
+) -> Result<mam_source_integration::connectors::StatusAtualizacaoConectores, String> {
+    mam_interface::source_verificar_atualizacao_conectores(
+        library_manager.inner().clone(),
+        manifest_url,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn source_atualizar_conectores_remoto(
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    manifest_url: Option<String>,
+) -> Result<mam_source_integration::connectors::CatalogoConectores, String> {
+    mam_interface::source_atualizar_conectores_remoto(library_manager.inner().clone(), manifest_url)
+        .await
+}
+
+#[tauri::command]
+async fn source_importar_conector_json(
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    conteudo_json: String,
+) -> Result<mam_source_integration::connectors::CatalogoConectores, String> {
+    mam_interface::source_importar_conector_json(library_manager.inner().clone(), conteudo_json)
+        .await
 }
 
 #[tauri::command]
@@ -685,6 +746,11 @@ pub fn run() {
       source_pausar_operacao,
       source_retomar_operacao,
       source_cancelar_operacao,
+      source_buscar_obras_por_conector,
+      source_listar_conectores,
+      source_verificar_atualizacao_conectores,
+      source_atualizar_conectores_remoto,
+      source_importar_conector_json,
       library_listar_obras_resumo,
       source_listar_historico_downloads,
     ])
