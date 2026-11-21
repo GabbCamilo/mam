@@ -43,6 +43,12 @@ impl AiEngineManager {
         }
     }
 
+    /// Ajusta o timeout padrão das chamadas JSON-RPC (útil para automação web/CDP multi-página).
+    pub fn com_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
     /// Resolve o executável Python priorizando:
     /// 1. Variável de ambiente `MAM_PYTHON_EXE`
     /// 2. Runtime Python embutido ao lado do executável (`<exe_dir>/python/python.exe` ou `python/bin/python3`)

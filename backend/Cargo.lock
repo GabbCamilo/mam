@@ -2270,6 +2270,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "mam-ai-engine",
  "mam-archive",
  "mam-core",
  "mam-database",

@@ -53,21 +53,32 @@ impl ExtratorSite for GenericoExtractor {
         }
 
         if let Some(url) = entrada.url.as_deref().filter(|u| !u.trim().is_empty()) {
+            let mut paginas_estaticas = Vec::new();
             if let Ok(resp) = self.client.get(url).send().await {
                 if resp.status().is_success() {
                     if let Ok(html) = resp.text().await {
-                        let paginas = extrair_urls_imagens_html(&html);
-                        if !paginas.is_empty() {
-                            return Ok(paginas);
+                        paginas_estaticas = extrair_urls_imagens_html(&html);
+                        if paginas_estaticas.len() > 1 {
+                            return Ok(paginas_estaticas);
                         }
                     }
                 }
             }
+            if let Ok(paginas_cdp) =
+                crate::extractors::smart_extract_pages_via_ai_engine(url).await
+            {
+                if paginas_cdp.len() > paginas_estaticas.len() {
+                    return Ok(paginas_cdp);
+                }
+            }
             if let Ok(dom) = crate::extractors::renderizar_html_com_navegador(url).await {
                 let paginas = extrair_urls_imagens_html(&dom);
-                if !paginas.is_empty() {
+                if paginas.len() > paginas_estaticas.len() {
                     return Ok(paginas);
                 }
+            }
+            if !paginas_estaticas.is_empty() {
+                return Ok(paginas_estaticas);
             }
         }
 

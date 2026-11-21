@@ -97,6 +97,7 @@ function App() {
   const [extUrl, setExtUrl] = useState('')
   const [extHtml, setExtHtml] = useState('')
   const [extUrlsTexto, setExtUrlsTexto] = useState('')
+  const [extIdiomaPreferido, setExtIdiomaPreferido] = useState<'pt-br' | 'en' | 'ja' | 'all'>('pt-br')
   const [resultadoImportacao, setResultadoImportacao] = useState<ResultadoImportacao | null>(null)
 
   useEffect(() => {
@@ -398,7 +399,11 @@ function App() {
       return
     }
     try {
-      const res = await mamApi.sourceDescobrirPorLink(extUrl.trim(), extHtml.trim() || null)
+      const res = await mamApi.sourceDescobrirPorLink(
+        extUrl.trim(),
+        extHtml.trim() || null,
+        extIdiomaPreferido,
+      )
       const obraResult: ObraBuscaResultado = {
         fonte_id: 'extrator-link',
         obra_id_fonte: res.url_obra,
@@ -2026,6 +2031,23 @@ function App() {
                   value={extObraTitulo}
                   onChange={(e) => setExtObraTitulo(e.target.value)}
                 />
+                <div className="mam-toolbar-row" style={{ alignItems: 'center' }}>
+                  <span className="mam-section-desc" style={{ margin: 0 }}>
+                    Idioma preferido no site:
+                  </span>
+                  <select
+                    className="mam-select"
+                    value={extIdiomaPreferido}
+                    onChange={(e) =>
+                      setExtIdiomaPreferido(e.target.value as 'pt-br' | 'en' | 'ja' | 'all')
+                    }
+                  >
+                    <option value="pt-br">PT-BR (Preferido)</option>
+                    <option value="en">ENG (Inglês)</option>
+                    <option value="ja">JPN (Japonês)</option>
+                    <option value="all">Todos / Padrão do site</option>
+                  </select>
+                </div>
                 <textarea
                   className="mam-textarea"
                   placeholder="HTML da página principal da obra (opcional — útil se o site carregar capítulos via JS no navegador)"

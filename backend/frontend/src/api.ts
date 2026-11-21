@@ -272,10 +272,15 @@ export const mamApi = {
       caminhoModelo: params.caminhoModelo ?? null,
     }),
   sourceListarExtratores: () => invoke<ExtratorInfo[]>('source_listar_extratores'),
-  sourceDescobrirPorLink: (urlObra: string, html?: string | null) =>
+  sourceDescobrirPorLink: (
+    urlObra: string,
+    html?: string | null,
+    idiomaPreferido?: string | null,
+  ) =>
     invoke<ObraExtraidaPorLink>('source_descobrir_por_link', {
       urlObra,
       html: html ?? null,
+      idiomaPreferido: idiomaPreferido ?? null,
     }),
   sourceImportarExtrator: (entrada: EntradaImportacao) =>
     invoke<ResultadoImportacao>('source_importar_extrator', { entrada }),

@@ -249,8 +249,9 @@ async fn source_obter_capa(url: String) -> Result<String, String> {
 async fn source_descobrir_por_link(
     url_obra: String,
     html: Option<String>,
+    idioma_preferido: Option<String>,
 ) -> Result<mam_source_integration::extractors::ObraExtraidaPorLink, String> {
-    mam_interface::source_descobrir_por_link(url_obra, html).await
+    mam_interface::source_descobrir_por_link(url_obra, html, idioma_preferido).await
 }
 
 #[tauri::command]

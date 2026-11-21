@@ -158,3 +158,106 @@ def classificar_links_capitulos(params: dict[str, Any]) -> dict[str, Any]:
 
     resultados.sort(key=lambda r: (r["numero"] is None, r["numero"] or 0))
     return {"capitulos": resultados}
+
+
+def _profile_cache_path():
+    import os
+    from pathlib import Path
+
+    base = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "MAM"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "site_profiles.json"
+
+
+def analyze_reader_dom(params: dict[str, Any]) -> dict[str, Any]:
+    """Guia IA estrutural que identifica seletores de capítulos/leitor e salva perfil por domínio."""
+    import json
+    from urllib.parse import urlparse
+
+    url = str(params.get("url", "")).strip()
+    dominio = urlparse(url).netloc.lower()
+    candidatos = params.get("candidatos") or []
+    classificados = classificar_links_capitulos({"url_obra": url, "candidatos": candidatos})
+
+    perfil = {
+        "dominio": dominio,
+        "padrao_capitulo": "/chapter/" if any("/chapter/" in c["href"].lower() for c in classificados["capitulos"]) else "generico",
+        "total_detectado": len(classificados["capitulos"]),
+    }
+
+    if dominio:
+        cache_path = _profile_cache_path()
+        try:
+            perfis = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
+        except Exception:
+            perfis = {}
+        perfis[dominio] = perfil
+        cache_path.write_text(json.dumps(perfis, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {"perfil": perfil, "capitulos": classificados["capitulos"]}
+
+
+def smart_discover_chapters(params: dict[str, Any]) -> dict[str, Any]:
+    """Orquestra o Leitor Web Inteligente (CDP) + classificação estrutural de capítulos."""
+    import re
+    from .web_reader import discover_work_chapters
+
+    url_obra = str(params.get("url_obra", "")).strip()
+    idioma_preferido = str(params.get("idioma_preferido") or "pt-br").strip()
+    max_paginas = params.get("max_paginas")
+
+    bruto = discover_work_chapters(
+        url=url_obra,
+        preferred_lang=idioma_preferido,
+        max_pages=int(max_paginas) if max_paginas is not None else None,
+    )
+
+    capitulos_out: list[dict[str, Any]] = []
+    for item in bruto.get("capitulos") or []:
+        href = str(item.get("href") or "").strip()
+        texto = str(item.get("text") or "").strip()
+        row_lang = str(item.get("rowLang") or "").strip().lower()
+        data_num = str(item.get("dataNumber") or "").strip()
+
+        numero = None
+        m = re.search(r"(?:cap[íi]tulo|chapter|cap\.?|ch\.?)\s*[-:]?\s*(\d+)", f"{texto} {href}".lower())
+        if m:
+            numero = int(m.group(1))
+        elif data_num.isdigit():
+            numero = int(data_num)
+
+        idioma = None
+        comb = f"{href} {texto} {row_lang}".lower()
+        if "pt-br" in comb or "/pt/" in comb or "portuguese" in comb or row_lang in ("pt", "br", "pt-br"):
+            idioma = "PT"
+        elif "/en/" in comb or "english" in comb or row_lang in ("en", "gb"):
+            idioma = "ENG"
+        elif "/ja/" in comb or "/jp/" in comb or "japanese" in comb or row_lang in ("ja", "jp"):
+            idioma = "JPN"
+
+        capitulos_out.append({
+            "fonte_id": "extrator-link",
+            "obra_id_fonte": url_obra,
+            "capitulo_id_fonte": href,
+            "numero": numero,
+            "titulo": texto or None,
+            "url": href,
+            "idioma": idioma,
+        })
+
+    capitulos_out.sort(key=lambda c: (c["numero"] is None, c["numero"] or 0))
+    return {
+        "titulo": bruto.get("titulo") or "Obra Importada",
+        "capa_url": bruto.get("capa_url"),
+        "url_obra": url_obra,
+        "paginas_varridas": bruto.get("paginas_varridas", 1),
+        "capitulos": capitulos_out,
+    }
+
+
+def smart_extract_chapter_pages(params: dict[str, Any]) -> dict[str, Any]:
+    """Orquestra o Leitor Web Inteligente (CDP) para extrair todas as páginas de um capítulo."""
+    from .web_reader import extract_chapter_pages
+
+    url_capitulo = str(params.get("url_capitulo", "")).strip()
+    return extract_chapter_pages(url_capitulo)

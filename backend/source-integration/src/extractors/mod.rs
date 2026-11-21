@@ -282,11 +282,21 @@ impl RegistroExtratores {
     }
 }
 
-/// Descobre capítulos relacionados a uma obra a partir da URL da página principal (ou HTML colado).
-/// Caso o HTML estático não contenha links (ex.: sites SPA renderizados via JS), renderiza o DOM com Edge/Chrome headless.
+/// Descobre capítulos relacionados a uma obra a partir da URL da página principal (ou HTML colado),
+/// usando por padrão idioma preferido `pt-br` e fallback automático para o Leitor Web Inteligente (CDP).
 pub async fn descobrir_capitulos_por_link(
     url_obra: &str,
     html_opcional: Option<&str>,
+) -> Result<ObraExtraidaPorLink, SourceError> {
+    descobrir_capitulos_por_link_com_opcoes(url_obra, html_opcional, Some("pt-br")).await
+}
+
+/// Descobre capítulos com preferência explícita de idioma (`pt-br`, `en`, `ja`, `all`).
+/// Para SPAs ou sites paginados, aciona o `ai-engine` (CDP multi-página/multi-idioma) e faz fallback para `--dump-dom`.
+pub async fn descobrir_capitulos_por_link_com_opcoes(
+    url_obra: &str,
+    html_opcional: Option<&str>,
+    idioma_preferido: Option<&str>,
 ) -> Result<ObraExtraidaPorLink, SourceError> {
     let url_limpa = url_obra.trim();
     if url_limpa.is_empty() {
@@ -311,7 +321,6 @@ pub async fn descobrir_capitulos_por_link(
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    let mut extraida_estatica: Option<ObraExtraidaPorLink> = None;
     if let Ok(resp) = client.get(url_limpa).send().await {
         if resp.status().is_success() {
             if let Ok(html) = resp.text().await {
@@ -319,12 +328,20 @@ pub async fn descobrir_capitulos_por_link(
                 if !extraida.capitulos.is_empty() {
                     return Ok(extraida);
                 }
-                extraida_estatica = Some(extraida);
             }
         }
     }
 
-    // Fallback automático para SPAs / páginas renderizadas via JavaScript
+    // Fallback 1: Leitor Web Inteligente (CDP multi-página + seletor de idioma) via ai-engine
+    if let Ok(extraida_cdp) =
+        smart_discover_via_ai_engine(url_limpa, idioma_preferido.unwrap_or("pt-br")).await
+    {
+        if !extraida_cdp.capitulos.is_empty() {
+            return Ok(extraida_cdp);
+        }
+    }
+
+    // Fallback 2: Renderização simples --dump-dom caso ai-engine Python não esteja acessível
     if let Ok(dom_renderizado) = renderizar_html_com_navegador(url_limpa).await {
         let extraida = extrair_capitulos_de_html(url_limpa, &dom_renderizado);
         if !extraida.capitulos.is_empty() {
@@ -332,10 +349,58 @@ pub async fn descobrir_capitulos_por_link(
         }
     }
 
-    let _ = extraida_estatica;
     Err(SourceError::Operacao(
-        "Nenhum link de capítulo reconhecido na página da obra (nem após renderização JS). Se necessário, cole o HTML da página.".to_string(),
+        "Nenhum link de capítulo reconhecido na página da obra (nem após Leitor Web CDP). Se necessário, cole o HTML da página.".to_string(),
     ))
+}
+
+async fn smart_discover_via_ai_engine(
+    url_obra: &str,
+    idioma_preferido: &str,
+) -> Result<ObraExtraidaPorLink, SourceError> {
+    let py = mam_ai_engine::AiEngineManager::detectar_executavel_python();
+    let dir = mam_ai_engine::AiEngineManager::detectar_diretorio_padrao();
+    let manager = mam_ai_engine::AiEngineManager::nova(py, dir)
+        .com_timeout(std::time::Duration::from_secs(90));
+    let val = manager
+        .chamar(
+            "smart_discover_chapters",
+            serde_json::json!({
+                "url_obra": url_obra,
+                "idioma_preferido": idioma_preferido,
+            }),
+        )
+        .await
+        .map_err(|e| SourceError::Operacao(e.to_string()))?;
+    serde_json::from_value::<ObraExtraidaPorLink>(val)
+        .map_err(|e| SourceError::Operacao(e.to_string()))
+}
+
+/// Aciona o Leitor Web Inteligente (CDP) via `ai-engine` para extrair todas as páginas de um capítulo.
+pub async fn smart_extract_pages_via_ai_engine(
+    url_capitulo: &str,
+) -> Result<Vec<String>, SourceError> {
+    let py = mam_ai_engine::AiEngineManager::detectar_executavel_python();
+    let dir = mam_ai_engine::AiEngineManager::detectar_diretorio_padrao();
+    let manager = mam_ai_engine::AiEngineManager::nova(py, dir)
+        .com_timeout(std::time::Duration::from_secs(90));
+    let val = manager
+        .chamar(
+            "smart_extract_chapter_pages",
+            serde_json::json!({ "url_capitulo": url_capitulo }),
+        )
+        .await
+        .map_err(|e| SourceError::Operacao(e.to_string()))?;
+    let paginas = val
+        .get("paginas")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok(paginas)
 }
 
 /// Renderiza uma página SPA/JS utilizando Microsoft Edge ou Google Chrome em modo headless (`--dump-dom`).
@@ -848,18 +913,29 @@ pub fn extrair_urls_imagens_html(html: &str) -> Vec<String> {
 }
 
 fn eh_url_imagem_valida(url: &str) -> bool {
-    let lower = url.to_lowercase();
+    let lower = url.trim().to_lowercase();
     if !(lower.starts_with("http://") || lower.starts_with("https://")) {
         return false;
     }
-    let sem_query = lower.split('?').next().unwrap_or(&lower);
+    let sem_query = lower.split('?').next().unwrap_or(&lower).split('#').next().unwrap_or(&lower);
+    if [".js", ".mjs", ".css", ".html", ".htm", ".svg", ".ico", ".json", ".woff", ".woff2", ".ttf"]
+        .iter()
+        .any(|ext| sem_query.ends_with(ext))
+    {
+        return false;
+    }
+    if ["favicon", "logo", "avatar", "banner", "badge", "flag"]
+        .iter()
+        .any(|tok| sem_query.contains(tok))
+    {
+        return false;
+    }
     sem_query.ends_with(".jpg")
         || sem_query.ends_with(".jpeg")
         || sem_query.ends_with(".png")
         || sem_query.ends_with(".webp")
         || sem_query.ends_with(".avif")
         || lower.contains("/page")
-        || lower.contains("cdn")
 }
 
 fn extrair_extensao_url(url: &str) -> &'static str {
@@ -1024,5 +1100,9 @@ mod tests {
         assert_eq!(spa.capitulos.len(), 1);
         assert_eq!(spa.capitulos[0].numero, Some(192));
         assert_eq!(spa.capitulos[0].idioma.as_deref(), Some("ENG"));
+
+        assert!(!eh_url_imagem_valida("https://s.mfcdn.nl/build/mf/assets/main-B7h3oPSn.js"));
+        assert!(!eh_url_imagem_valida("https://cdn.exemplo.com/assets/logo.png"));
+        assert!(eh_url_imagem_valida("https://pw6.mfcdn2.xyz/mf/abc123/h/p.jpg"));
     }
 }

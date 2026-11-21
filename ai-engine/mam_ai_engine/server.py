@@ -8,11 +8,14 @@ from typing import Any, Callable
 
 from .models_manager import inspecionar_modelo, listar_modelos_locais
 from .pipeline import (
+    analyze_reader_dom,
     classificar_links_capitulos,
     detectar_baloes,
     detectar_provedores_inferencia,
     executar_ocr,
     processar_pagina_completa,
+    smart_discover_chapters,
+    smart_extract_chapter_pages,
     traduzir_regioes,
 )
 from .protocol import (
@@ -42,6 +45,9 @@ def handle_request(req: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         "translate": traduzir_regioes,
         "process_page": processar_pagina_completa,
         "classify_chapter_links": classificar_links_capitulos,
+        "analyze_reader_dom": analyze_reader_dom,
+        "smart_discover_chapters": smart_discover_chapters,
+        "smart_extract_chapter_pages": smart_extract_chapter_pages,
         "models_list": lambda p: listar_modelos_locais(p.get("diretorios")),
         "models_inspect": lambda p: inspecionar_modelo(str(p.get("caminho_modelo", ""))),
     }
