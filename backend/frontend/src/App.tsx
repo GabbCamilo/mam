@@ -871,7 +871,14 @@ function App() {
               <section className="mam-panel">
                 {detalhes ? (
                   <>
-                    <div className="mam-section-header">
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.75rem',
+                        marginBottom: '1rem',
+                      }}
+                    >
                       <div style={{ display: 'flex', gap: '0.85rem', alignItems: 'center' }}>
                         {capaDestaqueBiblioteca && (
                           <img
@@ -883,15 +890,17 @@ function App() {
                               objectFit: 'cover',
                               borderRadius: 8,
                               border: '1px solid var(--border-subtle)',
+                              flexShrink: 0,
                             }}
                           />
                         )}
-                        <div>
+                        <div style={{ minWidth: 0, flex: 1 }}>
                           <h2 className="mam-section-title">{detalhes.obra.titulo}</h2>
                           <p className="mam-section-desc">{detalhes.obra.caminho_relativo}</p>
                         </div>
                       </div>
-                      <div className="mam-toolbar-row">
+
+                      <div className="mam-toolbar-row" style={{ flexWrap: 'wrap' }}>
                         {(() => {
                           let ultimoCap: Capitulo | undefined
                           try {
@@ -919,33 +928,51 @@ function App() {
                           ) : null
                         })()}
                         <div className="mam-segmented">
-                        <button
-                          className={`mam-segmented-btn ${subAbaObra === 'capitulos' ? 'active' : ''}`}
-                          onClick={() => setSubAbaObra('capitulos')}
-                        >
-                          Capítulos ({capitulosFiltrados.length})
-                        </button>
-                        <button
-                          className={`mam-segmented-btn ${subAbaObra === 'volumes' ? 'active' : ''}`}
-                          onClick={() => setSubAbaObra('volumes')}
-                        >
-                          Volumes ({detalhes.volumes.length})
-                        </button>
-                        <button
-                          className={`mam-segmented-btn ${subAbaObra === 'marcados' ? 'active' : ''}`}
-                          onClick={() => setSubAbaObra('marcados')}
-                        >
-                          Marcados (
-                          {
-                            marcadoresObra.filter(
-                              (m) =>
-                                filtroIdiomaBiblioteca === 'TODOS' ||
-                                obterIdiomaCapitulo(m.capitulo) === filtroIdiomaBiblioteca,
-                            ).length
-                          }
-                          )
-                        </button>
+                          <button
+                            className={`mam-segmented-btn ${subAbaObra === 'capitulos' ? 'active' : ''}`}
+                            onClick={() => setSubAbaObra('capitulos')}
+                          >
+                            Capítulos ({capitulosFiltrados.length})
+                          </button>
+                          <button
+                            className={`mam-segmented-btn ${subAbaObra === 'volumes' ? 'active' : ''}`}
+                            onClick={() => setSubAbaObra('volumes')}
+                          >
+                            Volumes ({detalhes.volumes.length})
+                          </button>
+                          <button
+                            className={`mam-segmented-btn ${subAbaObra === 'marcados' ? 'active' : ''}`}
+                            onClick={() => setSubAbaObra('marcados')}
+                          >
+                            Marcados (
+                            {
+                              marcadoresObra.filter(
+                                (m) =>
+                                  filtroIdiomaBiblioteca === 'TODOS' ||
+                                  obterIdiomaCapitulo(m.capitulo) === filtroIdiomaBiblioteca,
+                              ).length
+                            }
+                            )
+                          </button>
                         </div>
+                        {idiomasBibliotecaDisponiveis.length > 0 && (
+                          <select
+                            className="mam-select"
+                            aria-label="Filtrar capítulos por idioma"
+                            value={filtroIdiomaBiblioteca}
+                            onChange={(e) => setFiltroIdiomaBiblioteca(e.target.value)}
+                          >
+                            <option value="TODOS">LANG: Todos</option>
+                            {idiomasBibliotecaDisponiveis.map((lang) => (
+                              <option key={lang} value={lang}>
+                                LANG: {lang}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+
+                      <div>
                         <button
                           className="mam-btn"
                           onClick={(e) => handleExcluirObra(e, detalhes.obra.id, detalhes.obra.titulo)}
@@ -965,21 +992,6 @@ function App() {
                             value={buscaCapitulo}
                             onChange={(e) => setBuscaCapitulo(e.target.value)}
                           />
-                          {idiomasBibliotecaDisponiveis.length > 0 && (
-                            <select
-                              className="mam-select"
-                              aria-label="Filtrar capítulos por idioma"
-                              value={filtroIdiomaBiblioteca}
-                              onChange={(e) => setFiltroIdiomaBiblioteca(e.target.value)}
-                            >
-                              <option value="TODOS">LANG: Todos</option>
-                              {idiomasBibliotecaDisponiveis.map((lang) => (
-                                <option key={lang} value={lang}>
-                                  LANG: {lang}
-                                </option>
-                              ))}
-                            </select>
-                          )}
                           <button
                             className="mam-btn"
                             onClick={() => setOrdemCaps((o) => (o === 'desc' ? 'asc' : 'desc'))}
@@ -1428,7 +1440,12 @@ function App() {
                         </button>
                       </div>
                     </div>
-                    {capitulosFonteFiltrados.map((c) => (
+                    {capitulosFonteFiltrados.length === 0 ? (
+                      <p className="mam-section-desc">
+                        Nenhum capítulo hospedado diretamente nesta fonte para os idiomas PT/ENG/JPN (esta obra pode possuir apenas links externos de editoras oficiais como MangaPlus/Viz). Use "+ Importar por Link / HTML" se desejar importar manualmente.
+                      </p>
+                    ) : (
+                      capitulosFonteFiltrados.map((c) => (
                       <label key={c.capitulo_id_fonte} className="mam-row-card">
                         <span style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                           <input
@@ -1442,7 +1459,8 @@ function App() {
                           </span>
                         </span>
                       </label>
-                    ))}
+                    ))
+                    )}
                   </>
                 ) : (
                   <p className="mam-section-desc">

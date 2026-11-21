@@ -369,8 +369,10 @@ body,
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.65rem 1rem;
-  background: #101725;
-  border-bottom: 1px solid #1e293b;
+  background: rgba(16, 23, 37, 0.86);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow: 0 10px 24px -8px rgba(7, 10, 16, 0.85);
   flex-wrap: wrap;
 }
 

@@ -20,9 +20,34 @@ impl MangaDexFonte {
     pub fn nova() -> Self {
         let client = reqwest::Client::builder()
             .user_agent("MAM-MangaArchiveManager/0.1.0")
+            .http1_only()
+            .pool_max_idle_per_host(0)
+            .timeout(std::time::Duration::from_secs(25))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         Self { client }
+    }
+
+    async fn enviar_com_retry(
+        &self,
+        build: impl Fn() -> reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, FonteError> {
+        let mut ultimo_erro = None;
+        for tentativa in 0..3 {
+            match build().send().await {
+                Ok(resp) => return Ok(resp),
+                Err(e) => {
+                    ultimo_erro = Some(e.to_string());
+                    if tentativa < 2 {
+                        tokio::time::sleep(std::time::Duration::from_millis(300 * (tentativa + 1)))
+                            .await;
+                    }
+                }
+            }
+        }
+        Err(FonteError::Rede(
+            ultimo_erro.unwrap_or_else(|| "Falha de rede ao consultar MangaDex".to_string()),
+        ))
     }
 }
 
@@ -116,12 +141,12 @@ impl Fonte for MangaDexFonte {
 
     async fn buscar_obras(&self, consulta: &str) -> Result<Vec<ObraEncontrada>, FonteError> {
         let resp = self
-            .client
-            .get(format!("{}/manga", API_BASE))
-            .query(&[("title", consulta), ("limit", "15"), ("includes[]", "cover_art")])
-            .send()
-            .await
-            .map_err(|e| FonteError::Rede(e.to_string()))?;
+            .enviar_com_retry(|| {
+                self.client
+                    .get(format!("{}/manga", API_BASE))
+                    .query(&[("title", consulta), ("limit", "15"), ("includes[]", "cover_art")])
+            })
+            .await?;
 
         if !resp.status().is_success() {
             return Err(FonteError::Rede(format!("HTTP {}", resp.status())));
@@ -161,19 +186,19 @@ impl Fonte for MangaDexFonte {
         obra_id_fonte: &str,
     ) -> Result<Vec<CapituloEncontrado>, FonteError> {
         let resp = self
-            .client
-            .get(format!("{}/manga/{}/feed", API_BASE, obra_id_fonte))
-            .query(&[
-                ("limit", "100"),
-                ("order[chapter]", "asc"),
-                ("includeExternalUrl", "0"),
-                ("translatedLanguage[]", "pt-br"),
-                ("translatedLanguage[]", "en"),
-                ("translatedLanguage[]", "ja"),
-            ])
-            .send()
-            .await
-            .map_err(|e| FonteError::Rede(e.to_string()))?;
+            .enviar_com_retry(|| {
+                self.client
+                    .get(format!("{}/manga/{}/feed", API_BASE, obra_id_fonte))
+                    .query(&[
+                        ("limit", "100"),
+                        ("order[chapter]", "asc"),
+                        ("includeExternalUrl", "0"),
+                        ("translatedLanguage[]", "pt-br"),
+                        ("translatedLanguage[]", "en"),
+                        ("translatedLanguage[]", "ja"),
+                    ])
+            })
+            .await?;
 
         if !resp.status().is_success() {
             return Err(FonteError::Rede(format!("HTTP {}", resp.status())));
@@ -215,11 +240,11 @@ impl Fonte for MangaDexFonte {
 
     async fn obter_capitulo(&self, capitulo_id_fonte: &str) -> Result<Vec<u8>, FonteError> {
         let resp = self
-            .client
-            .get(format!("{}/at-home/server/{}", API_BASE, capitulo_id_fonte))
-            .send()
-            .await
-            .map_err(|e| FonteError::Rede(e.to_string()))?;
+            .enviar_com_retry(|| {
+                self.client
+                    .get(format!("{}/at-home/server/{}", API_BASE, capitulo_id_fonte))
+            })
+            .await?;
 
         if !resp.status().is_success() {
             return Err(FonteError::Rede(format!("HTTP {}", resp.status())));
