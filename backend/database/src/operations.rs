@@ -398,6 +398,16 @@ impl Database {
         Ok(itens)
     }
 
+    /// Remove uma chave de configuração pelo nome exato.
+    pub async fn remover_configuracao(&self, chave: &str) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "DELETE FROM configuracao_biblioteca WHERE chave = ?1",
+            params![chave],
+        )?;
+        Ok(())
+    }
+
     // ── Resultados de IA (OCR, balões, tradução e revisão) ──
 
     pub async fn salvar_resultado_ia(

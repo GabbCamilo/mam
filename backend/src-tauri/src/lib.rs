@@ -539,6 +539,15 @@ async fn library_limpar_historico_logs(
 }
 
 #[tauri::command]
+async fn reader_remover_marcador(
+    db: tauri::State<'_, Arc<Database>>,
+    capitulo_id: String,
+    pagina: usize,
+) -> Result<(), String> {
+    mam_interface::reader_remover_marcador(db.inner().clone(), capitulo_id, pagina).await
+}
+
+#[tauri::command]
 async fn library_excluir_capitulo(
     db: tauri::State<'_, Arc<Database>>,
     library_manager: tauri::State<'_, Arc<LibraryManager>>,
@@ -601,6 +610,7 @@ pub fn run() {
       reader_obter_progresso,
       reader_alternar_favorito,
       reader_adicionar_marcador,
+      reader_remover_marcador,
       reader_listar_marcadores,
       transfer_copia_integral,
       transfer_seletiva,

@@ -520,6 +520,18 @@ pub async fn reader_adicionar_marcador(
         .map_err(|e| e.to_string())
 }
 
+/// Remove o marcador de uma página específica do capítulo.
+pub async fn reader_remover_marcador(
+    db: Arc<Database>,
+    capitulo_id: String,
+    pagina: usize,
+) -> Result<(), String> {
+    let chave = format!("reader:marcador:{}:{:06}", capitulo_id, pagina);
+    db.remover_configuracao(&chave)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Lista todos os marcadores salvos para um capítulo.
 pub async fn reader_listar_marcadores(
     db: Arc<Database>,

@@ -19,7 +19,7 @@ import {
 import { CbzReader } from './components/CbzReader'
 
 type AbaAtiva = 'biblioteca' | 'fontes' | 'downloads' | 'transferencia' | 'ai'
-type SubAbaObra = 'capitulos' | 'volumes'
+type SubAbaObra = 'capitulos' | 'volumes' | 'marcados'
 type OrdemBiblioteca = 'nome-asc' | 'nome-desc' | 'caps-desc' | 'caps-asc'
 
 function obterIdiomaCapitulo(cap: Capitulo): string | null {
@@ -53,6 +53,10 @@ function App() {
   const [capaBiblioteca, setCapaBiblioteca] = useState<PaginaExtraida | null>(null)
   const [capitulosLidos, setCapitulosLidos] = useState<string[]>([])
   const [capituloAtivo, setCapituloAtivo] = useState<Capitulo | null>(null)
+  const [paginaInicialAtiva, setPaginaInicialAtiva] = useState<number | null>(null)
+  const [marcadoresObra, setMarcadoresObra] = useState<
+    Array<{ capitulo: Capitulo; pagina: number; nota: string }>
+  >([])
   const [tituloNovaObra, setTituloNovaObra] = useState('')
   const [caminhoNovaObra, setCaminhoNovaObra] = useState('')
   const [mensagem, setMensagem] = useState<string | null>(null)
@@ -522,14 +526,40 @@ function App() {
     return () => clearInterval(interval)
   }, [temDownloadAtivo])
 
-  function abrirCapituloParaLeitura(cap: Capitulo) {
+  function abrirCapituloParaLeitura(cap: Capitulo, paginaInicial: number | null = null) {
     try {
       localStorage.setItem(`mam:ultimo_cap:${cap.obra_id}`, cap.id)
     } catch {
       // Ignora indisponibilidade de storage
     }
+    setPaginaInicialAtiva(paginaInicial)
     setCapituloAtivo(cap)
   }
+
+  async function carregarMarcadoresObra(d: DetalhesObra | null) {
+    if (!d) {
+      setMarcadoresObra([])
+      return
+    }
+    const caps = [...d.volumes.flatMap((v) => v.capitulos), ...d.capitulos_avulsos].sort(
+      (a, b) => a.numero - b.numero,
+    )
+    const listas = await Promise.all(
+      caps.map(async (cap) => {
+        try {
+          const ms = await mamApi.listarMarcadores(cap.id)
+          return ms.map((m) => ({ capitulo: cap, pagina: m.pagina, nota: m.nota }))
+        } catch {
+          return []
+        }
+      }),
+    )
+    setMarcadoresObra(listas.flat())
+  }
+
+  useEffect(() => {
+    carregarMarcadoresObra(detalhes)
+  }, [detalhes])
 
   async function handleAbrirCapituloDoLog(item: DownloadLogItem) {
     try {
@@ -662,10 +692,13 @@ function App() {
           capitulosMesmoIdioma.length > 0 ? capitulosMesmoIdioma : todosCapitulosObra
         }
         volumesDisponiveis={detalhes?.volumes ?? []}
-        onSelecionarCapitulo={abrirCapituloParaLeitura}
+        paginaInicial={paginaInicialAtiva}
+        onSelecionarCapitulo={(cap) => abrirCapituloParaLeitura(cap, null)}
         onFechar={async () => {
           setCapituloAtivo(null)
+          setPaginaInicialAtiva(null)
           await carregarObras()
+          await carregarMarcadoresObra(detalhes)
         }}
       />
     )
@@ -829,13 +862,6 @@ function App() {
                         <span className="mam-pill-badge" style={{ whiteSpace: 'nowrap' }}>
                           {item.total_capitulos} cap(s)
                         </span>
-                        <button
-                          className="mam-btn"
-                          title="Excluir obra da biblioteca"
-                          onClick={(e) => handleExcluirObra(e, item.obra.id, item.obra.titulo)}
-                        >
-                          🗑
-                        </button>
                       </div>
                     </div>
                   ))
@@ -904,6 +930,20 @@ function App() {
                           onClick={() => setSubAbaObra('volumes')}
                         >
                           Volumes ({detalhes.volumes.length})
+                        </button>
+                        <button
+                          className={`mam-segmented-btn ${subAbaObra === 'marcados' ? 'active' : ''}`}
+                          onClick={() => setSubAbaObra('marcados')}
+                        >
+                          Marcados (
+                          {
+                            marcadoresObra.filter(
+                              (m) =>
+                                filtroIdiomaBiblioteca === 'TODOS' ||
+                                obterIdiomaCapitulo(m.capitulo) === filtroIdiomaBiblioteca,
+                            ).length
+                          }
+                          )
                         </button>
                         </div>
                         <button
@@ -1194,6 +1234,81 @@ function App() {
                             Nenhum volume agrupado; selecione os capítulos acima para formar um volume.
                           </p>
                         )}
+                      </>
+                    )}
+
+                    {subAbaObra === 'marcados' && (
+                      <>
+                        {idiomasBibliotecaDisponiveis.length > 0 && (
+                          <div className="mam-toolbar-row" style={{ marginBottom: '0.6rem' }}>
+                            <select
+                              className="mam-select"
+                              aria-label="Filtrar páginas marcadas por idioma"
+                              value={filtroIdiomaBiblioteca}
+                              onChange={(e) => setFiltroIdiomaBiblioteca(e.target.value)}
+                            >
+                              <option value="TODOS">LANG: Todos</option>
+                              {idiomasBibliotecaDisponiveis.map((lang) => (
+                                <option key={lang} value={lang}>
+                                  LANG: {lang}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        {(() => {
+                          const filtrados = marcadoresObra.filter(
+                            (m) =>
+                              filtroIdiomaBiblioteca === 'TODOS' ||
+                              obterIdiomaCapitulo(m.capitulo) === filtroIdiomaBiblioteca,
+                          )
+                          if (filtrados.length === 0) {
+                            return (
+                              <p className="mam-section-desc">
+                                Nenhuma página marcada nesta obra para o idioma selecionado.
+                              </p>
+                            )
+                          }
+                          return (
+                            <div style={{ display: 'grid', gap: '0.5rem' }}>
+                              {filtrados.map((m) => {
+                                const lang = obterIdiomaCapitulo(m.capitulo)
+                                return (
+                                  <div
+                                    key={`${m.capitulo.id}-${m.pagina}`}
+                                    className="mam-row-card"
+                                    onClick={() => abrirCapituloParaLeitura(m.capitulo, m.pagina)}
+                                  >
+                                    <div>
+                                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                        {lang && <span className="mam-pill-badge">{lang}</span>}
+                                        <strong>
+                                          Cap. {m.capitulo.numero} • {m.nota}
+                                        </strong>
+                                      </div>
+                                      <div className="mam-brand-sub">{m.capitulo.caminho_relativo}</div>
+                                    </div>
+                                    <div className="mam-toolbar-row">
+                                      <button
+                                        className="mam-btn"
+                                        onClick={async (e) => {
+                                          e.stopPropagation()
+                                          await mamApi.removerMarcador(m.capitulo.id, m.pagina)
+                                          await carregarMarcadoresObra(detalhes)
+                                          setMensagem('Marcador removido.')
+                                        }}
+                                        title="Desmarcar página"
+                                      >
+                                        🔖 Desmarcar
+                                      </button>
+                                      <button className="mam-btn mam-btn-primary">Ler</button>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )
+                        })()}
                       </>
                     )}
                   </>

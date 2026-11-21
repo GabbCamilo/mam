@@ -15,6 +15,7 @@ interface CbzReaderProps {
   capitulo: Capitulo
   capitulosDisponiveis: Capitulo[]
   volumesDisponiveis?: VolumeComCapitulos[]
+  paginaInicial?: number | null
   onSelecionarCapitulo: (capitulo: Capitulo) => void
   onFechar: () => void
 }
@@ -23,6 +24,7 @@ export function CbzReader({
   capitulo,
   capitulosDisponiveis,
   volumesDisponiveis = [],
+  paginaInicial = null,
   onSelecionarCapitulo,
   onFechar,
 }: CbzReaderProps) {
@@ -33,9 +35,17 @@ export function CbzReader({
   const [modo, setModo] = useState<ModoLeitura>('horizontal')
   const [ajuste, setAjuste] = useState<AjusteTela>('fit-width')
   const [zoom, setZoom] = useState(30)
+  const [zoomPadraoPorModo, setZoomPadraoPorModo] = useState<Record<ModoLeitura, number>>({
+    horizontal: 30,
+    dupla: 110,
+    vertical: 40,
+  })
+  const [usarZoomPadrao, setUsarZoomPadrao] = useState(true)
+  const [barraVisivel, setBarraVisivel] = useState(true)
   const [telaCheia, setTelaCheia] = useState(false)
   const [paginaHover, setPaginaHover] = useState<number | null>(null)
   const viewportRef = useRef<HTMLDivElement | null>(null)
+  const lastScrollTopRef = useRef(0)
   const longStripPageRefs = useRef<(HTMLImageElement | null)[]>([])
   const pendingScrollRatioRef = useRef<{ x: number; y: number } | null>(null)
   const [marcadores, setMarcadores] = useState<MarcadorPagina[]>([])
@@ -72,19 +82,31 @@ export function CbzReader({
           mamApi.aiListarResultadosCapitulo(capitulo.id),
         ])
         if (!ativo) return
-        setIndiceAtual(progresso)
+        setIndiceAtual(paginaInicial !== null && paginaInicial !== undefined ? paginaInicial : progresso)
         setMarcadores(listaMarcadores)
         setResultadosIa(listaIa)
       } catch {
         if (!ativo) return
-        setIndiceAtual(0)
+        setIndiceAtual(paginaInicial ?? 0)
       }
     }
     inicializar()
     return () => {
       ativo = false
     }
-  }, [capitulo.id])
+  }, [capitulo.id, paginaInicial])
+
+  useEffect(() => {
+    if (usarZoomPadrao) {
+      setZoom(zoomPadraoPorModo[modo])
+    }
+  }, [indiceAtual, capitulo.id, modo, usarZoomPadrao, zoomPadraoPorModo])
+
+  useEffect(() => {
+    if (modo !== 'vertical') {
+      setBarraVisivel(true)
+    }
+  }, [modo])
 
   useEffect(() => {
     let ativo = true
@@ -248,8 +270,14 @@ export function CbzReader({
     }
   }
 
-  async function handleAdicionarMarcador() {
-    await mamApi.adicionarMarcador(capitulo.id, indiceAtual, `Página ${indiceAtual + 1}`)
+  const paginaAtualMarcada = marcadores.some((m) => m.pagina === indiceAtual)
+
+  async function handleAlternarMarcador() {
+    if (paginaAtualMarcada) {
+      await mamApi.removerMarcador(capitulo.id, indiceAtual)
+    } else {
+      await mamApi.adicionarMarcador(capitulo.id, indiceAtual, `Página ${indiceAtual + 1}`)
+    }
     const atualizados = await mamApi.listarMarcadores(capitulo.id)
     setMarcadores(atualizados)
   }
@@ -284,6 +312,7 @@ export function CbzReader({
 
   return (
     <div className="mam-reader-shell">
+      {barraVisivel && (
       <div className="mam-reader-toolbar">
         <div className="mam-toolbar-row">
           <button className="mam-btn" onClick={onFechar}>
@@ -311,8 +340,11 @@ export function CbzReader({
           >
             {telaCheia ? '⤢ Sair Tela Cheia' : '⛶ Tela Cheia'}
           </button>
-          <button className="mam-btn" onClick={handleAdicionarMarcador}>
-            🔖 Marcar
+          <button
+            className={`mam-btn ${paginaAtualMarcada ? 'mam-btn-active' : ''}`}
+            onClick={handleAlternarMarcador}
+          >
+            {paginaAtualMarcada ? '🔖 Desmarcar' : '🔖 Marcar'}
           </button>
           <button
             className={`mam-btn ${mostrarSobreposicao ? 'mam-btn-active' : ''}`}
@@ -351,11 +383,13 @@ export function CbzReader({
           </button>
         </div>
       </div>
+      )}
 
-      {marcadores.length > 0 && (
+      {barraVisivel && marcadores.length > 0 && (
         <div
           style={{
             display: 'flex',
+            alignItems: 'center',
             gap: '0.4rem',
             flexWrap: 'wrap',
             padding: '0.45rem 1rem',
@@ -366,7 +400,7 @@ export function CbzReader({
         >
           <span style={{ color: '#94a3b8' }}>Marcadores:</span>
           {marcadores.map((m) => (
-            <button key={m.pagina} className="mam-btn" onClick={() => setIndiceAtual(m.pagina)}>
+            <button key={m.pagina} className="mam-btn" onClick={() => irParaPagina(m.pagina)}>
               {m.nota}
             </button>
           ))}
@@ -494,6 +528,17 @@ export function CbzReader({
       <div
         ref={viewportRef}
         className="mam-reader-viewport"
+        onScroll={(e) => {
+          if (modo === 'vertical') {
+            const st = e.currentTarget.scrollTop
+            if (st > lastScrollTopRef.current + 6) {
+              setBarraVisivel(false)
+            } else if (st < lastScrollTopRef.current - 6) {
+              setBarraVisivel(true)
+            }
+            lastScrollTopRef.current = st
+          }
+        }}
         onWheel={(e) => {
           if (e.ctrlKey) {
             e.preventDefault()
@@ -744,7 +789,7 @@ export function CbzReader({
                 className={`mam-layout-card ${modo === 'horizontal' ? 'active' : ''}`}
                 onClick={() => {
                   setModo('horizontal')
-                  setZoom(30)
+                  setZoom(zoomPadraoPorModo.horizontal)
                 }}
               >
                 <span>▯</span>
@@ -754,7 +799,7 @@ export function CbzReader({
                 className={`mam-layout-card ${modo === 'dupla' ? 'active' : ''}`}
                 onClick={() => {
                   setModo('dupla')
-                  setZoom(110)
+                  setZoom(zoomPadraoPorModo.dupla)
                 }}
               >
                 <span>▯▯</span>
@@ -764,7 +809,7 @@ export function CbzReader({
                 className={`mam-layout-card ${modo === 'vertical' ? 'active' : ''}`}
                 onClick={() => {
                   setModo('vertical')
-                  setZoom(100)
+                  setZoom(zoomPadraoPorModo.vertical)
                 }}
               >
                 <span>☰</span>
@@ -784,11 +829,32 @@ export function CbzReader({
                 </button>
                 <button
                   className="mam-btn"
-                  onClick={() =>
-                    aplicarZoom(modo === 'horizontal' ? 30 : modo === 'dupla' ? 110 : 100)
-                  }
+                  onClick={() => aplicarZoom(zoomPadraoPorModo[modo])}
                 >
                   Reset
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <small style={{ color: '#94a3b8' }}>ZOOM PADRÃO</small>
+              <div className="mam-toolbar-row" style={{ marginTop: '0.35rem' }}>
+                <button
+                  className={`mam-btn ${usarZoomPadrao ? 'mam-btn-active' : ''}`}
+                  onClick={() => setUsarZoomPadrao((v) => !v)}
+                >
+                  {usarZoomPadrao
+                    ? `✓ Zoom Padrão (${zoomPadraoPorModo[modo]}%)`
+                    : 'Zoom Padrão: OFF'}
+                </button>
+                <button
+                  className="mam-btn"
+                  onClick={() => {
+                    setZoomPadraoPorModo((prev) => ({ ...prev, [modo]: zoom }))
+                    setUsarZoomPadrao(true)
+                  }}
+                >
+                  Usar {zoom}% como padrão
                 </button>
               </div>
             </div>

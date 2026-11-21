@@ -195,6 +195,8 @@ export const mamApi = {
     invoke<boolean>('reader_alternar_favorito', { alvoId }),
   adicionarMarcador: (capituloId: string, pagina: number, nota: string) =>
     invoke<void>('reader_adicionar_marcador', { capituloId, pagina, nota }),
+  removerMarcador: (capituloId: string, pagina: number) =>
+    invoke<void>('reader_remover_marcador', { capituloId, pagina }),
   listarMarcadores: (capituloId: string) =>
     invoke<MarcadorPagina[]>('reader_listar_marcadores', { capituloId }),
   transferCopiaIntegral: (origem: string, destino: string) =>
