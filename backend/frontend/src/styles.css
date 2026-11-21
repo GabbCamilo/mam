@@ -277,6 +277,46 @@ body,
   border-color: var(--accent);
 }
 
+.mam-chapter-row-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.mam-chapter-header-line {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.mam-chapter-title {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: min(46ch, 100%);
+  display: inline-block;
+  vertical-align: bottom;
+}
+
+.mam-chapter-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+}
+
+@media (max-width: 640px) {
+  .mam-row-card {
+    flex-wrap: wrap;
+  }
+  .mam-chapter-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
 .mam-segmented {
   display: inline-flex;
   background: var(--bg-input);

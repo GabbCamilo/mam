@@ -1138,12 +1138,15 @@ function App() {
                                     className="mam-row-card"
                                     onClick={() => abrirCapituloParaLeitura(cap)}
                                   >
-                                    <div>
-                                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <div className="mam-chapter-row-main">
+                                      <div className="mam-chapter-header-line">
                                         {idiomaCap && <span className="mam-pill-badge">{idiomaCap}</span>}
-                                        <strong>Cap. {cap.numero}</strong>
+                                        <strong style={{ whiteSpace: 'nowrap' }}>Cap. {cap.numero}</strong>
                                         {cap.titulo_original && (
-                                          <span style={{ color: 'var(--text-secondary)' }}>
+                                          <span
+                                            className="mam-chapter-title"
+                                            title={cap.titulo_original}
+                                          >
                                             • {cap.titulo_original}
                                           </span>
                                         )}
@@ -1151,6 +1154,7 @@ function App() {
                                           className="mam-pill-badge"
                                           style={{
                                             cursor: 'pointer',
+                                            whiteSpace: 'nowrap',
                                             background: lido ? 'rgba(34, 197, 94, 0.16)' : 'rgba(148, 163, 184, 0.12)',
                                             color: lido ? 'var(--success)' : 'var(--text-secondary)',
                                             borderColor: lido ? 'rgba(34, 197, 94, 0.35)' : 'var(--border-subtle)',
@@ -1160,9 +1164,11 @@ function App() {
                                           {lido ? '✓ Lido' : '○ Não lido'}
                                         </button>
                                       </div>
-                                      <div className="mam-brand-sub">{cap.caminho_relativo}</div>
+                                      <div className="mam-brand-sub" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {cap.caminho_relativo}
+                                      </div>
                                     </div>
-                                    <div className="mam-toolbar-row">
+                                    <div className="mam-chapter-actions">
                                       <span className="mam-pill-badge">{cap.quantidade_paginas} págs</span>
                                       <button
                                         className="mam-btn"
@@ -1308,14 +1314,22 @@ function App() {
                                     className="mam-row-card"
                                     onClick={() => abrirCapituloParaLeitura(cap)}
                                   >
-                                    <span style={{ display: 'flex', gap: '0.45rem', alignItems: 'center' }}>
-                                      {langCap && <span className="mam-pill-badge">{langCap}</span>}
-                                      <span>
-                                        Cap. {cap.numero}
-                                        {cap.titulo_original ? ` — ${cap.titulo_original}` : ''} ({cap.quantidade_paginas} págs)
-                                      </span>
-                                    </span>
-                                    <div className="mam-toolbar-row">
+                                    <div className="mam-chapter-row-main">
+                                      <div className="mam-chapter-header-line">
+                                        {langCap && <span className="mam-pill-badge">{langCap}</span>}
+                                        <strong style={{ whiteSpace: 'nowrap' }}>Cap. {cap.numero}</strong>
+                                        {cap.titulo_original && (
+                                          <span
+                                            className="mam-chapter-title"
+                                            title={cap.titulo_original}
+                                          >
+                                            — {cap.titulo_original}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="mam-chapter-actions">
+                                      <span className="mam-pill-badge">{cap.quantidade_paginas} págs</span>
                                       <button
                                         className="mam-btn"
                                         onClick={(e) => handleRenomearCapitulo(e, cap)}
@@ -1540,15 +1554,15 @@ function App() {
                       className={`mam-row-card ${obraFonteSelecionada?.obra_id_fonte === o.obra_id_fonte ? 'mam-row-card-active' : ''}`}
                       onClick={() => handleSelecionarObraFonte(o)}
                     >
-                      <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center', minWidth: 0 }}>
                         {capaSrc && (
                           <img
                             src={capaSrc}
                             alt={o.titulo}
-                            style={{ width: 40, height: 56, objectFit: 'cover', borderRadius: 6 }}
+                            style={{ width: 40, height: 56, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }}
                           />
                         )}
-                        <span>{o.titulo}</span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.titulo}</span>
                       </div>
                     </div>
                   )
@@ -1559,12 +1573,12 @@ function App() {
                 {obraFonteSelecionada ? (
                   <>
                     <div className="mam-section-header">
-                      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', minWidth: 0 }}>
                         {obraFonteSelecionada.capa_url && capasCache[obraFonteSelecionada.capa_url] && (
                           <img
                             src={capasCache[obraFonteSelecionada.capa_url]}
                             alt={obraFonteSelecionada.titulo}
-                            style={{ width: 52, height: 74, objectFit: 'cover', borderRadius: 8 }}
+                            style={{ width: 52, height: 74, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }}
                           />
                         )}
                         <strong>{obraFonteSelecionada.titulo}</strong>

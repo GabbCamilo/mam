@@ -99,7 +99,7 @@ pub async fn obter_obra_galeria(url_galeria: &str) -> Result<ObraExtraidaPorLink
     let capa_url = data
         .cover
         .as_ref()
-        .map(|c| format!("https://i.nhentai.net/{}", c.path.trim_start_matches('/')))
+        .map(|c| format!("https://t.nhentai.net/{}", c.path.trim_start_matches('/')))
         .or_else(|| {
             data.pages
                 .first()
@@ -170,7 +170,15 @@ pub fn extrair_colecao_html(url_pagina: &str, html: &str) -> ObraExtraidaPorLink
         let trecho_fim = (abs + 900).min(html.len());
         let trecho = &html[abs..trecho_fim];
         let titulo_alt = extrair_attr(trecho, "alt=").or_else(|| extrair_caption(trecho));
-        let capa_item = extrair_attr(trecho, "data-src=").or_else(|| extrair_attr(trecho, "src="));
+        let capa_item = extrair_attr(trecho, "data-src=")
+            .or_else(|| extrair_attr(trecho, "src="))
+            .map(|u| {
+                if u.starts_with("//") {
+                    format!("https:{}", u)
+                } else {
+                    u
+                }
+            });
         if primeira_capa.is_none() {
             primeira_capa = capa_item;
         }
