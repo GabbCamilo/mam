@@ -2,6 +2,7 @@
 //! Cópia integral, sincronização e transferência seletiva de bibliotecas.
 //! Garante validação SHA-256 pós-cópia e nunca exclui arquivos da origem.
 
+pub mod container;
 pub mod copia;
 pub mod sincronizacao;
 
@@ -11,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+pub use container::RelatorioContainer;
 pub use sincronizacao::DiferencaBibliotecas;
 
 /// Erros do módulo de transferência e sincronização.
@@ -89,23 +91,72 @@ impl TransferManager {
         copia::transferencia_seletiva(origem, destino, caminhos_relativos)
     }
 
-    /// Compara duas bibliotecas identificando arquivos ausentes, diferentes e idênticos.
+    /// Compara duas bibliotecas (ou um container `.zip` com uma biblioteca) identificando ausentes, diferentes e idênticos.
     pub async fn comparar_bibliotecas(
         &self,
         origem: &Path,
         destino: &Path,
     ) -> Result<DiferencaBibliotecas, TransferError> {
-        sincronizacao::comparar_bibliotecas(origem, destino)
+        let orig = origem.to_path_buf();
+        let dest = destino.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let eh_zip = orig
+                .is_file()
+                && orig
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("zip"));
+            if eh_zip {
+                container::comparar_container_com_biblioteca(&orig, &dest)
+            } else {
+                sincronizacao::comparar_bibliotecas(&orig, &dest)
+            }
+        })
+        .await
+        .map_err(|e| TransferError::Storage(format!("Falha em tarefa de comparação: {}", e)))?
     }
 
-    /// Sincroniza duas bibliotecas com controle explícito de sobrescrita.
+    /// Sincroniza duas bibliotecas (ou de um container `.zip` para biblioteca) com controle explícito de sobrescrita.
     pub async fn sincronizar_bibliotecas(
         &self,
         origem: &Path,
         destino: &Path,
         permitir_sobrescrita: bool,
     ) -> Result<RelatorioTransferencia, TransferError> {
-        sincronizacao::sincronizar_bibliotecas(origem, destino, permitir_sobrescrita)
+        let orig = origem.to_path_buf();
+        let dest = destino.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let eh_zip = orig
+                .is_file()
+                && orig
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("zip"));
+            if eh_zip {
+                container::sincronizar_container_para_biblioteca(&orig, &dest, permitir_sobrescrita)
+            } else {
+                sincronizacao::sincronizar_bibliotecas(&orig, &dest, permitir_sobrescrita)
+            }
+        })
+        .await
+        .map_err(|e| TransferError::Storage(format!("Falha em tarefa de sincronização: {}", e)))?
+    }
+
+    /// Comprime uma biblioteca completa em um container `.zip` nomeável para distribuição.
+    pub async fn empacotar_container(
+        &self,
+        raiz_biblioteca: &Path,
+        pasta_destino: &Path,
+        nome_container: &str,
+    ) -> Result<RelatorioContainer, TransferError> {
+        let raiz = raiz_biblioteca.to_path_buf();
+        let dest = pasta_destino.to_path_buf();
+        let nome = nome_container.to_string();
+        tokio::task::spawn_blocking(move || {
+            container::empacotar_biblioteca_container(&raiz, &dest, &nome)
+        })
+        .await
+        .map_err(|e| TransferError::Storage(format!("Falha em tarefa de empacotamento: {}", e)))?
     }
 }
 
@@ -191,6 +242,53 @@ mod tests {
         assert_eq!(
             fs::read(destino.join("Manga/conflito.cbz")).unwrap(),
             b"versao-destino"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn container_empacota_compara_e_sincroniza() {
+        let base = env::temp_dir().join(format!("mam_test_container_{}", Uuid::new_v4()));
+        let origem = base.join("bib_origem");
+        let exports = base.join("exports");
+        let destino = base.join("bib_destino");
+        fs::create_dir_all(origem.join("Manga/Obra X")).unwrap();
+        fs::create_dir_all(origem.join("System")).unwrap();
+        fs::create_dir_all(destino.join("Manga/Obra X")).unwrap();
+
+        fs::write(origem.join("Manga/Obra X/Cap_01.cbz"), b"cbz-1").unwrap();
+        fs::write(origem.join("Manga/Obra X/Cap_02.cbz"), b"cbz-2").unwrap();
+        fs::write(origem.join("System/database.db"), b"sqlite-db").unwrap();
+        fs::write(destino.join("Manga/Obra X/Cap_01.cbz"), b"cbz-1").unwrap();
+
+        let tm = TransferManager::nova();
+        let rel_c = tm
+            .empacotar_container(&origem, &exports, "ColecaoTeste")
+            .await
+            .unwrap();
+        assert_eq!(rel_c.quantidade_arquivos, 3);
+        let zip_path = std::path::PathBuf::from(&rel_c.caminho_arquivo);
+        assert!(zip_path.exists());
+
+        let diff = tm.comparar_bibliotecas(&zip_path, &destino).await.unwrap();
+        assert!(diff
+            .ausentes_no_destino
+            .contains(&"Manga/Obra X/Cap_02.cbz".to_string()));
+        assert!(diff
+            .identicos
+            .contains(&"Manga/Obra X/Cap_01.cbz".to_string()));
+
+        let rel_s = tm
+            .sincronizar_bibliotecas(&zip_path, &destino, false)
+            .await
+            .unwrap();
+        assert!(rel_s
+            .arquivos_copiados
+            .contains(&"Manga/Obra X/Cap_02.cbz".to_string()));
+        assert_eq!(
+            fs::read(destino.join("Manga/Obra X/Cap_02.cbz")).unwrap(),
+            b"cbz-2"
         );
 
         let _ = fs::remove_dir_all(&base);

@@ -759,6 +759,26 @@ pub async fn reader_listar_marcadores_obra(
         .collect())
 }
 
+/// Comprime toda a biblioteca atual em um arquivo container `.zip` nomeável para distribuição.
+pub async fn transfer_empacotar_container(
+    db: Arc<Database>,
+    library_manager: Arc<LibraryManager>,
+    transfer_manager: Arc<TransferManager>,
+    pasta_destino: Option<String>,
+    nome_container: String,
+) -> Result<mam_transfer::RelatorioContainer, String> {
+    let _ = db.checkpoint_truncar().await;
+    let raiz = library_manager.raiz();
+    let destino = match pasta_destino {
+        Some(p) if !p.trim().is_empty() => std::path::PathBuf::from(p.trim()),
+        _ => raiz.join("Exports"),
+    };
+    transfer_manager
+        .empacotar_container(raiz, &destino, &nome_container)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Executa cópia integral de uma biblioteca origem para um destino.
 pub async fn transfer_copia_integral(
     transfer_manager: Arc<TransferManager>,

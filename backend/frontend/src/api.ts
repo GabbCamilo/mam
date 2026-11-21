@@ -67,6 +67,12 @@ export interface RelatorioTransferencia {
   bytes_transferidos: number
 }
 
+export interface RelatorioContainer {
+  caminho_arquivo: string
+  quantidade_arquivos: number
+  bytes_totais: number
+}
+
 export interface DiferencaBibliotecas {
   ausentes_no_destino: string[]
   diferentes: string[]
@@ -242,6 +248,11 @@ export const mamApi = {
     invoke<MarcadorObra[]>('reader_listar_marcadores_obra', { obraId }),
   transferCopiaIntegral: (origem: string, destino: string) =>
     invoke<RelatorioTransferencia>('transfer_copia_integral', { origem, destino }),
+  transferEmpacotarContainer: (nomeContainer: string, pastaDestino?: string | null) =>
+    invoke<RelatorioContainer>('transfer_empacotar_container', {
+      nomeContainer,
+      pastaDestino: pastaDestino ?? null,
+    }),
   syncCompararBibliotecas: (origem: string, destino: string) =>
     invoke<DiferencaBibliotecas>('sync_comparar_bibliotecas', { origem, destino }),
   syncSincronizarBibliotecas: (origem: string, destino: string, permitirSobrescrita: boolean) =>

@@ -32,6 +32,7 @@ use mam_interface::{
     reader_listar_marcadores_obra as if_reader_listar_marcadores_obra,
     transfer_copia_integral as if_transfer_copia_integral,
     transfer_seletiva as if_transfer_seletiva,
+    transfer_empacotar_container as if_transfer_empacotar_container,
     sync_comparar_bibliotecas as if_sync_comparar_bibliotecas,
     sync_sincronizar_bibliotecas as if_sync_sincronizar_bibliotecas,
     ai_health as if_ai_health,
@@ -55,7 +56,7 @@ use mam_interface::{
 use mam_source_integration::extractors::{EntradaImportacao, ExtratorInfo, ResultadoImportacao};
 use mam_storage::CacheL1Lru;
 use mam_ai_engine::{AiEngineManager, ModeloInfo};
-use mam_transfer::{DiferencaBibliotecas, RelatorioTransferencia, TransferManager};
+use mam_transfer::{DiferencaBibliotecas, RelatorioContainer, RelatorioTransferencia, TransferManager};
 use mam_source_integration::SourceIntegrationManager;
 use mam_source_integration::mangadex::MangaDexFonte;
 use mam_source_integration::{FonteInfo, ObraBuscaResultado, CapituloBuscaResultado, StatusOperacao};
@@ -465,6 +466,24 @@ async fn transfer_seletiva(
 }
 
 #[tauri::command]
+async fn transfer_empacotar_container(
+    db: tauri::State<'_, Arc<Database>>,
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    transfer_manager: tauri::State<'_, Arc<TransferManager>>,
+    pasta_destino: Option<String>,
+    nome_container: String,
+) -> Result<RelatorioContainer, String> {
+    if_transfer_empacotar_container(
+        db.inner().clone(),
+        library_manager.inner().clone(),
+        transfer_manager.inner().clone(),
+        pasta_destino,
+        nome_container,
+    )
+    .await
+}
+
+#[tauri::command]
 async fn sync_comparar_bibliotecas(
     transfer_manager: tauri::State<'_, Arc<TransferManager>>,
     origem: String,
@@ -731,6 +750,7 @@ pub fn run() {
       reader_listar_marcadores_obra,
       transfer_copia_integral,
       transfer_seletiva,
+      transfer_empacotar_container,
       sync_comparar_bibliotecas,
       sync_sincronizar_bibliotecas,
       ai_health,

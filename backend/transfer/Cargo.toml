@@ -12,6 +12,7 @@ sha2 = "0.10"
 tokio = { version = "1", features = ["full"] }
 thiserror = "1"
 walkdir = "2"
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
 mam-core = { path = "../core" }
 mam-storage = { path = "../storage" }
 

@@ -11,6 +11,7 @@ import {
   ObraBuscaResultado,
   ObraResumo,
   PaginaExtraida,
+  RelatorioContainer,
   RelatorioTransferencia,
   ResultadoImportacao,
   StatusOperacao,
@@ -67,6 +68,10 @@ function App() {
   const [destinoTransfer, setDestinoTransfer] = useState('')
   const [diferenca, setDiferenca] = useState<DiferencaBibliotecas | null>(null)
   const [relatorioTransfer, setRelatorioTransfer] = useState<RelatorioTransferencia | null>(null)
+  const [nomeContainer, setNomeContainer] = useState('MAM_Biblioteca_Container')
+  const [pastaSaidaContainer, setPastaSaidaContainer] = useState('')
+  const [relatorioContainer, setRelatorioContainer] = useState<RelatorioContainer | null>(null)
+  const [empacotandoContainer, setEmpacotandoContainer] = useState(false)
 
   const [aiStatus, setAiStatus] = useState<Record<string, unknown> | null>(null)
   const [diretorioModelos, setDiretorioModelos] = useState('')
@@ -397,6 +402,24 @@ function App() {
       setMensagem(`Cópia integral concluída: ${rel.arquivos_copiados.length} arquivo(s).`)
     } catch (err) {
       setMensagem(`Erro na cópia integral: ${String(err)}`)
+    }
+  }
+
+  async function handleEmpacotarContainer() {
+    setEmpacotandoContainer(true)
+    try {
+      const rel = await mamApi.transferEmpacotarContainer(
+        nomeContainer.trim() || 'MAM_Biblioteca_Container',
+        pastaSaidaContainer.trim() || null,
+      )
+      setRelatorioContainer(rel)
+      setMensagem(
+        `Container criado com ${rel.quantidade_arquivos} arquivo(s) em: ${rel.caminho_arquivo}`,
+      )
+    } catch (err) {
+      setMensagem(`Erro ao comprimir biblioteca em container: ${String(err)}`)
+    } finally {
+      setEmpacotandoContainer(false)
     }
   }
 
@@ -2011,18 +2034,90 @@ function App() {
           <section className="mam-panel">
             <h1 className="mam-section-title">TRANSFERÊNCIA & SINCRONIZAÇÃO</h1>
             <p className="mam-section-desc">
-              Compare bibliotecas, sincronize sem sobrescritas inesperadas e valide integridade SHA-256.
+              Compare bibliotecas (ou containers <code>.zip</code>), sincronize sem sobrescritas inesperadas e valide integridade SHA-256.
             </p>
+
+            <div
+              style={{
+                padding: '0.9rem 1rem',
+                borderRadius: 10,
+                border: '1px solid var(--border-subtle)',
+                background: 'var(--bg-card)',
+                display: 'grid',
+                gap: '0.65rem',
+                marginBottom: '0.5rem',
+              }}
+            >
+              <strong>📦 Container Portátil de Distribuição (.zip)</strong>
+              <span className="mam-brand-sub">
+                Comprime toda a biblioteca atual (<code>Manga/</code> + <code>System/</code>) em um único arquivo <code>.zip</code> nomeável para envio ou importação em outro computador.
+                Destino padrão: <code>{raizBiblioteca ? `${raizBiblioteca}/Exports` : 'Exports'}</code>
+              </span>
+              <div className="mam-toolbar-row">
+                <input
+                  className="mam-input mam-search-input"
+                  placeholder="Nome do container (ex: MinhaColecao_2026)"
+                  value={nomeContainer}
+                  onChange={(e) => setNomeContainer(e.target.value)}
+                />
+                <input
+                  className="mam-input mam-search-input"
+                  placeholder="Pasta de saída (opcional; vazio usa Exports)"
+                  value={pastaSaidaContainer}
+                  onChange={(e) => setPastaSaidaContainer(e.target.value)}
+                />
+                <button
+                  className="mam-btn mam-btn-primary"
+                  disabled={empacotandoContainer}
+                  onClick={handleEmpacotarContainer}
+                >
+                  {empacotandoContainer ? 'Comprimindo...' : 'Comprimir Biblioteca em Container'}
+                </button>
+              </div>
+              {relatorioContainer && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.75rem',
+                    flexWrap: 'wrap',
+                    padding: '0.55rem 0.75rem',
+                    borderRadius: 8,
+                    background: 'rgba(59, 130, 246, 0.12)',
+                    border: '1px solid rgba(59, 130, 246, 0.35)',
+                  }}
+                >
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: '0.84rem' }}>
+                      <strong>Container gerado:</strong>{' '}
+                      <code style={{ wordBreak: 'break-all' }}>{relatorioContainer.caminho_arquivo}</code>
+                    </div>
+                    <div className="mam-brand-sub">
+                      {relatorioContainer.quantidade_arquivos} arquivo(s) •{' '}
+                      {(relatorioContainer.bytes_totais / (1024 * 1024)).toFixed(2)} MB
+                    </div>
+                  </div>
+                  <button
+                    className="mam-btn"
+                    onClick={() => setOrigemTransfer(relatorioContainer.caminho_arquivo)}
+                  >
+                    Usar como Origem
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div className="mam-toolbar-row">
               <input
                 className="mam-input mam-search-input"
-                placeholder="Caminho da biblioteca origem"
+                placeholder="Caminho da biblioteca origem ou container (.zip)"
                 value={origemTransfer}
                 onChange={(e) => setOrigemTransfer(e.target.value)}
               />
               <input
                 className="mam-input mam-search-input"
-                placeholder="Caminho da biblioteca destino"
+                placeholder={`Caminho da biblioteca destino${raizBiblioteca ? ` (ex: ${raizBiblioteca})` : ''}`}
                 value={destinoTransfer}
                 onChange={(e) => setDestinoTransfer(e.target.value)}
               />
