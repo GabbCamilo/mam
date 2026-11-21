@@ -12,7 +12,7 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
-tokio = { version = "1", features = ["rt"] }
+tokio = { version = "1", features = ["rt", "process", "time"] }
 async-trait = "0.1"
 zip = "0.6"
 sha2 = "0.10"

@@ -283,6 +283,7 @@ impl RegistroExtratores {
 }
 
 /// Descobre capítulos relacionados a uma obra a partir da URL da página principal (ou HTML colado).
+/// Caso o HTML estático não contenha links (ex.: sites SPA renderizados via JS), renderiza o DOM com Edge/Chrome headless.
 pub async fn descobrir_capitulos_por_link(
     url_obra: &str,
     html_opcional: Option<&str>,
@@ -292,33 +293,94 @@ pub async fn descobrir_capitulos_por_link(
         return Err(SourceError::Operacao("Informe a URL da obra".to_string()));
     }
 
-    let html = if let Some(h) = html_opcional.filter(|s| !s.trim().is_empty()) {
-        h.to_string()
-    } else {
-        let client = reqwest::Client::builder()
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-            .http1_only()
-            .pool_max_idle_per_host(0)
-            .timeout(std::time::Duration::from_secs(20))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-        let resp = client.get(url_limpa).send().await?;
-        if !resp.status().is_success() {
-            return Err(SourceError::Operacao(format!(
-                "HTTP {} ao acessar a página da obra (cole o HTML da página se o site exigir navegador).",
-                resp.status()
-            )));
+    if let Some(h) = html_opcional.filter(|s| !s.trim().is_empty()) {
+        let extraida = extrair_capitulos_de_html(url_limpa, h);
+        if extraida.capitulos.is_empty() {
+            return Err(SourceError::Operacao(
+                "Nenhum link de capítulo reconhecido no HTML fornecido.".to_string(),
+            ));
         }
-        resp.text().await?
-    };
-
-    let extraida = extrair_capitulos_de_html(url_limpa, &html);
-    if extraida.capitulos.is_empty() {
-        return Err(SourceError::Operacao(
-            "Nenhum link de capítulo reconhecido na página da obra. Se o site carregar capítulos dinamicamente, cole o HTML da página.".to_string(),
-        ));
+        return Ok(extraida);
     }
-    Ok(extraida)
+
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+        .http1_only()
+        .pool_max_idle_per_host(0)
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let mut extraida_estatica: Option<ObraExtraidaPorLink> = None;
+    if let Ok(resp) = client.get(url_limpa).send().await {
+        if resp.status().is_success() {
+            if let Ok(html) = resp.text().await {
+                let extraida = extrair_capitulos_de_html(url_limpa, &html);
+                if !extraida.capitulos.is_empty() {
+                    return Ok(extraida);
+                }
+                extraida_estatica = Some(extraida);
+            }
+        }
+    }
+
+    // Fallback automático para SPAs / páginas renderizadas via JavaScript
+    if let Ok(dom_renderizado) = renderizar_html_com_navegador(url_limpa).await {
+        let extraida = extrair_capitulos_de_html(url_limpa, &dom_renderizado);
+        if !extraida.capitulos.is_empty() {
+            return Ok(extraida);
+        }
+    }
+
+    let _ = extraida_estatica;
+    Err(SourceError::Operacao(
+        "Nenhum link de capítulo reconhecido na página da obra (nem após renderização JS). Se necessário, cole o HTML da página.".to_string(),
+    ))
+}
+
+/// Renderiza uma página SPA/JS utilizando Microsoft Edge ou Google Chrome em modo headless (`--dump-dom`).
+pub async fn renderizar_html_com_navegador(url: &str) -> Result<String, SourceError> {
+    let candidatos = [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        "msedge",
+        "chrome",
+        "google-chrome",
+        "chromium",
+    ];
+
+    let executavel = candidatos
+        .iter()
+        .find(|p| !p.contains('\\') || Path::new(p).exists())
+        .copied()
+        .unwrap_or("msedge");
+
+    let mut cmd = tokio::process::Command::new(executavel);
+    cmd.args([
+        "--headless=new",
+        "--disable-gpu",
+        "--no-sandbox",
+        "--dump-dom",
+        "--virtual-time-budget=8000",
+        url,
+    ]);
+    #[cfg(windows)]
+    {
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    let output = tokio::time::timeout(std::time::Duration::from_secs(25), cmd.output())
+        .await
+        .map_err(|_| SourceError::Operacao("Tempo esgotado ao renderizar página no navegador headless".to_string()))?
+        .map_err(|e| SourceError::Operacao(format!("Falha ao executar navegador headless ({}): {}", executavel, e)))?;
+
+    let dom = String::from_utf8_lossy(&output.stdout).to_string();
+    if dom.trim().is_empty() {
+        return Err(SourceError::Operacao("Navegador headless retornou DOM vazio".to_string()));
+    }
+    Ok(dom)
 }
 
 /// Extrai metadados e capítulos vinculados de um HTML de página principal de obra
@@ -370,7 +432,9 @@ pub fn extrair_capitulos_de_html(url_obra: &str, html: &str) -> ObraExtraidaPorL
 
         let numero = extrair_numero_capitulo(&url_completa, &anchor_text)
             .or_else(|| extrair_data_number(tag_html));
-        let idioma = detectar_idioma_link(&url_completa, &anchor_text);
+        let ctx_start = abs_pos.saturating_sub(350);
+        let idioma = detectar_idioma_link(&url_completa, &anchor_text)
+            .or_else(|| detectar_idioma_contexto(&html[ctx_start..abs_pos]));
         let titulo_cap = if anchor_text.is_empty() {
             None
         } else {
@@ -607,6 +671,7 @@ fn extrair_numero_capitulo(url: &str, texto: &str) -> Option<i32> {
         }
     }
     let lower_txt = texto.to_lowercase();
+    let mut melhor_match: Option<(usize, i32)> = None;
     for palavra in ["capítulo", "capitulo", "chapter", "cap.", "cap ", "ch.", "ch "] {
         if let Some(pos) = lower_txt.find(palavra) {
             let after = lower_txt[pos + palavra.len()..].trim_start();
@@ -616,11 +681,13 @@ fn extrair_numero_capitulo(url: &str, texto: &str) -> Option<i32> {
                 .take_while(|c| c.is_ascii_digit())
                 .collect();
             if let Ok(n) = digitos.parse::<i32>() {
-                return Some(n);
+                if melhor_match.map_or(true, |(best_pos, _)| pos < best_pos) {
+                    melhor_match = Some((pos, n));
+                }
             }
         }
     }
-    None
+    melhor_match.map(|(_, n)| n)
 }
 
 fn detectar_idioma_link(url: &str, texto: &str) -> Option<String> {
@@ -631,6 +698,27 @@ fn detectar_idioma_link(url: &str, texto: &str) -> Option<String> {
         Some("ENG".to_string())
     } else if comb.contains("/ja/") || comb.contains("/jp/") || comb.contains("japanese") {
         Some("JPN".to_string())
+    } else {
+        None
+    }
+}
+
+fn detectar_idioma_contexto(trecho_anterior: &str) -> Option<String> {
+    let ultimo_row = trecho_anterior
+        .rfind("title-detail__row\"")
+        .or_else(|| trecho_anterior.rfind("title-detail__row "))
+        .or_else(|| trecho_anterior.rfind("<li"))
+        .or_else(|| trecho_anterior.rfind("<tr"))
+        .unwrap_or(0);
+    let recorte = &trecho_anterior[ultimo_row..].to_lowercase();
+    if recorte.contains("title=\"pt-br\"") || recorte.contains("title=\"pt\"") {
+        Some("PT".to_string())
+    } else if recorte.contains("title=\"en\"") || recorte.contains("title=\"gb\"") {
+        Some("ENG".to_string())
+    } else if recorte.contains("title=\"ja\"") || recorte.contains("title=\"jp\"") {
+        Some("JPN".to_string())
+    } else if recorte.contains("title=\"es\"") {
+        Some("ESP".to_string())
     } else {
         None
     }
@@ -912,5 +1000,29 @@ mod tests {
         "#;
         let sc = extrair_capitulos_de_html("https://mangafire.to/title/jw2-medaka-boxx", html_script);
         assert_eq!(sc.capitulos.len(), 1);
+
+        let html_spa = r#"
+            <div id="app-root">
+              <div class="title-detail">
+                <h1>Medaka Box</h1>
+                <div class="title-detail__list scroll-area">
+                  <div class="title-detail__row">
+                    <span class="title-detail__row-flag" title="en">GB</span>
+                    <div class="title-detail__row-name">
+                      <a class="title-detail__row-link" href="/title/jw2-medaka-boxx/chapter/6229076" data-discover="true">
+                        <span class="title-detail__row-num">Ch. 192.6</span>
+                        <span class="title-detail__row-sub">Good Loser Kumagawa Chapter 2</span>
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+        "#;
+        let spa = extrair_capitulos_de_html("https://mangafire.to/title/jw2-medaka-boxx", html_spa);
+        assert_eq!(spa.titulo, "Medaka Box");
+        assert_eq!(spa.capitulos.len(), 1);
+        assert_eq!(spa.capitulos[0].numero, Some(192));
+        assert_eq!(spa.capitulos[0].idioma.as_deref(), Some("ENG"));
     }
 }
