@@ -6,6 +6,7 @@
 pub mod generico;
 pub mod mangadex;
 pub mod mangafire;
+pub mod nhentai;
 
 use std::io::{Cursor, Write};
 use std::path::Path;
@@ -82,11 +83,12 @@ impl RegistroExtratores {
         }
     }
 
-    /// Cria o registro padrão com MangaDex, MangaFire e extrator Genérico.
+    /// Cria o registro padrão com MangaDex, MangaFire, nHentai e extrator Genérico.
     pub fn padrao() -> Self {
         let mut reg = Self::novo();
         reg.registrar(Arc::new(mangadex::MangaDexExtractor::nova()));
         reg.registrar(Arc::new(mangafire::MangaFireExtractor::nova()));
+        reg.registrar(Arc::new(nhentai::NHentaiExtractor::nova()));
         reg.registrar(Arc::new(generico::GenericoExtractor::nova()));
         reg
     }
@@ -311,6 +313,11 @@ pub async fn descobrir_capitulos_por_link_com_opcoes(
             ));
         }
         return Ok(extraida);
+    }
+
+    // Obras únicas com API direta (ex.: nhentai.net/g/<id>/)
+    if nhentai::extrair_gallery_id(url_limpa).is_some() {
+        return nhentai::obter_obra_galeria(url_limpa).await;
     }
 
     let client = reqwest::Client::builder()
