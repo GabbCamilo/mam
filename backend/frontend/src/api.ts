@@ -322,6 +322,22 @@ export const mamApi = {
       idiomaDestino: params.idiomaDestino,
       caminhoModelo: params.caminhoModelo ?? null,
     }),
+  aiProcessarCapitulo: (params: {
+    capituloId: string
+    caminhoCbz: string
+    totalPaginas: number
+    idiomaOrigem: string
+    idiomaDestino: string
+    caminhoModelo?: string | null
+  }) =>
+    invoke<ResultadoIA[]>('ai_processar_capitulo', {
+      capituloId: params.capituloId,
+      caminhoCbz: params.caminhoCbz,
+      totalPaginas: params.totalPaginas,
+      idiomaOrigem: params.idiomaOrigem,
+      idiomaDestino: params.idiomaDestino,
+      caminhoModelo: params.caminhoModelo ?? null,
+    }),
   sourceListarExtratores: () => invoke<ExtratorInfo[]>('source_listar_extratores'),
   sourceDescobrirPorLink: (
     urlObra: string,

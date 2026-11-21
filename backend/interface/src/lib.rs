@@ -983,6 +983,42 @@ pub async fn ai_processar_e_salvar_pagina(
     .map_err(|e| e.to_string())
 }
 
+/// Processa todas as páginas de um capítulo inteiro com o Manga AI Engine (reaproveitando cache L3 por SHA-256).
+#[allow(clippy::too_many_arguments)]
+pub async fn ai_processar_capitulo(
+    ai_manager: Arc<AiEngineManager>,
+    archive_manager: Arc<ArchiveManager>,
+    library_manager: Arc<LibraryManager>,
+    cache: Arc<CachePaginas>,
+    db: Arc<Database>,
+    capitulo_id: String,
+    caminho_cbz: String,
+    total_paginas: usize,
+    idioma_origem: String,
+    idioma_destino: String,
+    caminho_modelo: Option<String>,
+) -> Result<Vec<ResultadoIA>, String> {
+    let mut resultados = Vec::with_capacity(total_paginas);
+    for indice in 0..total_paginas {
+        let res = ai_processar_e_salvar_pagina(
+            ai_manager.clone(),
+            archive_manager.clone(),
+            library_manager.clone(),
+            cache.clone(),
+            db.clone(),
+            capitulo_id.clone(),
+            caminho_cbz.clone(),
+            indice,
+            idioma_origem.clone(),
+            idioma_destino.clone(),
+            caminho_modelo.clone(),
+        )
+        .await?;
+        resultados.push(res);
+    }
+    Ok(resultados)
+}
+
 fn decodificar_base64(input: &str) -> Vec<u8> {
     let mut saida = Vec::with_capacity((input.len() * 3) / 4);
     let mut buf: u32 = 0;

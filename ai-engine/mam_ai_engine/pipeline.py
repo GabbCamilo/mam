@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 from typing import Any
 
+from .bubble_detector import detectar_baloes_cpu
 from .onnx_runtime import OnnxSessionAdapter, carregar_imagem_rgb
 
 
@@ -37,11 +38,12 @@ def executar_ocr(params: dict[str, Any]) -> dict[str, Any]:
 def detectar_baloes(params: dict[str, Any]) -> dict[str, Any]:
     """Detecta balões de fala na página mantendo originais intactos."""
     caminho_imagem = str(params.get("caminho_imagem", ""))
+    baloes = detectar_baloes_cpu(caminho_imagem)
     return {
         "tipo": "detect_bubbles",
         "caminho_imagem": caminho_imagem,
         "provedor": detectar_provedores_inferencia()["prioritario"],
-        "baloes": [],
+        "baloes": baloes,
         "estado_revisao": "nao_revisado",
     }
 
@@ -92,6 +94,23 @@ def processar_pagina_completa(params: dict[str, Any]) -> dict[str, Any]:
         # Registra motivo explícito sem lançar exceção quando onnxruntime/modelo não estiverem presentes
         adaptador.carregar()
 
+    baloes = detectar_baloes_cpu(caminho_imagem)
+    regioes = []
+    for idx, b in enumerate(baloes):
+        regioes.append(
+            {
+                "id": b["id"],
+                "bbox": b["bbox"],
+                "cor_mascara": b.get("cor_mascara", "#ffffff"),
+                "confianca": b.get("confianca", 0.7),
+                "texto_original": "",
+                "texto_traduzido": f"[Balão {idx + 1}]",
+                "idioma_origem": idioma_origem,
+                "idioma_destino": idioma_destino,
+                "estado_revisao": "nao_revisado",
+            }
+        )
+
     return {
         "tipo": "process_page",
         "caminho_imagem": caminho_imagem,
@@ -100,7 +119,7 @@ def processar_pagina_completa(params: dict[str, Any]) -> dict[str, Any]:
         "provedor": detectar_provedores_inferencia()["prioritario"],
         "dimensoes_imagem": dimensoes,
         "onnx_status": adaptador.info_status(),
-        "regioes": [],
+        "regioes": regioes,
         "estado_revisao": "nao_revisado",
     }
 

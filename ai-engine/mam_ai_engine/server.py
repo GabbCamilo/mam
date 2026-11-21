@@ -70,6 +70,11 @@ def handle_request(req: dict[str, Any]) -> tuple[dict[str, Any], bool]:
 
 def main() -> int:
     """Loop principal JSONL lendo de stdin e escrevendo em stdout."""
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     for raw_line in sys.stdin:
         line = raw_line.strip()
         if not line:

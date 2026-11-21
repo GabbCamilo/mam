@@ -41,6 +41,7 @@ use mam_interface::{
     ai_listar_resultados_capitulo as if_ai_listar_resultados_capitulo,
     ai_revisar_resultado as if_ai_revisar_resultado,
     ai_processar_e_salvar_pagina as if_ai_processar_e_salvar_pagina,
+    ai_processar_capitulo as if_ai_processar_capitulo,
     CachePaginas,
     source_listar_extratores as if_source_listar_extratores,
     source_importar_extrator as if_source_importar_extrator,
@@ -575,6 +576,37 @@ async fn ai_processar_e_salvar_pagina(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn ai_processar_capitulo(
+    ai_manager: tauri::State<'_, Arc<AiEngineManager>>,
+    archive_manager: tauri::State<'_, Arc<ArchiveManager>>,
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    cache: tauri::State<'_, Arc<CachePaginas>>,
+    db: tauri::State<'_, Arc<Database>>,
+    capitulo_id: String,
+    caminho_cbz: String,
+    total_paginas: usize,
+    idioma_origem: String,
+    idioma_destino: String,
+    caminho_modelo: Option<String>,
+) -> Result<Vec<ResultadoIA>, String> {
+    if_ai_processar_capitulo(
+        ai_manager.inner().clone(),
+        archive_manager.inner().clone(),
+        library_manager.inner().clone(),
+        cache.inner().clone(),
+        db.inner().clone(),
+        capitulo_id,
+        caminho_cbz,
+        total_paginas,
+        idioma_origem,
+        idioma_destino,
+        caminho_modelo,
+    )
+    .await
+}
+
+#[tauri::command]
 async fn source_listar_extratores() -> Result<Vec<ExtratorInfo>, String> {
     if_source_listar_extratores().await
 }
@@ -759,6 +791,7 @@ pub fn run() {
       ai_listar_resultados_capitulo,
       ai_revisar_resultado,
       ai_processar_e_salvar_pagina,
+      ai_processar_capitulo,
       source_listar_extratores,
       source_importar_extrator,
       library_excluir_capitulo,

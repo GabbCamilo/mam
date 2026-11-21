@@ -376,6 +376,65 @@ export function CbzReader({
     )
     .sort((a, b) => (ordemModalCap === 'desc' ? b.numero - a.numero : a.numero - b.numero))
 
+  function renderizarSobreposicaoPagina(paginaIndice: number) {
+    if (!mostrarSobreposicao) return null
+    const regioes = resultadosIa
+      .filter((r) => r.pagina_numero === paginaIndice)
+      .flatMap((r) => {
+        try {
+          const parsed = JSON.parse(r.resultado_json) as {
+            regioes?: Array<{
+              bbox?: [number, number, number, number]
+              texto_traduzido?: string
+              texto_original?: string
+              cor_mascara?: string
+            }>
+          }
+          return parsed.regioes ?? []
+        } catch {
+          return []
+        }
+      })
+
+    if (regioes.length === 0) return null
+
+    return regioes.map((reg, idx) => {
+      const [x, y, w, h] = reg.bbox ?? [0, 0, 0.2, 0.1]
+      return (
+        <div
+          key={`${paginaIndice}-reg-${idx}`}
+          title={reg.texto_original || reg.texto_traduzido || 'Balão detectado'}
+          style={{
+            position: 'absolute',
+            left: `${x * 100}%`,
+            top: `${y * 100}%`,
+            width: `${w * 100}%`,
+            height: `${h * 100}%`,
+            background: reg.cor_mascara || '#ffffff',
+            color: '#0f172a',
+            border: '1.5px solid rgba(56, 189, 248, 0.85)',
+            boxShadow: '0 0 0 1px rgba(15, 23, 42, 0.12)',
+            padding: '2px 4px',
+            fontSize: 'clamp(9px, 1.05vw, 14px)',
+            fontWeight: 700,
+            lineHeight: 1.15,
+            borderRadius: '40%',
+            boxSizing: 'border-box',
+            overflow: 'hidden',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            textAlign: 'center',
+            pointerEvents: 'none',
+            zIndex: 4,
+          }}
+        >
+          {reg.texto_traduzido ?? reg.texto_original ?? ''}
+        </div>
+      )
+    })
+  }
+
   return (
     <div className="mam-reader-shell">
       {barraVisivel && (
@@ -425,15 +484,16 @@ export function CbzReader({
               setProcessandoIa(true)
               setErro(null)
               try {
-                await mamApi.aiProcessarESalvarPagina({
+                await mamApi.aiProcessarCapitulo({
                   capituloId: capitulo.id,
                   caminhoCbz: capitulo.caminho_relativo,
-                  indice: indiceAtual,
+                  totalPaginas: Math.max(1, totalPaginas),
                   idiomaOrigem: 'ja',
                   idiomaDestino: 'pt-BR',
                 })
                 const atualizados = await mamApi.aiListarResultadosCapitulo(capitulo.id)
                 setResultadosIa(atualizados)
+                setMostrarSobreposicao(true)
                 setMostrarIa(true)
               } catch (e) {
                 setErro(String(e))
@@ -649,22 +709,33 @@ export function CbzReader({
           Array.from({ length: totalPaginasLongStrip }, (_, idx) => {
             const pag = paginasLongStrip[idx]
             return pag ? (
-              <img
+              <div
                 key={`${capitulo.id}-${idx}`}
-                ref={(el) => {
-                  longStripPageRefs.current[idx] = el
-                }}
-                src={`data:${pag.mime_type};base64,${pag.dados_base64}`}
-                alt={pag.nome}
-                decoding="async"
                 style={{
-                  ...estiloImagem,
+                  position: 'relative',
+                  display: 'inline-block',
                   width: `${zoom}%`,
                   maxWidth: zoom <= 100 ? '100%' : 'none',
-                  maxHeight: 'none',
                   flexShrink: 0,
+                  lineHeight: 0,
                 }}
-              />
+              >
+                <img
+                  ref={(el) => {
+                    longStripPageRefs.current[idx] = el
+                  }}
+                  src={`data:${pag.mime_type};base64,${pag.dados_base64}`}
+                  alt={pag.nome}
+                  decoding="async"
+                  style={{
+                    ...estiloImagem,
+                    width: '100%',
+                    maxWidth: '100%',
+                    maxHeight: 'none',
+                  }}
+                />
+                {renderizarSobreposicaoPagina(idx)}
+              </div>
             ) : (
               <div
                 key={`${capitulo.id}-placeholder-${idx}`}
@@ -711,16 +782,19 @@ export function CbzReader({
                   justifyContent: paginaSecundaria ? 'flex-end' : 'center',
                 }}
               >
-                <img
-                  src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
-                  alt={paginaPrincipal.nome}
-                  style={{
-                    width: '100%',
-                    maxHeight: `${0.82 * zoom}vh`,
-                    objectFit: 'contain',
-                    objectPosition: paginaSecundaria ? 'right center' : 'center',
-                  }}
-                />
+                <div style={{ position: 'relative', display: 'inline-block', lineHeight: 0 }}>
+                  <img
+                    src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
+                    alt={paginaPrincipal.nome}
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: `${0.82 * zoom}vh`,
+                      objectFit: 'contain',
+                      display: 'block',
+                    }}
+                  />
+                  {renderizarSobreposicaoPagina(indiceAtual)}
+                </div>
               </div>
             )}
             {paginaSecundaria && (
@@ -732,16 +806,19 @@ export function CbzReader({
                   justifyContent: 'flex-start',
                 }}
               >
-                <img
-                  src={`data:${paginaSecundaria.mime_type};base64,${paginaSecundaria.dados_base64}`}
-                  alt={paginaSecundaria.nome}
-                  style={{
-                    width: '100%',
-                    maxHeight: `${0.82 * zoom}vh`,
-                    objectFit: 'contain',
-                    objectPosition: 'left center',
-                  }}
-                />
+                <div style={{ position: 'relative', display: 'inline-block', lineHeight: 0 }}>
+                  <img
+                    src={`data:${paginaSecundaria.mime_type};base64,${paginaSecundaria.dados_base64}`}
+                    alt={paginaSecundaria.nome}
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: `${0.82 * zoom}vh`,
+                      objectFit: 'contain',
+                      display: 'block',
+                    }}
+                  />
+                  {renderizarSobreposicaoPagina(indiceAtual + 1)}
+                </div>
               </div>
             )}
           </div>
@@ -757,63 +834,32 @@ export function CbzReader({
                 justifyContent: 'center',
               }}
             >
-              <img
-                src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
-                alt={paginaPrincipal.nome}
-                onClick={handleClickNavegacaoImagem}
-                title="Clique na esquerda para voltar ou na direita para avançar"
+              <div
                 style={{
-                  ...estiloImagem,
+                  position: 'relative',
+                  display: 'inline-block',
+                  lineHeight: 0,
                   width:
                     ajuste === 'fit-width'
                       ? zoom > 100
                         ? '100%'
                         : `${zoom}%`
                       : 'auto',
-                  cursor: 'pointer',
                 }}
-              />
-              {mostrarSobreposicao &&
-                resultadosIa
-                  .filter((r) => r.pagina_numero === indiceAtual)
-                  .flatMap((r) => {
-                    try {
-                      const parsed = JSON.parse(r.resultado_json) as {
-                        regioes?: Array<{
-                          bbox?: [number, number, number, number]
-                          texto_traduzido?: string
-                          texto_original?: string
-                        }>
-                      }
-                      return parsed.regioes ?? []
-                    } catch {
-                      return []
-                    }
-                  })
-                  .map((reg, idx) => {
-                    const [x, y, w, h] = reg.bbox ?? [0, 0, 0.2, 0.1]
-                    return (
-                      <div
-                        key={idx}
-                        style={{
-                          position: 'absolute',
-                          left: `${x * 100}%`,
-                          top: `${y * 100}%`,
-                          width: `${w * 100}%`,
-                          height: `${h * 100}%`,
-                          background: 'rgba(255, 255, 255, 0.9)',
-                          color: '#0f172a',
-                          padding: '2px 4px',
-                          fontSize: '0.8rem',
-                          borderRadius: 4,
-                          boxSizing: 'border-box',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        {reg.texto_traduzido || reg.texto_original || ''}
-                      </div>
-                    )
-                  })}
+              >
+                <img
+                  src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
+                  alt={paginaPrincipal.nome}
+                  onClick={handleClickNavegacaoImagem}
+                  title="Clique na esquerda para voltar ou na direita para avançar"
+                  style={{
+                    ...estiloImagem,
+                    width: ajuste === 'fit-width' ? '100%' : 'auto',
+                    cursor: 'pointer',
+                  }}
+                />
+                {renderizarSobreposicaoPagina(indiceAtual)}
+              </div>
             </div>
           )
         )}

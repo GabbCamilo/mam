@@ -134,6 +134,8 @@ impl AiEngineManager {
                 .arg("mam_ai_engine.server")
                 .env("PYTHONPATH", &self.diretorio_ai_engine)
                 .env("PYTHONUNBUFFERED", "1")
+                .env("PYTHONUTF8", "1")
+                .env("PYTHONIOENCODING", "utf-8")
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null());
