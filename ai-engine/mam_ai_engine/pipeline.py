@@ -103,3 +103,58 @@ def processar_pagina_completa(params: dict[str, Any]) -> dict[str, Any]:
         "regioes": [],
         "estado_revisao": "nao_revisado",
     }
+
+
+def classificar_links_capitulos(params: dict[str, Any]) -> dict[str, Any]:
+    """Classifica candidatos de links de uma página central de mangá por padrão estrutural."""
+    import re
+
+    url_obra = str(params.get("url_obra", "")).strip().lower().rstrip("/")
+    candidatos = params.get("candidatos") or []
+    if not isinstance(candidatos, list):
+        candidatos = []
+
+    resultados: list[dict[str, Any]] = []
+    vistos: set[str] = set()
+    for item in candidatos:
+        if not isinstance(item, dict):
+            continue
+        href = str(item.get("href", "")).strip()
+        texto = str(item.get("text", "")).strip()
+        if not href or href in vistos:
+            continue
+
+        lower_href = href.lower()
+        lower_txt = texto.lower()
+        score = 0.0
+        if any(p in lower_href for p in ("/chapter/", "/capitulo-", "/chapter-", "/cap-", "/ch-")):
+            score += 0.65
+        if url_obra and lower_href.startswith(url_obra) and len(lower_href) > len(url_obra) + 1:
+            score += 0.2
+        if any(p in lower_txt for p in ("cap", "chapter", "ch.")):
+            score += 0.15
+
+        if score < 0.5:
+            continue
+
+        vistos.add(href)
+        m = re.search(r"(?:capitulo-|chapter-|cap\.?\s*|ch\.?\s*)(\d+)", f"{lower_href} {lower_txt}")
+        numero = int(m.group(1)) if m else None
+        idioma = None
+        if "pt-br" in lower_href or "/pt/" in lower_href:
+            idioma = "PT"
+        elif "/en/" in lower_href or "english" in lower_txt:
+            idioma = "ENG"
+        elif "/ja/" in lower_href or "/jp/" in lower_href:
+            idioma = "JPN"
+
+        resultados.append({
+            "href": href,
+            "numero": numero,
+            "titulo": texto or None,
+            "idioma": idioma,
+            "score": round(score, 2),
+        })
+
+    resultados.sort(key=lambda r: (r["numero"] is None, r["numero"] or 0))
+    return {"capitulos": resultados}

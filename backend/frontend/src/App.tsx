@@ -90,6 +90,7 @@ function App() {
   const [volCapitulosIds, setVolCapitulosIds] = useState<string[]>([])
 
   const [modalImportarUrlAberto, setModalImportarUrlAberto] = useState(false)
+  const [modoImportacao, setModoImportacao] = useState<'obra' | 'capitulo'>('obra')
   const [extratores, setExtratores] = useState<ExtratorInfo[]>([])
   const [extObraTitulo, setExtObraTitulo] = useState('')
   const [extNumeroCap, setExtNumeroCap] = useState('1')
@@ -1970,10 +1971,17 @@ function App() {
             className="mam-modal"
             style={{ maxWidth: 620 }}
             onClick={(e) => e.stopPropagation()}
-            onSubmit={handleImportarExtrator}
+            onSubmit={(e) => {
+              if (modoImportacao === 'obra') {
+                e.preventDefault()
+                handleDescobrirCapitulosPorLink()
+              } else {
+                handleImportarExtrator(e)
+              }
+            }}
           >
             <div className="mam-modal-header">
-              <strong>Importar por Link Direto / HTML / Lista Ordenada</strong>
+              <strong>Importar por Link / Página da Obra</strong>
               <button
                 type="button"
                 className="mam-btn"
@@ -1982,64 +1990,114 @@ function App() {
                 ✕
               </button>
             </div>
+            <div className="mam-segmented" style={{ alignSelf: 'flex-start' }}>
+              <button
+                type="button"
+                className={`mam-segmented-btn ${modoImportacao === 'obra' ? 'active' : ''}`}
+                onClick={() => setModoImportacao('obra')}
+              >
+                Página Central da Obra (Lote)
+              </button>
+              <button
+                type="button"
+                className={`mam-segmented-btn ${modoImportacao === 'capitulo' ? 'active' : ''}`}
+                onClick={() => setModoImportacao('capitulo')}
+              >
+                Capítulo Único / URLs Manuais
+              </button>
+            </div>
             <p className="mam-section-desc">
-              Extratores ativos: {extratores.map((e) => e.id).join(', ') || 'mangadex, mangafire, generico'}
+              {modoImportacao === 'obra'
+                ? 'Cole o link principal da obra (ex.: mangafire.to/title/... ou mangalivre.to/manga/...) para listar e selecionar todos os capítulos.'
+                : `Extratores ativos: ${extratores.map((e) => e.id).join(', ') || 'mangadex, mangafire, generico'}`}
             </p>
-            <div className="mam-toolbar-row">
-              <input
-                className="mam-input mam-search-input"
-                placeholder="Título da obra (ex: Medaka Box)"
-                value={extObraTitulo}
-                onChange={(e) => setExtObraTitulo(e.target.value)}
-              />
-              <input
-                className="mam-input"
-                type="number"
-                placeholder="Cap."
-                value={extNumeroCap}
-                onChange={(e) => setExtNumeroCap(e.target.value)}
-                style={{ width: 90 }}
-              />
-            </div>
-            <input
-              className="mam-input"
-              placeholder="Link da obra ou capítulo (mangafire.to/title/..., mangalivre.to/manga/...)"
-              value={extUrl}
-              onChange={(e) => setExtUrl(e.target.value)}
-            />
-            <textarea
-              className="mam-textarea"
-              placeholder="Lista ordenada de URLs de páginas (uma por linha, opcional)"
-              value={extUrlsTexto}
-              onChange={(e) => setExtUrlsTexto(e.target.value)}
-              rows={3}
-            />
-            <textarea
-              className="mam-textarea"
-              placeholder="HTML da página (opcional — útil para sites dinâmicos ou protegidos)"
-              value={extHtml}
-              onChange={(e) => setExtHtml(e.target.value)}
-              rows={3}
-            />
-            <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="mam-btn"
-                onClick={() => setModalImportarUrlAberto(false)}
-              >
-                Fechar
-              </button>
-              <button
-                type="button"
-                className="mam-btn"
-                onClick={handleDescobrirCapitulosPorLink}
-              >
-                🔎 Buscar Capítulos pelo Link
-              </button>
-              <button className="mam-btn mam-btn-primary" type="submit">
-                Importar Capítulo Único
-              </button>
-            </div>
+
+            {modoImportacao === 'obra' ? (
+              <>
+                <input
+                  className="mam-input"
+                  placeholder="URL central da obra (ex.: https://mangafire.to/title/jw2-medaka-boxx)"
+                  value={extUrl}
+                  onChange={(e) => setExtUrl(e.target.value)}
+                />
+                <input
+                  className="mam-input"
+                  placeholder="Título personalizado (opcional — detectado automaticamente)"
+                  value={extObraTitulo}
+                  onChange={(e) => setExtObraTitulo(e.target.value)}
+                />
+                <textarea
+                  className="mam-textarea"
+                  placeholder="HTML da página principal da obra (opcional — útil se o site carregar capítulos via JS no navegador)"
+                  value={extHtml}
+                  onChange={(e) => setExtHtml(e.target.value)}
+                  rows={4}
+                />
+                <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    className="mam-btn"
+                    onClick={() => setModalImportarUrlAberto(false)}
+                  >
+                    Fechar
+                  </button>
+                  <button className="mam-btn mam-btn-primary" type="submit">
+                    🔎 Descobrir Capítulos
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mam-toolbar-row">
+                  <input
+                    className="mam-input mam-search-input"
+                    placeholder="Título da obra (ex: Medaka Box)"
+                    value={extObraTitulo}
+                    onChange={(e) => setExtObraTitulo(e.target.value)}
+                  />
+                  <input
+                    className="mam-input"
+                    type="number"
+                    placeholder="Cap."
+                    value={extNumeroCap}
+                    onChange={(e) => setExtNumeroCap(e.target.value)}
+                    style={{ width: 90 }}
+                  />
+                </div>
+                <input
+                  className="mam-input"
+                  placeholder="Link do capítulo (mangadex.org/chapter/..., mangafire.to/.../chapter/...)"
+                  value={extUrl}
+                  onChange={(e) => setExtUrl(e.target.value)}
+                />
+                <textarea
+                  className="mam-textarea"
+                  placeholder="Lista ordenada de URLs de páginas (uma por linha, opcional)"
+                  value={extUrlsTexto}
+                  onChange={(e) => setExtUrlsTexto(e.target.value)}
+                  rows={3}
+                />
+                <textarea
+                  className="mam-textarea"
+                  placeholder="HTML da página do capítulo (opcional)"
+                  value={extHtml}
+                  onChange={(e) => setExtHtml(e.target.value)}
+                  rows={3}
+                />
+                <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    className="mam-btn"
+                    onClick={() => setModalImportarUrlAberto(false)}
+                  >
+                    Fechar
+                  </button>
+                  <button className="mam-btn mam-btn-primary" type="submit">
+                    Importar Capítulo Único
+                  </button>
+                </div>
+              </>
+            )}
             {resultadoImportacao && (
               <pre className="mam-pre">{JSON.stringify(resultadoImportacao, null, 2)}</pre>
             )}

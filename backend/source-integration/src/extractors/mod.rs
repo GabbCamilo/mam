@@ -368,7 +368,8 @@ pub fn extrair_capitulos_de_html(url_obra: &str, html: &str) -> ObraExtraidaPorL
             continue;
         }
 
-        let numero = extrair_numero_capitulo(&url_completa, &anchor_text);
+        let numero = extrair_numero_capitulo(&url_completa, &anchor_text)
+            .or_else(|| extrair_data_number(tag_html));
         let idioma = detectar_idioma_link(&url_completa, &anchor_text);
         let titulo_cap = if anchor_text.is_empty() {
             None
@@ -387,6 +388,75 @@ pub fn extrair_capitulos_de_html(url_obra: &str, html: &str) -> ObraExtraidaPorL
         });
     }
 
+    // Camada 2: Varredura em JSON/scripts embutidos (ex.: __NEXT_DATA__ ou listas hidratadas)
+    if capitulos.is_empty() && !caminho_obra.is_empty() {
+        for cand in extrair_urls_scripts(html, &base_origin, url_obra) {
+            if !eh_link_capitulo(&cand, &caminho_obra) {
+                continue;
+            }
+            let normalizada = cand.trim_end_matches('/').to_string();
+            if !vistos.insert(normalizada) {
+                continue;
+            }
+            let numero = extrair_numero_capitulo(&cand, "");
+            let idioma = detectar_idioma_link(&cand, "");
+            capitulos.push(CapituloBuscaResultado {
+                fonte_id: "extrator-link".to_string(),
+                obra_id_fonte: url_obra.to_string(),
+                capitulo_id_fonte: cand.clone(),
+                numero,
+                titulo: None,
+                url: Some(cand),
+                idioma,
+            });
+        }
+    }
+
+    // Camada 3: Heurística de agrupamento repetitivo sob o mesmo prefixo da obra
+    if capitulos.is_empty() && !caminho_obra.is_empty() {
+        let mut ag_offset = 0;
+        while let Some(pos) = lower[ag_offset..].find("<a ") {
+            let abs_pos = ag_offset + pos;
+            let Some(tag_end_rel) = lower[abs_pos..].find('>') else {
+                break;
+            };
+            let tag_end = abs_pos + tag_end_rel;
+            let tag_html = &html[abs_pos..=tag_end];
+            let close_pos = lower[tag_end + 1..]
+                .find("</a>")
+                .map(|p| tag_end + 1 + p)
+                .unwrap_or(tag_end + 1);
+            let anchor_text = limpar_tags_html(&html[tag_end + 1..close_pos]);
+            ag_offset = tag_end + 1;
+
+            let Some(raw_href) = extrair_atributo_href(tag_html) else {
+                continue;
+            };
+            let url_completa = resolver_url(raw_href.trim(), &base_origin, url_obra);
+            let caminho = extrair_caminho_url(&url_completa);
+            if caminho.starts_with(&caminho_obra) && caminho.len() > caminho_obra.len() + 1 {
+                let resto = &caminho[caminho_obra.len() + 1..];
+                if resto.chars().any(|c| c.is_ascii_digit()) {
+                    let normalizada = url_completa.trim_end_matches('/').to_string();
+                    if vistos.insert(normalizada) {
+                        let numero = extrair_numero_capitulo(&url_completa, &anchor_text)
+                            .or_else(|| extrair_data_number(tag_html));
+                        let idioma = detectar_idioma_link(&url_completa, &anchor_text);
+                        capitulos.push(CapituloBuscaResultado {
+                            fonte_id: "extrator-link".to_string(),
+                            obra_id_fonte: url_obra.to_string(),
+                            capitulo_id_fonte: url_completa.clone(),
+                            numero,
+                            titulo: if anchor_text.is_empty() { None } else { Some(anchor_text) },
+                            url: Some(url_completa),
+                            idioma,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     capitulos.sort_by_key(|c| c.numero.unwrap_or(i32::MAX));
 
     ObraExtraidaPorLink {
@@ -395,6 +465,51 @@ pub fn extrair_capitulos_de_html(url_obra: &str, html: &str) -> ObraExtraidaPorL
         url_obra: url_obra.to_string(),
         capitulos,
     }
+}
+
+fn extrair_data_number(tag: &str) -> Option<i32> {
+    let lower = tag.to_lowercase();
+    for attr in ["data-number=", "data-chapter="] {
+        if let Some(idx) = lower.find(attr) {
+            let rest = tag[idx + attr.len()..].trim_start();
+            let digitos: String = rest
+                .trim_start_matches(['"', '\''])
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
+            if let Ok(n) = digitos.parse::<i32>() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+fn extrair_urls_scripts(html: &str, base_origin: &str, url_obra: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let lower = html.to_lowercase();
+    let mut offset = 0;
+    while let Some(pos) = lower[offset..].find("<script") {
+        let abs = offset + pos;
+        let Some(end_tag) = lower[abs..].find('>') else {
+            break;
+        };
+        let start_body = abs + end_tag + 1;
+        let end_body = lower[start_body..]
+            .find("</script>")
+            .map(|p| start_body + p)
+            .unwrap_or(html.len());
+        let body = &html[start_body..end_body];
+        offset = end_body;
+
+        for token in body.split(['"', '\'']) {
+            let t = token.trim();
+            if t.contains("/chapter/") || t.contains("/capitulo-") || t.contains("/chapter-") {
+                out.push(resolver_url(t, base_origin, url_obra));
+            }
+        }
+    }
+    out
 }
 
 fn extrair_origem(url: &str) -> String {
@@ -746,5 +861,56 @@ mod tests {
         .unwrap();
         let archive = zip::ZipArchive::new(Cursor::new(cbz)).unwrap();
         assert_eq!(archive.len(), 2);
+    }
+
+    #[test]
+    fn extrair_capitulos_de_html_suporta_mangafire_mangalivre_e_scripts() {
+        let html_mf = r#"
+            <html>
+              <head>
+                <title>Medaka Box - MangaFire</title>
+                <meta property="og:image" content="https://cdn.exemplo.com/medaka.jpg" />
+              </head>
+              <body>
+                <a href="/title/jw2-medaka-boxx/chapter/4570384" data-number="192">Ch. 192</a>
+                <a href="/title/jw2-medaka-boxx/chapter/4570383" data-number="191">Ch. 191</a>
+              </body>
+            </html>
+        "#;
+        let mf = extrair_capitulos_de_html("https://mangafire.to/title/jw2-medaka-boxx", html_mf);
+        assert_eq!(mf.titulo, "Medaka Box");
+        assert_eq!(mf.capa_url.as_deref(), Some("https://cdn.exemplo.com/medaka.jpg"));
+        assert_eq!(mf.capitulos.len(), 2);
+        assert_eq!(mf.capitulos[0].numero, Some(191));
+        assert_eq!(
+            mf.capitulos[1].capitulo_id_fonte,
+            "https://mangafire.to/title/jw2-medaka-boxx/chapter/4570384"
+        );
+
+        let html_ml = r#"
+            <html>
+              <head><title>Chainsaw Man - MangaLivre</title></head>
+              <body>
+                <a href="https://mangalivre.to/manga/chainsaw-man-pt-br/capitulo-208/">Capítulo 208</a>
+                <a href="/manga/chainsaw-man-pt-br/capitulo-207/">Capítulo 207</a>
+              </body>
+            </html>
+        "#;
+        let ml = extrair_capitulos_de_html(
+            "https://mangalivre.to/manga/chainsaw-man-pt-br/",
+            html_ml,
+        );
+        assert_eq!(ml.titulo, "Chainsaw Man");
+        assert_eq!(ml.capitulos.len(), 2);
+        assert_eq!(ml.capitulos[0].numero, Some(207));
+        assert_eq!(ml.capitulos[0].idioma.as_deref(), Some("PT"));
+        assert_eq!(ml.capitulos[1].numero, Some(208));
+
+        let html_script = r#"
+            <html><head><title>Obra Script</title></head>
+            <body><script>window.__DATA__ = ["/title/jw2-medaka-boxx/chapter/4570384"];</script></body></html>
+        "#;
+        let sc = extrair_capitulos_de_html("https://mangafire.to/title/jw2-medaka-boxx", html_script);
+        assert_eq!(sc.capitulos.len(), 1);
     }
 }
