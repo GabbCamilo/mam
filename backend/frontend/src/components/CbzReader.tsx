@@ -47,6 +47,7 @@ export function CbzReader({
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const lastScrollTopRef = useRef(0)
   const longStripPageRefs = useRef<(HTMLImageElement | null)[]>([])
+  const longStripCapituloRef = useRef<string | null>(null)
   const pendingScrollRatioRef = useRef<{ x: number; y: number } | null>(null)
   const [marcadores, setMarcadores] = useState<MarcadorPagina[]>([])
   const [erro, setErro] = useState<string | null>(null)
@@ -100,7 +101,13 @@ export function CbzReader({
     if (usarZoomPadrao) {
       setZoom(zoomPadraoPorModo[modo])
     }
-  }, [indiceAtual, capitulo.id, modo, usarZoomPadrao, zoomPadraoPorModo])
+  }, [capitulo.id, modo, usarZoomPadrao, zoomPadraoPorModo])
+
+  useEffect(() => {
+    if (usarZoomPadrao && modo !== 'vertical') {
+      setZoom(zoomPadraoPorModo[modo])
+    }
+  }, [indiceAtual])
 
   useEffect(() => {
     if (modo !== 'vertical') {
@@ -111,6 +118,10 @@ export function CbzReader({
   useEffect(() => {
     let ativo = true
     async function carregarPaginas() {
+      if (modo === 'vertical' && longStripCapituloRef.current === capitulo.caminho_relativo && paginasLongStrip.length > 0) {
+        await mamApi.salvarProgresso(capitulo.id, indiceAtual)
+        return
+      }
       setCarregando(true)
       setErro(null)
       try {
@@ -131,15 +142,18 @@ export function CbzReader({
             todas.push(p)
           }
           if (ativo) {
+            longStripCapituloRef.current = capitulo.caminho_relativo
             setPaginasLongStrip(todas)
             setPaginaSecundaria(null)
             await mamApi.marcarLido(capitulo.id, true)
           }
         } else if (modo === 'dupla' && indiceAtual + 1 < p1.total_paginas) {
+          longStripCapituloRef.current = null
           setPaginasLongStrip([])
           const p2 = await mamApi.obterPagina(capitulo.caminho_relativo, indiceAtual + 1)
           if (ativo) setPaginaSecundaria(p2)
         } else {
+          longStripCapituloRef.current = null
           setPaginasLongStrip([])
           setPaginaSecundaria(null)
         }
@@ -530,13 +544,36 @@ export function CbzReader({
         className="mam-reader-viewport"
         onScroll={(e) => {
           if (modo === 'vertical') {
-            const st = e.currentTarget.scrollTop
+            const vpEl = e.currentTarget
+            const st = vpEl.scrollTop
             if (st > lastScrollTopRef.current + 6) {
               setBarraVisivel(false)
             } else if (st < lastScrollTopRef.current - 6) {
               setBarraVisivel(true)
             }
             lastScrollTopRef.current = st
+
+            const vpRect = vpEl.getBoundingClientRect()
+            const alvoY = vpRect.top + vpRect.height * 0.35
+            let visivel = indiceAtual
+            let melhorDist = Number.POSITIVE_INFINITY
+            for (let i = 0; i < longStripPageRefs.current.length; i++) {
+              const el = longStripPageRefs.current[i]
+              if (!el) continue
+              const r = el.getBoundingClientRect()
+              if (r.top <= alvoY && r.bottom >= alvoY) {
+                visivel = i
+                break
+              }
+              const dist = Math.abs(r.top - alvoY)
+              if (dist < melhorDist) {
+                melhorDist = dist
+                visivel = i
+              }
+            }
+            if (visivel !== indiceAtual) {
+              setIndiceAtual(visivel)
+            }
           }
         }}
         onWheel={(e) => {

@@ -455,7 +455,13 @@ function App() {
 
   async function handleBuscarNaFonte(e: React.FormEvent) {
     e.preventDefault()
-    if (!consultaFonte.trim()) return
+    if (!consultaFonte.trim()) {
+      setObrasFonte([])
+      setObraFonteSelecionada(null)
+      setCapitulosFonte([])
+      setSelecionadosIds([])
+      return
+    }
     try {
       const res = await mamApi.sourceBuscarObras(consultaFonte.trim())
       setObrasFonte(res)
@@ -1394,7 +1400,16 @@ function App() {
                   className="mam-input mam-search-input"
                   placeholder="🔍 Pesquisar obra por título no MangaDex..."
                   value={consultaFonte}
-                  onChange={(e) => setConsultaFonte(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setConsultaFonte(v)
+                    if (!v.trim()) {
+                      setObrasFonte([])
+                      setObraFonteSelecionada(null)
+                      setCapitulosFonte([])
+                      setSelecionadosIds([])
+                    }
+                  }}
                 />
                 <button className="mam-btn mam-btn-primary" type="submit">
                   Pesquisar
@@ -1950,7 +1965,7 @@ function App() {
 
       {/* Modal flutuante de Importação por Link Direto / HTML / Lista Ordenada */}
       {modalImportarUrlAberto && (
-        <div className="mam-modal-backdrop" onClick={() => setModalImportarUrlAberto(false)}>
+        <div className="mam-modal-backdrop">
           <form
             className="mam-modal"
             style={{ maxWidth: 620 }}
