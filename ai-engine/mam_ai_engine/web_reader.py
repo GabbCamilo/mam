@@ -336,12 +336,148 @@ def _select_preferred_language(cdp: _CdpClient, preferred_lang: str) -> bool:
     return bool(clicked)
 
 
+def _collect_paginated_chapters(
+    cdp: _CdpClient,
+    url: str,
+    max_pages: int | None = None,
+    stop_when_all_numbers_in: set[int] | None = None,
+) -> tuple[str, str | None, int, list[dict[str, Any]]]:
+    vistos: set[str] = set()
+    capitulos: list[dict[str, Any]] = []
+    titulo_obra = ""
+    capa_url = None
+    idle_steps = 0
+    page_idx = 0
+
+    while True:
+        page_idx += 1
+        snap = cdp.eval_js(
+            """
+            const h1 = document.querySelector('h1');
+            const ogImg = document.querySelector('meta[property="og:image"]');
+            const coverImg = document.querySelector(
+              '.title-detail__cover img, .title-detail__top img, .manga-poster img, img[class*="cover"], img[class*="poster"]'
+            );
+            const anchors = Array.from(document.querySelectorAll('a[href]')).map(a => {
+              const row = a.closest('.title-detail__row, li, tr, .chapter-item');
+              const flag = row ? row.querySelector('.title-detail__row-flag, [class*="flag"]') : null;
+              return {
+                href: a.href,
+                text: (a.textContent || '').replace(/\\s+/g, ' ').trim(),
+                dataNumber: a.getAttribute('data-number') || a.getAttribute('data-chapter') || '',
+                rowLang: flag ? (flag.getAttribute('title') || flag.textContent || '') : ''
+              };
+            });
+            return {
+              title: h1 ? h1.textContent.trim() : document.title,
+              cover: (ogImg && ogImg.content) || (coverImg && (coverImg.currentSrc || coverImg.src)) || null,
+              anchors
+            };
+            """
+        ) or {}
+
+        if not titulo_obra and snap.get("title"):
+            titulo_obra = str(snap["title"]).strip()
+        if not capa_url and snap.get("cover"):
+            capa_url = str(snap["cover"]).strip()
+
+        novos_nesta_pagina = 0
+        novos_fora_do_conjunto = 0
+        for item in snap.get("anchors") or []:
+            href = str(item.get("href") or "").strip()
+            if not href:
+                continue
+            lower_href = href.lower()
+            if not any(p in lower_href for p in ("/chapter/", "/capitulo-", "/chapter-", "/cap-", "/ch-")):
+                continue
+            norm = href.rstrip("/")
+            if norm in vistos:
+                continue
+            vistos.add(norm)
+            novos_nesta_pagina += 1
+            if stop_when_all_numbers_in is not None:
+                m = re.search(
+                    r"(?:cap[íi]tulo|chapter|cap\.?|ch\.?)\s*[-:]?\s*(\d+)",
+                    f"{item.get('text', '')} {href}".lower(),
+                )
+                num = int(m.group(1)) if m else None
+                if num is None or num not in stop_when_all_numbers_in:
+                    novos_fora_do_conjunto += 1
+                    capitulos.append(item)
+            else:
+                capitulos.append(item)
+
+        if stop_when_all_numbers_in is not None and novos_nesta_pagina > 0 and novos_fora_do_conjunto == 0:
+            break
+
+        if novos_nesta_pagina == 0:
+            idle_steps += 1
+        else:
+            idle_steps = 0
+        if idle_steps >= 2:
+            break
+        if max_pages is not None and page_idx >= max_pages:
+            break
+
+        avancou = cdp.eval_js(
+            """
+            const active = document.querySelector('.npager__num.is-active, .pagination .active, [aria-current="page"]');
+            if (active) {
+              let next = active.nextElementSibling;
+              while (next && (next.disabled || next.classList.contains('disabled'))) {
+                next = next.nextElementSibling;
+              }
+              if (next) {
+                const txt = (next.textContent || '').trim();
+                const aria = (next.getAttribute('aria-label') || '').toLowerCase();
+                if (/^\\d+$|^>$|^›$|next|próxima/i.test(txt) || /next|próxim/i.test(aria) || (txt === '' && next.querySelector('svg'))) {
+                  next.click();
+                  return true;
+                }
+              }
+            }
+            const nextBtn = document.querySelector('a[rel="next"], button[aria-label*="Next" i], button.load-more, .load-more button');
+            if (nextBtn && !nextBtn.disabled) {
+              nextBtn.click();
+              return true;
+            }
+            const scroller = document.querySelector('.scroll-area');
+            if (scroller && scroller.scrollTop + scroller.clientHeight + 20 < scroller.scrollHeight) {
+              scroller.scrollTop = scroller.scrollHeight;
+              return true;
+            }
+            return false;
+            """
+        )
+        if not avancou:
+            break
+        time.sleep(0.9)
+
+    return titulo_obra, capa_url, page_idx, capitulos
+
+
+def _extract_num_set(items: list[dict[str, Any]]) -> set[int]:
+    nums: set[int] = set()
+    for it in items:
+        m = re.search(
+            r"(?:cap[íi]tulo|chapter|cap\.?|ch\.?)\s*[-:]?\s*(\d+)",
+            f"{it.get('text', '')} {it.get('href', '')}".lower(),
+        )
+        if m:
+            nums.add(int(m.group(1)))
+    return nums
+
+
 def discover_work_chapters(
     url: str,
     preferred_lang: str = "pt-br",
     max_pages: int | None = None,
 ) -> dict[str, Any]:
-    """Navega na página central da obra via CDP, seleciona idioma e percorre toda a paginação."""
+    """Navega na página central da obra via CDP, seleciona idioma e percorre toda a paginação.
+
+    Se `preferred_lang == 'pt-br'`, complementa automaticamente com capítulos pendentes de `en`
+    cujos números ainda não existam em PT-BR (ex.: PT até 100 + ENG 101..150 em sequência).
+    """
     with _BrowserSession() as cdp:
         cdp.call("Page.navigate", {"url": url})
         _wait_spa_settle(
@@ -349,111 +485,37 @@ def discover_work_chapters(
             "document.querySelectorAll('a[href*=\"chapter\"], a[href*=\"capitulo\"], .title-detail__row-link').length > 0",
             max_wait_s=9.0,
         )
-        _select_preferred_language(cdp, preferred_lang)
+        selecionou_pref = _select_preferred_language(cdp, preferred_lang)
+        titulo_obra, capa_url, paginas_varridas, capitulos = _collect_paginated_chapters(
+            cdp, url, max_pages=max_pages
+        )
 
-        vistos: set[str] = set()
-        capitulos: list[dict[str, Any]] = []
-        titulo_obra = ""
-        capa_url = None
-        idle_steps = 0
-        page_idx = 0
-
-        while True:
-            page_idx += 1
-            snap = cdp.eval_js(
-                """
-                const h1 = document.querySelector('h1');
-                const ogImg = document.querySelector('meta[property="og:image"]');
-                const coverImg = document.querySelector('.title-detail__cover img, .manga-poster img, img[class*="cover"]');
-                const anchors = Array.from(document.querySelectorAll('a[href]')).map(a => {
-                  const row = a.closest('.title-detail__row, li, tr, .chapter-item');
-                  const flag = row ? row.querySelector('.title-detail__row-flag, [class*="flag"]') : null;
-                  return {
-                    href: a.href,
-                    text: (a.textContent || '').replace(/\\s+/g, ' ').trim(),
-                    dataNumber: a.getAttribute('data-number') || a.getAttribute('data-chapter') || '',
-                    rowLang: flag ? (flag.getAttribute('title') || flag.textContent || '') : ''
-                  };
-                });
-                return {
-                  title: h1 ? h1.textContent.trim() : document.title,
-                  cover: (ogImg && ogImg.content) || (coverImg && coverImg.src) || null,
-                  anchors
-                };
-                """
-            ) or {}
-
-            if not titulo_obra and snap.get("title"):
-                titulo_obra = str(snap["title"]).strip()
-            if not capa_url and snap.get("cover"):
-                capa_url = str(snap["cover"]).strip()
-
-            novos_nesta_pagina = 0
-            for item in snap.get("anchors") or []:
-                href = str(item.get("href") or "").strip()
-                if not href:
-                    continue
-                lower_href = href.lower()
-                if not any(p in lower_href for p in ("/chapter/", "/capitulo-", "/chapter-", "/cap-", "/ch-")):
-                    continue
-                norm = href.rstrip("/")
-                if norm in vistos:
-                    continue
-                vistos.add(norm)
-                novos_nesta_pagina += 1
-                capitulos.append(item)
-
-            if novos_nesta_pagina == 0:
-                idle_steps += 1
-            else:
-                idle_steps = 0
-            if idle_steps >= 2:
-                break
-            if max_pages is not None and page_idx >= max_pages:
-                break
-
-            avancou = cdp.eval_js(
-                """
-                // 1. Paginação numérica (ex.: .npager__num.is-active -> próximo irmão ou botão Next com ícone SVG)
-                const active = document.querySelector('.npager__num.is-active, .pagination .active, [aria-current="page"]');
-                if (active) {
-                  let next = active.nextElementSibling;
-                  while (next && (next.disabled || next.classList.contains('disabled'))) {
-                    next = next.nextElementSibling;
-                  }
-                  if (next) {
-                    const txt = (next.textContent || '').trim();
-                    const aria = (next.getAttribute('aria-label') || '').toLowerCase();
-                    if (/^\d+$|^>$|^›$|next|próxima/i.test(txt) || /next|próxim/i.test(aria) || (txt === '' && next.querySelector('svg'))) {
-                      next.click();
-                      return true;
-                    }
-                  }
-                }
-                // 2. Link/botão Próxima explícito ou Load More
-                const nextBtn = document.querySelector('a[rel="next"], button[aria-label*="Next" i], button.load-more, .load-more button');
-                if (nextBtn && !nextBtn.disabled) {
-                  nextBtn.click();
-                  return true;
-                }
-                // 3. Scroll na lista caso seja scroll infinito
-                const scroller = document.querySelector('.scroll-area');
-                if (scroller && scroller.scrollTop + scroller.clientHeight + 20 < scroller.scrollHeight) {
-                  scroller.scrollTop = scroller.scrollHeight;
-                  return true;
-                }
-                return false;
-                """
-            )
-            if not avancou:
-                break
-            time.sleep(0.9)
+        # Se PT-BR foi selecionado e existe inglês com capítulos além dos disponíveis em PT-BR,
+        # adiciona os pendentes em sequência após os de português.
+        if (preferred_lang or "pt-br").strip().lower() in ("pt", "pt-br", "pt_br", "portuguese") and selecionou_pref:
+            numeros_pt = _extract_num_set(capitulos)
+            if _select_preferred_language(cdp, "en"):
+                _, capa_en, pags_en, extras_en = _collect_paginated_chapters(
+                    cdp,
+                    url,
+                    max_pages=max_pages,
+                    stop_when_all_numbers_in=numeros_pt if numeros_pt else None,
+                )
+                paginas_varridas += pags_en
+                if not capa_url and capa_en:
+                    capa_url = capa_en
+                vistos_urls = {str(c.get("href", "")).rstrip("/") for c in capitulos}
+                for ex in extras_en:
+                    h = str(ex.get("href", "")).rstrip("/")
+                    if h and h not in vistos_urls:
+                        vistos_urls.add(h)
+                        capitulos.append(ex)
 
         return {
             "titulo": titulo_obra or "Obra Importada",
             "capa_url": capa_url,
             "url_obra": url,
-            "paginas_varridas": page_idx,
+            "paginas_varridas": paginas_varridas,
             "capitulos": capitulos,
         }
 

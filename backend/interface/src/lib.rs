@@ -334,6 +334,23 @@ pub async fn library_listar_obras_resumo(
                     mam_source_integration::codificar_base64(&bytes)
                 )
             })
+        } else if total_capitulos > 0 {
+            let mut fallback_url = None;
+            if let Ok(caps) = db.listar_capitulos_obra(obra.id).await {
+                if let Some(primeiro_cap) = caps.first() {
+                    let cbz_path = raiz.join(primeiro_cap.caminho_relativo.as_str());
+                    if cbz_path.is_file() {
+                        let arch = ArchiveManager::nova(db.clone());
+                        if let Ok(pag) = arch.ler_pagina(&cbz_path, 0).await {
+                            fallback_url = Some(format!(
+                                "data:{};base64,{}",
+                                pag.mime_type, pag.dados_base64
+                            ));
+                        }
+                    }
+                }
+            }
+            fallback_url
         } else {
             None
         };

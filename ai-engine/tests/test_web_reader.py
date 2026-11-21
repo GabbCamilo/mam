@@ -54,6 +54,22 @@ class TestWebReader(unittest.TestCase):
         self.assertEqual(res["capitulos"][0]["idioma"], "PT")
         self.assertEqual(res["capitulos"][1]["numero"], 192)
 
+    def test_smart_discover_chapters_completa_sequencia_pt_com_eng(self) -> None:
+        fake_cdp_seq = {
+            "titulo": "Obra Mista",
+            "capa_url": None,
+            "url_obra": "https://mangafire.to/title/obra-mista",
+            "paginas_varridas": 2,
+            "capitulos": [
+                {"href": "https://mangafire.to/title/obra-mista/chapter/100", "text": "Ch. 100", "dataNumber": "", "rowLang": "pt-br"},
+                {"href": "https://mangafire.to/title/obra-mista/chapter/150", "text": "Ch. 150", "dataNumber": "", "rowLang": "en"},
+            ],
+        }
+        with patch("mam_ai_engine.web_reader.discover_work_chapters", return_value=fake_cdp_seq):
+            res = smart_discover_chapters({"url_obra": "https://mangafire.to/title/obra-mista", "idioma_preferido": "pt-br"})
+        self.assertEqual([c["numero"] for c in res["capitulos"]], [100, 150])
+        self.assertEqual([c["idioma"] for c in res["capitulos"]], ["PT", "ENG"])
+
     def test_smart_extract_chapter_pages_e_analyze_reader_dom(self) -> None:
         with patch(
             "mam_ai_engine.web_reader.extract_chapter_pages",
