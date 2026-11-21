@@ -8,6 +8,7 @@ Suporta sites SPA/dinâmicos sem dependências externas:
 
 from __future__ import annotations
 
+import atexit
 import base64
 import hashlib
 import json
@@ -26,6 +27,23 @@ from typing import Any
 
 _NON_IMAGE_EXTS = (".js", ".mjs", ".css", ".html", ".htm", ".svg", ".ico", ".json", ".woff", ".woff2", ".ttf")
 _UI_NOISE_TOKENS = ("favicon", "logo", "avatar", "banner", "badge", "flag", "/assets/mangafire/logo")
+_ACTIVE_BROWSER_PROCS: set[subprocess.Popen[bytes]] = set()
+
+
+def _cleanup_all_browsers() -> None:
+    for proc in list(_ACTIVE_BROWSER_PROCS):
+        try:
+            proc.terminate()
+            proc.wait(timeout=2)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        _ACTIVE_BROWSER_PROCS.discard(proc)
+
+
+atexit.register(_cleanup_all_browsers)
 
 
 def find_browser_executable() -> str | None:
@@ -211,6 +229,7 @@ class _BrowserSession:
             stderr=subprocess.DEVNULL,
             creationflags=creationflags,
         )
+        _ACTIVE_BROWSER_PROCS.add(self._proc)
 
         port_file = Path(self._tmp_dir) / "DevToolsActivePort"
         deadline = time.monotonic() + 12.0
@@ -240,6 +259,7 @@ class _BrowserSession:
         if self.cdp is not None:
             self.cdp.close()
         if self._proc is not None:
+            _ACTIVE_BROWSER_PROCS.discard(self._proc)
             try:
                 self._proc.terminate()
                 self._proc.wait(timeout=3)
