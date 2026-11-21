@@ -93,6 +93,13 @@ function App() {
 
   const [modalImportarUrlAberto, setModalImportarUrlAberto] = useState(false)
   const [modalInfoImportacaoAberto, setModalInfoImportacaoAberto] = useState(false)
+  const [modalConfirmacao, setModalConfirmacao] = useState<{
+    titulo: string
+    mensagem: string
+    textoConfirmar: string
+    perigo?: boolean
+    onConfirm: () => Promise<void> | void
+  } | null>(null)
   const [conectoresCatalogo, setConectoresCatalogo] = useState<CatalogoConectores | null>(null)
   const [conectorBuscaAtivo, setConectorBuscaAtivo] = useState('mangadex')
   const [statusAtualizacaoConectores, setStatusAtualizacaoConectores] =
@@ -213,20 +220,25 @@ function App() {
 
   async function handleExcluirObra(e: React.MouseEvent, obraId: string, titulo: string) {
     e.stopPropagation()
-    if (!window.confirm(`Excluir a obra "${titulo}" e todos os seus arquivos da biblioteca?`)) {
-      return
-    }
-    try {
-      await mamApi.excluirObra(obraId, true)
-      if (detalhes?.obra.id === obraId) {
-        setDetalhes(null)
-        setCapaBiblioteca(null)
-      }
-      setMensagem(`Obra "${titulo}" excluída da biblioteca.`)
-      await carregarObras()
-    } catch (err) {
-      setMensagem(`Erro ao excluir obra: ${String(err)}`)
-    }
+    setModalConfirmacao({
+      titulo: 'Excluir Obra da Biblioteca',
+      mensagem: `Excluir a obra "${titulo}" e todos os seus arquivos da biblioteca?`,
+      textoConfirmar: 'Excluir Obra',
+      perigo: true,
+      onConfirm: async () => {
+        try {
+          await mamApi.excluirObra(obraId, true)
+          if (detalhes?.obra.id === obraId) {
+            setDetalhes(null)
+            setCapaBiblioteca(null)
+          }
+          setMensagem(`Obra "${titulo}" excluída da biblioteca.`)
+          await carregarObras()
+        } catch (err) {
+          setMensagem(`Erro ao excluir obra: ${String(err)}`)
+        }
+      },
+    })
   }
 
   async function handleRenomearCapitulo(e: React.MouseEvent, cap: Capitulo) {
@@ -294,20 +306,25 @@ function App() {
   }
 
   async function handleExcluirVolume(volId: string, label: string) {
-    if (!window.confirm(`Excluir o "${label}"? (Os capítulos continuarão salvos na obra.)`)) {
-      return
-    }
-    try {
-      await mamApi.excluirVolume(volId)
-      if (detalhes) {
-        const d = await mamApi.obterDetalhesObra(detalhes.obra.id)
-        setDetalhes(d)
-      }
-      await carregarObras()
-      setMensagem('Volume excluído (capítulos preservados na obra).')
-    } catch (err) {
-      setMensagem(`Erro ao excluir volume: ${String(err)}`)
-    }
+    setModalConfirmacao({
+      titulo: 'Excluir Volume',
+      mensagem: `Excluir o "${label}"? (Os capítulos continuarão salvos na obra.)`,
+      textoConfirmar: 'Excluir Volume',
+      perigo: true,
+      onConfirm: async () => {
+        try {
+          await mamApi.excluirVolume(volId)
+          if (detalhes) {
+            const d = await mamApi.obterDetalhesObra(detalhes.obra.id)
+            setDetalhes(d)
+          }
+          await carregarObras()
+          setMensagem('Volume excluído (capítulos preservados na obra).')
+        } catch (err) {
+          setMensagem(`Erro ao excluir volume: ${String(err)}`)
+        }
+      },
+    })
   }
 
   async function handleLimparLog() {
@@ -317,22 +334,24 @@ function App() {
         : subAbaLogs === 'exclusoes'
           ? 'exclusao'
           : 'renomeacao'
-    if (
-      !window.confirm(
-        `Limpar o histórico de ${subAbaLogs}? (Downloads em andamento ou pausados serão preservados automaticamente.)`,
-      )
-    )
-      return
-    try {
-      await mamApi.limparHistoricoLogs(tipo)
-      if (subAbaLogs === 'downloads') {
-        setOperacoesDownload([])
-      }
-      await carregarObras()
-      setMensagem('Log limpo com sucesso.')
-    } catch (err) {
-      setMensagem(`Erro ao limpar log: ${String(err)}`)
-    }
+    setModalConfirmacao({
+      titulo: 'Limpar Histórico',
+      mensagem: `Limpar o histórico de ${subAbaLogs}? (Downloads em andamento ou pausados serão preservados automaticamente.)`,
+      textoConfirmar: 'Limpar Log',
+      perigo: false,
+      onConfirm: async () => {
+        try {
+          await mamApi.limparHistoricoLogs(tipo)
+          if (subAbaLogs === 'downloads') {
+            setOperacoesDownload([])
+          }
+          await carregarObras()
+          setMensagem('Log limpo com sucesso.')
+        } catch (err) {
+          setMensagem(`Erro ao limpar log: ${String(err)}`)
+        }
+      },
+    })
   }
 
   async function handleAlternarLido(e: React.MouseEvent, capId: string) {
@@ -1871,21 +1890,23 @@ function App() {
                                   <button
                                     type="button"
                                     className="mam-btn mam-btn-danger"
-                                    onClick={async () => {
-                                      if (
-                                        !window.confirm(
-                                          `Cancelar o download de "${grupo.titulo}" e excluir todos os capítulos já baixados deste conjunto?`,
-                                        )
-                                      )
-                                        return
-                                      await mamApi.sourceCancelarOperacao(grupo.id)
-                                      const [ops, hist] = await Promise.all([
-                                        mamApi.sourceListarOperacoes(),
-                                        mamApi.sourceListarHistoricoDownloads(),
-                                      ])
-                                      setOperacoesDownload(ops)
-                                      setDownloadsLog(hist)
-                                      await carregarObras()
+                                    onClick={() => {
+                                      setModalConfirmacao({
+                                        titulo: 'Cancelar Download',
+                                        mensagem: `Cancelar o download de "${grupo.titulo}" e excluir todos os capítulos já baixados deste conjunto?`,
+                                        textoConfirmar: 'Cancelar e Excluir',
+                                        perigo: true,
+                                        onConfirm: async () => {
+                                          await mamApi.sourceCancelarOperacao(grupo.id)
+                                          const [ops, hist] = await Promise.all([
+                                            mamApi.sourceListarOperacoes(),
+                                            mamApi.sourceListarHistoricoDownloads(),
+                                          ])
+                                          setOperacoesDownload(ops)
+                                          setDownloadsLog(hist)
+                                          await carregarObras()
+                                        },
+                                      })
                                     }}
                                   >
                                     ✖ Cancelar
@@ -2134,6 +2155,54 @@ function App() {
           </section>
         )}
       </main>
+
+      {/* Modal de confirmação estilizado (substitui notificações nativas do WebView) */}
+      {modalConfirmacao && (
+        <div
+          className="mam-modal-backdrop"
+          onClick={() => setModalConfirmacao(null)}
+        >
+          <div
+            className="mam-modal"
+            style={{ maxWidth: 460 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mam-modal-header">
+              <strong>{modalConfirmacao.titulo}</strong>
+              <button
+                type="button"
+                className="mam-btn"
+                onClick={() => setModalConfirmacao(null)}
+              >
+                ✕
+              </button>
+            </div>
+            <p className="mam-section-desc" style={{ margin: 0 }}>
+              {modalConfirmacao.mensagem}
+            </p>
+            <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="mam-btn"
+                onClick={() => setModalConfirmacao(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className={`mam-btn ${modalConfirmacao.perigo ? 'mam-btn-danger' : 'mam-btn-primary'}`}
+                onClick={async () => {
+                  const fn = modalConfirmacao.onConfirm
+                  setModalConfirmacao(null)
+                  await fn()
+                }}
+              >
+                {modalConfirmacao.textoConfirmar}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal informativo de Como Usar o Importar por Link e Sites Suportados */}
       {modalInfoImportacaoAberto && (

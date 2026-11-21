@@ -589,8 +589,6 @@ export function CbzReader({
           justifyContent: 'flex-start',
         }}
       >
-        {carregando && <p style={{ color: '#94a3b8', margin: 'auto' }}>Carregando página...</p>}
-
         {modo === 'vertical' && paginasLongStrip.length > 0 ? (
           paginasLongStrip.map((pag, idx) => (
             <img

@@ -321,12 +321,40 @@ pub async fn descobrir_capitulos_por_link_com_opcoes(
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
+    let mut melhor_resultado: Option<ObraExtraidaPorLink> = None;
     if let Ok(resp) = client.get(url_limpa).send().await {
         if resp.status().is_success() {
             if let Ok(html) = resp.text().await {
-                let extraida = extrair_capitulos_de_html(url_limpa, &html);
-                if !extraida.capitulos.is_empty() {
+                let mut extraida = extrair_capitulos_de_html(url_limpa, &html);
+
+                // Suporte automático a temas WordPress Madara (lista completa via POST .../ajax/chapters/)
+                if extraida.capitulos.len() <= 2
+                    || html.contains("wp-manga")
+                    || html.contains("ajax/chapters")
+                {
+                    let ajax_url = format!("{}/ajax/chapters/", url_limpa.trim_end_matches('/'));
+                    if let Ok(resp_ajax) = client
+                        .post(&ajax_url)
+                        .header("X-Requested-With", "XMLHttpRequest")
+                        .send()
+                        .await
+                    {
+                        if resp_ajax.status().is_success() {
+                            if let Ok(ajax_html) = resp_ajax.text().await {
+                                let via_ajax = extrair_capitulos_de_html(url_limpa, &ajax_html);
+                                if via_ajax.capitulos.len() > extraida.capitulos.len() {
+                                    extraida.capitulos = via_ajax.capitulos;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if extraida.capitulos.len() > 2 {
                     return Ok(extraida);
+                }
+                if !extraida.capitulos.is_empty() {
+                    melhor_resultado = Some(extraida);
                 }
             }
         }
@@ -336,7 +364,9 @@ pub async fn descobrir_capitulos_por_link_com_opcoes(
     if let Ok(extraida_cdp) =
         smart_discover_via_ai_engine(url_limpa, idioma_preferido.unwrap_or("pt-br")).await
     {
-        if !extraida_cdp.capitulos.is_empty() {
+        if extraida_cdp.capitulos.len()
+            > melhor_resultado.as_ref().map(|r| r.capitulos.len()).unwrap_or(0)
+        {
             return Ok(extraida_cdp);
         }
     }
@@ -344,9 +374,15 @@ pub async fn descobrir_capitulos_por_link_com_opcoes(
     // Fallback 2: Renderização simples --dump-dom caso ai-engine Python não esteja acessível
     if let Ok(dom_renderizado) = renderizar_html_com_navegador(url_limpa).await {
         let extraida = extrair_capitulos_de_html(url_limpa, &dom_renderizado);
-        if !extraida.capitulos.is_empty() {
+        if extraida.capitulos.len()
+            > melhor_resultado.as_ref().map(|r| r.capitulos.len()).unwrap_or(0)
+        {
             return Ok(extraida);
         }
+    }
+
+    if let Some(res) = melhor_resultado {
+        return Ok(res);
     }
 
     Err(SourceError::Operacao(
