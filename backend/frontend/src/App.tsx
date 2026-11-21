@@ -1079,7 +1079,7 @@ function App() {
                           ))
                         )}
                       </>
-                    ) : (
+                    ) : subAbaObra === 'volumes' ? (
                       <>
                         <form onSubmit={handleCriarVolumeComCapitulos} className="mam-panel" style={{ marginBottom: '1rem' }}>
                           <div className="mam-section-header" style={{ marginBottom: '0.5rem' }}>
@@ -1235,7 +1235,7 @@ function App() {
                           </p>
                         )}
                       </>
-                    )}
+                    ) : null}
 
                     {subAbaObra === 'marcados' && (
                       <>
@@ -1757,9 +1757,106 @@ function App() {
                 Cópia Integral (SHA-256)
               </button>
             </div>
-            {diferenca && <pre className="mam-pre">{JSON.stringify(diferenca, null, 2)}</pre>}
+            {diferenca && (
+              <div style={{ marginTop: '1rem', display: 'grid', gap: '0.85rem' }}>
+                <div
+                  style={{
+                    padding: '0.85rem 1rem',
+                    borderRadius: 10,
+                    border: '1px solid rgba(34, 197, 94, 0.45)',
+                    background: 'rgba(34, 197, 94, 0.1)',
+                  }}
+                >
+                  <strong style={{ color: 'var(--success, #22c55e)' }}>
+                    🟢 Ausentes no Destino — prontos para adicionar sem sobrescrever (
+                    {diferenca.ausentes_no_destino.length})
+                  </strong>
+                  {diferenca.ausentes_no_destino.length === 0 ? (
+                    <p className="mam-section-desc" style={{ marginTop: '0.35rem' }}>
+                      Nenhum arquivo/pasta ausente no destino.
+                    </p>
+                  ) : (
+                    <div style={{ display: 'grid', gap: '0.3rem', marginTop: '0.5rem' }}>
+                      {diferenca.ausentes_no_destino.map((caminho) => (
+                        <div
+                          key={caminho}
+                          style={{
+                            padding: '0.4rem 0.65rem',
+                            borderRadius: 6,
+                            background: 'rgba(34, 197, 94, 0.14)',
+                            color: '#bbf7d0',
+                            fontFamily: 'monospace',
+                            fontSize: '0.85rem',
+                          }}
+                        >
+                          + {caminho}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {diferenca.diferentes.length > 0 && (
+                  <div
+                    style={{
+                      padding: '0.85rem 1rem',
+                      borderRadius: 10,
+                      border: '1px solid rgba(234, 179, 8, 0.4)',
+                      background: 'rgba(234, 179, 8, 0.08)',
+                    }}
+                  >
+                    <strong style={{ color: '#facc15' }}>
+                      🟡 Diferentes ({diferenca.diferentes.length})
+                    </strong>
+                    <div style={{ display: 'grid', gap: '0.3rem', marginTop: '0.5rem' }}>
+                      {diferenca.diferentes.map((caminho) => (
+                        <div
+                          key={caminho}
+                          style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: '#fef08a' }}
+                        >
+                          ≠ {caminho}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="mam-panel" style={{ padding: '0.75rem 1rem' }}>
+                  <strong>⚪ Idênticos ({diferenca.identicos.length})</strong>
+                  {diferenca.identicos.length > 0 && (
+                    <div style={{ display: 'grid', gap: '0.2rem', marginTop: '0.4rem' }}>
+                      {diferenca.identicos.map((caminho) => (
+                        <div
+                          key={caminho}
+                          className="mam-brand-sub"
+                          style={{ fontFamily: 'monospace' }}
+                        >
+                          = {caminho}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {relatorioTransfer && (
-              <pre className="mam-pre">{JSON.stringify(relatorioTransfer, null, 2)}</pre>
+              <div className="mam-panel" style={{ marginTop: '1rem' }}>
+                <strong>
+                  Relatório de Transferência ({relatorioTransfer.operacao_id})
+                </strong>
+                <div className="mam-toolbar-row" style={{ marginTop: '0.5rem' }}>
+                  <span className="mam-pill-badge">
+                    ✓ Copiados: {relatorioTransfer.arquivos_copiados.length}
+                  </span>
+                  <span className="mam-pill-badge">
+                    Ignorados: {relatorioTransfer.arquivos_ignorados.length}
+                  </span>
+                  <span className="mam-pill-badge">
+                    {relatorioTransfer.bytes_transferidos} bytes
+                  </span>
+                </div>
+              </div>
             )}
           </section>
         )}
