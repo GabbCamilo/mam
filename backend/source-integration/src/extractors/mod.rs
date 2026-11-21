@@ -267,13 +267,13 @@ impl RegistroExtratores {
                 .send()
                 .await?;
             if !resp.status().is_success() {
-                return Err(SourceError::Rede(format!(
+                return Err(SourceError::Operacao(format!(
                     "Falha ao baixar imagem {}: HTTP {}",
                     url,
                     resp.status()
                 )));
             }
-            let ext = extensao_por_url(url);
+            let ext = extrair_extensao_url(url);
             let bytes = resp.bytes().await?.to_vec();
             paginas_bytes.push((ext, bytes));
         }
@@ -304,7 +304,7 @@ pub async fn descobrir_capitulos_por_link(
             .unwrap_or_else(|_| reqwest::Client::new());
         let resp = client.get(url_limpa).send().await?;
         if !resp.status().is_success() {
-            return Err(SourceError::Rede(format!(
+            return Err(SourceError::Operacao(format!(
                 "HTTP {} ao acessar a página da obra (cole o HTML da página se o site exigir navegador).",
                 resp.status()
             )));
