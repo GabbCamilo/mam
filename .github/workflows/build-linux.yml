@@ -1,0 +1,53 @@
+name: Build Linux Portable & Update
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar dependências Tauri 2 Linux
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Instalar dependências do frontend e rodar testes
+        run: |
+          cd backend/frontend && npm ci && npm run build
+          cd ../../ai-engine && python3 -m unittest tests/test_web_reader.py
+          cd ../backend && cargo test --workspace --quiet
+
+      - name: Gerar pacotes Linux portáteis e atualização incremental
+        run: |
+          chmod +x packaging/linux/build-portable-linux.sh
+          ./packaging/linux/build-portable-linux.sh
+          ! tar -tzf dist/MAM-linux-x86_64-update.tar.gz | grep -q "MAM_LIBRARY"
+
+      - name: Publicar artefatos Linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: mam-linux-x86_64
+          path: |
+            dist/MAM-linux-x86_64.tar.gz
+            dist/MAM-linux-x86_64-update.tar.gz
