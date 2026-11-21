@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use super::CapituloBuscaResultado;
 
 /// Operação de arquivamento de capítulos de uma obra.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OperacaoArquivamento {
     pub id: String,
     pub obra_titulo: String,
@@ -15,6 +15,25 @@ pub struct OperacaoArquivamento {
     pub capitulos_processados: HashMap<String, bool>, // capitulo_id -> processado
     pub data_inicio: chrono::DateTime<chrono::Utc>,
     pub data_conclusao: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default = "estado_padrao")]
+    pub estado: String, // "executando" | "pausado" | "cancelado" | "concluido"
+    #[serde(default)]
+    pub pausada: bool,
+    #[serde(default)]
+    pub cancelada: bool,
+    #[serde(default)]
+    pub capa_url: Option<String>,
+    #[serde(default)]
+    pub obra_id_criada: Option<String>,
+    #[serde(default)]
+    pub obra_nova: bool,
+    /// Lista de `(capitulo_id, caminho_relativo)` gravados nesta operação (para rollback estilo Docker).
+    #[serde(default)]
+    pub capitulos_gravados: Vec<(String, String)>,
+}
+
+fn estado_padrao() -> String {
+    "executando".to_string()
 }
 
 /// Capítulo a ser arquivado em uma operação.
@@ -26,6 +45,8 @@ pub struct CapituloParaArquivar {
     pub numero: Option<i32>,
     pub titulo: Option<String>,
     pub url: Option<String>,
+    #[serde(default)]
+    pub idioma: Option<String>,
 }
 
 /// Status simplificado de uma operação (para exposição via API).
@@ -37,6 +58,12 @@ pub struct StatusOperacao {
     pub capitulos_processados: usize,
     pub percentual: f32,
     pub concluida: bool,
+    #[serde(default = "estado_padrao")]
+    pub estado: String,
+    #[serde(default)]
+    pub pausada: bool,
+    #[serde(default)]
+    pub cancelada: bool,
 }
 
 impl OperacaoArquivamento {
@@ -57,6 +84,7 @@ impl OperacaoArquivamento {
                 numero: cap.numero,
                 titulo: cap.titulo,
                 url: cap.url,
+                idioma: cap.idioma,
             });
             processados.insert(cap.capitulo_id_fonte, false);
         }
@@ -68,6 +96,13 @@ impl OperacaoArquivamento {
             capitulos_processados: processados,
             data_inicio: chrono::Utc::now(),
             data_conclusao: None,
+            estado: "executando".to_string(),
+            pausada: false,
+            cancelada: false,
+            capa_url: None,
+            obra_id_criada: None,
+            obra_nova: false,
+            capitulos_gravados: Vec::new(),
         }
     }
 
@@ -78,6 +113,7 @@ impl OperacaoArquivamento {
         }
         if self.capitulos_processados.values().all(|v| *v) {
             self.data_conclusao = Some(chrono::Utc::now());
+            self.estado = "concluido".to_string();
         }
     }
 
@@ -99,6 +135,13 @@ impl OperacaoArquivamento {
             capitulos_processados: processados,
             percentual,
             concluida,
+            estado: if concluida {
+                "concluido".to_string()
+            } else {
+                self.estado.clone()
+            },
+            pausada: self.pausada,
+            cancelada: self.cancelada,
         }
     }
 
@@ -118,6 +161,13 @@ impl Default for OperacaoArquivamento {
             capitulos_processados: HashMap::new(),
             data_inicio: chrono::Utc::now(),
             data_conclusao: None,
+            estado: "executando".to_string(),
+            pausada: false,
+            cancelada: false,
+            capa_url: None,
+            obra_id_criada: None,
+            obra_nova: false,
+            capitulos_gravados: Vec::new(),
         }
     }
 }

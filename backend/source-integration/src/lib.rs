@@ -196,7 +196,7 @@ impl SourceIntegrationManager {
         Ok(self.db.consultar_integridade(caminho_relativo).await?.is_some())
     }
 
-    /// Inicia uma operação de arquivamento de capítulos.
+    /// Inicia uma operação de arquivamento de capítulos e persiste o estado inicial no SQLite.
     pub async fn iniciar_operacao_arquivamento(
         &self,
         obra_titulo: String,
@@ -206,13 +206,193 @@ impl SourceIntegrationManager {
 
         let operacao = operacao::OperacaoArquivamento::nova(
             id_operacao.clone(),
-            obra_titulo,
+            obra_titulo.clone(),
             capitulos,
         );
+        if let Ok(json) = serde_json::to_string(&operacao) {
+            let _ = self
+                .db
+                .salvar_estado_operacao_arquivamento(&id_operacao, &obra_titulo, "executando", &json)
+                .await;
+        }
 
         self.operacoes.write().await.insert(id_operacao.clone(), operacao);
 
         Ok(id_operacao)
+    }
+
+    async fn persistir_operacao(&self, id_operacao: &str) {
+        let snapshot = {
+            let operacoes = self.operacoes.read().await;
+            operacoes.get(id_operacao).cloned()
+        };
+        if let Some(op) = snapshot {
+            if let Ok(json) = serde_json::to_string(&op) {
+                let _ = self
+                    .db
+                    .salvar_estado_operacao_arquivamento(&op.id, &op.obra_titulo, &op.estado, &json)
+                    .await;
+            }
+        }
+    }
+
+    /// Carrega operações que estavam em andamento ou pausadas no banco após fechar o app.
+    pub async fn carregar_operacoes_pausadas_do_banco(&self) -> usize {
+        let Ok(rows) = self.db.listar_estados_operacoes_arquivamento().await else {
+            return 0;
+        };
+        let mut carregadas = 0usize;
+        let mut guard = self.operacoes.write().await;
+        for (id, _titulo, estado, payload_json) in rows {
+            if guard.contains_key(&id) {
+                continue;
+            }
+            if estado == "executando" || estado == "pausado" {
+                if let Ok(mut op) = serde_json::from_str::<operacao::OperacaoArquivamento>(&payload_json) {
+                    op.pausada = true;
+                    op.estado = "pausado".to_string();
+                    guard.insert(id, op);
+                    carregadas += 1;
+                }
+            }
+        }
+        carregadas
+    }
+
+    /// Pausa uma operação ativa.
+    pub async fn pausar_operacao(&self, id_operacao: &str) -> Result<(), SourceError> {
+        {
+            let mut operacoes = self.operacoes.write().await;
+            let op = operacoes
+                .get_mut(id_operacao)
+                .ok_or_else(|| SourceError::Operacao("Operação não encontrada".to_string()))?;
+            if !op.esta_concluida() && !op.cancelada {
+                op.pausada = true;
+                op.estado = "pausado".to_string();
+            }
+        }
+        self.persistir_operacao(id_operacao).await;
+        Ok(())
+    }
+
+    /// Pausa automaticamente todas as operações em andamento (ex.: ao fechar o aplicativo).
+    pub async fn pausar_todas_operacoes_ativas(&self) -> usize {
+        let ids: Vec<String> = {
+            let mut operacoes = self.operacoes.write().await;
+            let mut alterados = Vec::new();
+            for op in operacoes.values_mut() {
+                if !op.esta_concluida() && !op.cancelada && op.estado == "executando" {
+                    op.pausada = true;
+                    op.estado = "pausado".to_string();
+                    alterados.push(op.id.clone());
+                }
+            }
+            alterados
+        };
+        for id in &ids {
+            self.persistir_operacao(id).await;
+        }
+        ids.len()
+    }
+
+    /// Prepara uma operação pausada para retomada: se ainda houver tarefa ativa em memória,
+    /// apenas despausa; se foi restaurada do banco após reinício, retorna os dados para reexecução.
+    pub async fn preparar_retomada_operacao(
+        &self,
+        id_operacao: &str,
+    ) -> Result<Option<(String, Vec<CapituloBuscaResultado>, Option<String>)>, SourceError> {
+        let dados_respawn = {
+            let mut operacoes = self.operacoes.write().await;
+            let op = operacoes
+                .get_mut(id_operacao)
+                .ok_or_else(|| SourceError::Operacao("Operação não encontrada".to_string()))?;
+            if op.cancelada || op.esta_concluida() {
+                return Ok(None);
+            }
+            op.pausada = false;
+            op.estado = "executando".to_string();
+            let caps = op
+                .capitulos
+                .iter()
+                .map(|c| CapituloBuscaResultado {
+                    fonte_id: c.fonte_id.clone(),
+                    obra_id_fonte: c.obra_id_fonte.clone(),
+                    capitulo_id_fonte: c.capitulo_id_fonte.clone(),
+                    numero: c.numero,
+                    titulo: c.titulo.clone(),
+                    url: c.url.clone(),
+                    idioma: c.idioma.clone(),
+                })
+                .collect::<Vec<_>>();
+            Some((op.obra_titulo.clone(), caps, op.capa_url.clone()))
+        };
+        self.persistir_operacao(id_operacao).await;
+        Ok(dados_respawn)
+    }
+
+    /// Cancela uma operação e executa rollback estilo Docker (remove os CBZs e registros deste conjunto).
+    pub async fn cancelar_operacao(
+        &self,
+        id_operacao: &str,
+        raiz_biblioteca: &std::path::Path,
+    ) -> Result<(), SourceError> {
+        let estava_pausada = {
+            let mut operacoes = self.operacoes.write().await;
+            let op = operacoes
+                .get_mut(id_operacao)
+                .ok_or_else(|| SourceError::Operacao("Operação não encontrada".to_string()))?;
+            op.cancelada = true;
+            op.pausada = false;
+            op.estado = "cancelado".to_string();
+            op.capitulos_gravados.clone()
+        };
+        // Sempre executa rollback imediatamente para garantir limpeza tanto se pausada quanto ativa
+        let _ = estava_pausada;
+        self.executar_rollback_operacao(id_operacao, raiz_biblioteca)
+            .await;
+        Ok(())
+    }
+
+    async fn executar_rollback_operacao(
+        &self,
+        id_operacao: &str,
+        raiz_biblioteca: &std::path::Path,
+    ) {
+        let (gravados, obra_id_criada, obra_nova, obra_titulo) = {
+            let mut operacoes = self.operacoes.write().await;
+            if let Some(op) = operacoes.get_mut(id_operacao) {
+                op.cancelada = true;
+                op.pausada = false;
+                op.estado = "cancelado".to_string();
+                let grav = std::mem::take(&mut op.capitulos_gravados);
+                (grav, op.obra_id_criada.clone(), op.obra_nova, op.obra_titulo.clone())
+            } else {
+                (Vec::new(), None, false, String::new())
+            }
+        };
+
+        for (cap_id, caminho_rel) in &gravados {
+            let abs = raiz_biblioteca.join(caminho_rel);
+            let _ = std::fs::remove_file(&abs);
+            let _ = std::fs::remove_file(abs.with_extension("cbz.mam_tmp"));
+            let _ = self.db.excluir_capitulo_por_id(cap_id).await;
+        }
+
+        let _ = self.db.remover_historico_por_operacao(id_operacao).await;
+
+        if obra_nova {
+            if let Some(oid) = obra_id_criada {
+                if let Ok(true) = self.db.excluir_obra_se_vazia(&oid).await {
+                    let pasta_obra = raiz_biblioteca.join("Manga").join(sanitizar_nome(&obra_titulo));
+                    let _ = std::fs::remove_dir_all(&pasta_obra);
+                }
+            }
+        }
+
+        let _ = self
+            .db
+            .remover_estado_operacao_arquivamento(id_operacao)
+            .await;
     }
 
     /// Retorna o status de uma operação de arquivamento.
@@ -221,36 +401,13 @@ impl SourceIntegrationManager {
         id_operacao: &str,
     ) -> Result<Option<StatusOperacao>, SourceError> {
         let operacoes = self.operacoes.read().await;
-        Ok(operacoes.get(id_operacao).map(|o| {
-            let s = o.status();
-            StatusOperacao {
-                id: o.id.clone(),
-                obra_titulo: o.obra_titulo.clone(),
-                total_capitulos: s.total_capitulos,
-                capitulos_processados: s.capitulos_processados,
-                percentual: s.percentual,
-                concluida: s.concluida,
-            }
-        }))
+        Ok(operacoes.get(id_operacao).map(|o| o.status()))
     }
 
     /// Lista todas as operações de arquivamento.
     pub async fn listar_operacoes(&self) -> Vec<StatusOperacao> {
         let operacoes = self.operacoes.read().await;
-        operacoes
-            .values()
-            .map(|o| {
-                let s = o.status();
-                StatusOperacao {
-                    id: o.id.clone(),
-                    obra_titulo: o.obra_titulo.clone(),
-                    total_capitulos: s.total_capitulos,
-                    capitulos_processados: s.capitulos_processados,
-                    percentual: s.percentual,
-                    concluida: s.concluida,
-                }
-            })
-            .collect()
+        operacoes.values().map(|o| o.status()).collect()
     }
 
     /// Executa o arquivamento de um capítulo (atualiza progresso).
@@ -321,9 +478,9 @@ impl SourceIntegrationManager {
             let _ = salvar_capa_local(url_capa, &pasta_obra_abs).await;
         }
 
-        let obra = match self.db.buscar_obra_por_titulo(&obra_titulo).await? {
-            Some(o) => o,
-            None => {
+        let (obra, obra_criada_agora) = match self.db.buscar_obra_por_titulo(&obra_titulo).await? {
+            Some(o) => (o, false),
+            None => (
                 self.db
                     .criar_obra(
                         mam_core::ObraId::new(),
@@ -331,11 +488,52 @@ impl SourceIntegrationManager {
                         mam_core::CaminhoRelativo::from_str(caminho_rel_obra.clone()),
                         capitulos.first().map(|c| c.fonte_id.clone()),
                     )
-                    .await?
-            }
+                    .await?,
+                true,
+            ),
         };
 
+        {
+            let mut operacoes = self.operacoes.write().await;
+            if let Some(op) = operacoes.get_mut(id_operacao) {
+                op.capa_url = capa_url.clone();
+                if op.obra_id_criada.is_none() {
+                    op.obra_id_criada = Some(obra.id.to_string());
+                    op.obra_nova = obra_criada_agora;
+                }
+            }
+        }
+        self.persistir_operacao(id_operacao).await;
+
         for cap in capitulos {
+            // Verifica se capítulo já foi processado (retomada após pausa/reinício)
+            {
+                let operacoes = self.operacoes.read().await;
+                if let Some(op) = operacoes.get(id_operacao) {
+                    if op.capitulos_processados.get(&cap.capitulo_id_fonte).copied().unwrap_or(false) {
+                        continue;
+                    }
+                }
+            }
+
+            // Checa cancelamento / pausa antes de iniciar cada capítulo
+            loop {
+                let (cancelada, pausada) = {
+                    let operacoes = self.operacoes.read().await;
+                    match operacoes.get(id_operacao) {
+                        Some(op) => (op.cancelada, op.pausada),
+                        None => (true, false),
+                    }
+                };
+                if cancelada {
+                    self.executar_rollback_operacao(id_operacao, raiz_biblioteca).await;
+                    return Ok(());
+                }
+                if !pausada {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+            }
             let numero = cap.numero.unwrap_or(0);
             let idioma_limpo = cap
                 .idioma
@@ -488,6 +686,14 @@ impl SourceIntegrationManager {
                 "paginas": qtd_paginas,
             })
             .to_string();
+            {
+                let mut operacoes = self.operacoes.write().await;
+                if let Some(op) = operacoes.get_mut(id_operacao) {
+                    op.capitulos_gravados
+                        .push((cap_id.to_string(), caminho_rel_cap.clone()));
+                }
+            }
+
             let _ = self
                 .db
                 .registrar_operacao(
@@ -500,7 +706,23 @@ impl SourceIntegrationManager {
 
             self.arquivar_capitulo(id_operacao, &cap.fonte_id, &cap)
                 .await?;
+            self.persistir_operacao(id_operacao).await;
+
+            // Se foi cancelado durante o download deste capítulo, aplica rollback imediato
+            let cancelado_durante = {
+                let operacoes = self.operacoes.read().await;
+                operacoes.get(id_operacao).map(|o| o.cancelada).unwrap_or(false)
+            };
+            if cancelado_durante {
+                self.executar_rollback_operacao(id_operacao, raiz_biblioteca).await;
+                return Ok(());
+            }
         }
+
+        let _ = self
+            .db
+            .remover_estado_operacao_arquivamento(id_operacao)
+            .await;
 
         Ok(())
     }
@@ -604,16 +826,7 @@ pub struct FonteInfo {
     pub autorizada: bool,
 }
 
-/// Status de uma operação de arquivamento.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StatusOperacao {
-    pub id: String,
-    pub obra_titulo: String,
-    pub total_capitulos: usize,
-    pub capitulos_processados: usize,
-    pub percentual: f32,
-    pub concluida: bool,
-}
+pub use operacao::StatusOperacao;
 
 #[cfg(test)]
 mod tests {
@@ -639,6 +852,9 @@ mod tests {
             capitulos_processados: 3,
             percentual: 30.0,
             concluida: false,
+            estado: "executando".to_string(),
+            pausada: false,
+            cancelada: false,
         };
         assert_eq!(status.percentual, 30.0);
         assert!(!status.concluida);
@@ -713,6 +929,104 @@ mod tests {
         assert_eq!(caps_db.len(), 2);
         assert!(caps_db.iter().any(|c| c.idioma.as_deref() == Some("PT")));
         assert!(caps_db.iter().any(|c| c.idioma.as_deref() == Some("ENG")));
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn ciclo_vida_pausa_retomada_cancelamento_rollback_e_limpar_log_preservado() {
+        use std::io::Write;
+        use crate::fonte::{CapituloEncontrado, ObraEncontrada};
+        struct FonteLentaMock;
+        #[async_trait::async_trait]
+        impl Fonte for FonteLentaMock {
+            fn id(&self) -> &str { "mock-lenta" }
+            fn nome(&self) -> &str { "Mock Lenta" }
+            fn eh_autorizada(&self) -> bool { true }
+            async fn buscar_obras(&self, _: &str) -> Result<Vec<ObraEncontrada>, crate::fonte::FonteError> { Ok(vec![]) }
+            async fn listar_capitulos(&self, _: &str) -> Result<Vec<CapituloEncontrado>, crate::fonte::FonteError> { Ok(vec![]) }
+            async fn obter_capitulo(&self, _: &str) -> Result<Vec<u8>, crate::fonte::FonteError> {
+                let mut cur = std::io::Cursor::new(Vec::new());
+                {
+                    let mut zw = zip::ZipWriter::new(&mut cur);
+                    zw.start_file("0001.jpg", zip::write::FileOptions::default()).unwrap();
+                    zw.write_all(b"JPG").unwrap();
+                    zw.finish().unwrap();
+                }
+                Ok(cur.into_inner())
+            }
+        }
+
+        let base = std::env::temp_dir().join(format!("mam_test_lifecycle_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&base).unwrap();
+        let db = Arc::new(Database::abrir(base.join("db.sqlite"), base.clone()).await.unwrap());
+        let sm = Arc::new(SourceIntegrationManager::nova(db.clone()));
+        sm.registrar_fonte(Arc::new(FonteLentaMock)).await.unwrap();
+
+        let caps = vec![
+            CapituloBuscaResultado {
+                fonte_id: "mock-lenta".to_string(),
+                obra_id_fonte: "o1".to_string(),
+                capitulo_id_fonte: "c1".to_string(),
+                numero: Some(1),
+                titulo: Some("Cap 1".to_string()),
+                url: None,
+                idioma: Some("PT".to_string()),
+            },
+            CapituloBuscaResultado {
+                fonte_id: "mock-lenta".to_string(),
+                obra_id_fonte: "o1".to_string(),
+                capitulo_id_fonte: "c2".to_string(),
+                numero: Some(2),
+                titulo: Some("Cap 2".to_string()),
+                url: None,
+                idioma: Some("PT".to_string()),
+            },
+        ];
+
+        // 1. Inicia operação e pausa automaticamente (simulando fechamento do app)
+        let op_id = sm.iniciar_operacao_arquivamento("Obra Pausa".to_string(), caps.clone()).await.unwrap();
+        let pausadas = sm.pausar_todas_operacoes_ativas().await;
+        assert_eq!(pausadas, 1);
+
+        // 2. Simula reinício do app com novo SourceIntegrationManager carregando do SQLite
+        let sm_novo = Arc::new(SourceIntegrationManager::nova(db.clone()));
+        sm_novo.registrar_fonte(Arc::new(FonteLentaMock)).await.unwrap();
+        let restauradas = sm_novo.carregar_operacoes_pausadas_do_banco().await;
+        assert_eq!(restauradas, 1);
+        let st_rest = sm_novo.status_operacao(&op_id).await.unwrap().unwrap();
+        assert!(st_rest.pausada);
+        assert_eq!(st_rest.estado, "pausado");
+
+        // 3. Registrar um log ligado à operação pausada + um log antigo, e limpar o log:
+        //    o log da operação pausada deve ser preservado!
+        db.registrar_operacao(
+            "download".to_string(),
+            None,
+            Some(serde_json::json!({"operacao_id": op_id, "nome": "Cap em Pausa"}).to_string()),
+            None,
+        ).await.unwrap();
+        db.registrar_operacao(
+            "download".to_string(),
+            None,
+            Some(serde_json::json!({"operacao_id": "op-antiga", "nome": "Cap Antigo"}).to_string()),
+            None,
+        ).await.unwrap();
+        db.limpar_historico(Some("download")).await.unwrap();
+        let logs = db.listar_historico_por_tipo("download").await.unwrap();
+        assert_eq!(logs.len(), 1);
+        assert!(logs[0].2.as_deref().unwrap().contains(&op_id));
+
+        // 4. Despausa e executa parcialmente / testa rollback ao cancelar
+        let (_, caps_ret, capa_ret) = sm_novo.preparar_retomada_operacao(&op_id).await.unwrap().unwrap();
+        sm_novo.executar_arquivamento_operacao(&op_id, &base, "Obra Pausa".to_string(), caps_ret, capa_ret).await.unwrap();
+        assert!(base.join("Manga/Obra Pausa/PT/Capitulo_0001.cbz").exists());
+
+        // Cancela o conjunto e valida rollback estilo Docker (apaga CBZs, obra e logs do conjunto)
+        sm_novo.cancelar_operacao(&op_id, &base).await.unwrap();
+        assert!(!base.join("Manga/Obra Pausa/PT/Capitulo_0001.cbz").exists());
+        assert!(!base.join("Manga/Obra Pausa/PT/Capitulo_0002.cbz").exists());
+        assert!(db.buscar_obra_por_titulo("Obra Pausa").await.unwrap().is_none());
 
         let _ = std::fs::remove_dir_all(&base);
     }

@@ -274,11 +274,56 @@ pub async fn source_iniciar_arquivamento(
     Ok(id_operacao)
 }
 
-/// Lista todas as operações de arquivamento (em andamento e concluídas).
+/// Lista todas as operações de arquivamento (em andamento, pausadas e concluídas).
 pub async fn source_listar_operacoes(
     source_manager: Arc<SourceIntegrationManager>,
 ) -> Result<Vec<StatusOperacao>, String> {
+    let _ = source_manager.carregar_operacoes_pausadas_do_banco().await;
     Ok(source_manager.listar_operacoes().await)
+}
+
+/// Pausa uma operação de arquivamento ativa.
+pub async fn source_pausar_operacao(
+    source_manager: Arc<SourceIntegrationManager>,
+    id_operacao: String,
+) -> Result<(), String> {
+    source_manager
+        .pausar_operacao(&id_operacao)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Retoma (despausa) uma operação de arquivamento pausada (inclusive após reinício do app).
+pub async fn source_retomar_operacao(
+    source_manager: Arc<SourceIntegrationManager>,
+    library_manager: Arc<LibraryManager>,
+    id_operacao: String,
+) -> Result<(), String> {
+    if let Some((obra_titulo, capitulos, capa_url)) = source_manager
+        .preparar_retomada_operacao(&id_operacao)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        let raiz = library_manager.raiz().to_path_buf();
+        tokio::spawn(async move {
+            let _ = source_manager
+                .executar_arquivamento_operacao(&id_operacao, &raiz, obra_titulo, capitulos, capa_url)
+                .await;
+        });
+    }
+    Ok(())
+}
+
+/// Cancela uma operação de arquivamento aplicando rollback completo (estilo Docker).
+pub async fn source_cancelar_operacao(
+    source_manager: Arc<SourceIntegrationManager>,
+    library_manager: Arc<LibraryManager>,
+    id_operacao: String,
+) -> Result<(), String> {
+    source_manager
+        .cancelar_operacao(&id_operacao, library_manager.raiz())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Baixa uma imagem de capa pelo backend Rust (evitando bloqueio de Referer/CSP no WebView).

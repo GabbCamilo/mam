@@ -137,6 +137,10 @@ impl AiEngineManager {
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null());
+            #[cfg(windows)]
+            {
+                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW: evita abrir terminal na tela
+            }
 
             let mut child = cmd.spawn()?;
             let stdin = child

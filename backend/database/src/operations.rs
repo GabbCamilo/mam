@@ -743,17 +743,156 @@ impl Database {
         self.listar_historico_por_tipo("renomeacao").await
     }
 
-    /// Limpa registros do histórico de operações (de um tipo específico ou de todos os logs).
+    /// Limpa registros do histórico de operações preservando registros vinculados a
+    /// operações de download em andamento ou pausadas.
     pub async fn limpar_historico(&self, tipo: Option<&str>) -> DbResult<()> {
         let conn = self.conn.lock().await;
-        match tipo {
-            Some(t) => {
-                conn.execute("DELETE FROM historico_operacoes WHERE tipo = ?1", params![t])?;
+        Self::garantir_tabela_operacoes_estado(&conn)?;
+        let mut stmt = conn.prepare(
+            "SELECT id FROM operacoes_arquivamento_estado WHERE estado IN ('executando', 'pausado')",
+        )?;
+        let ids_protegidos: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
+            .filter_map(Result::ok)
+            .collect();
+        drop(stmt);
+
+        if ids_protegidos.is_empty() {
+            match tipo {
+                Some(t) => {
+                    conn.execute("DELETE FROM historico_operacoes WHERE tipo = ?1", params![t])?;
+                }
+                None => {
+                    conn.execute("DELETE FROM historico_operacoes", [])?;
+                }
             }
-            None => {
-                conn.execute("DELETE FROM historico_operacoes", [])?;
+        } else {
+            let mut stmt_hist = match tipo {
+                Some(t) => {
+                    let mut s = conn.prepare(
+                        "SELECT id, COALESCE(detalhes_json, '') FROM historico_operacoes WHERE tipo = ?1",
+                    )?;
+                    let rows: Vec<(String, String)> = s
+                        .query_map(params![t], |r| Ok((r.get(0)?, r.get(1)?)))?
+                        .filter_map(Result::ok)
+                        .collect();
+                    rows
+                }
+                None => {
+                    let mut s = conn.prepare(
+                        "SELECT id, COALESCE(detalhes_json, '') FROM historico_operacoes",
+                    )?;
+                    let rows: Vec<(String, String)> = s
+                        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                        .filter_map(Result::ok)
+                        .collect();
+                    rows
+                }
+            };
+            for (row_id, detalhes) in stmt_hist.drain(..) {
+                let protegido = ids_protegidos.iter().any(|op_id| detalhes.contains(op_id));
+                if !protegido {
+                    conn.execute("DELETE FROM historico_operacoes WHERE id = ?1", params![row_id])?;
+                }
             }
         }
+        Ok(())
+    }
+
+    fn garantir_tabela_operacoes_estado(conn: &rusqlite::Connection) -> DbResult<()> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS operacoes_arquivamento_estado (
+                id TEXT PRIMARY KEY,
+                obra_titulo TEXT NOT NULL,
+                estado TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                atualizado_em TEXT NOT NULL
+            )",
+            [],
+        )?;
+        Ok(())
+    }
+
+    /// Salva ou atualiza o estado persistido de uma operação de arquivamento (pausa/retomada/rollback).
+    pub async fn salvar_estado_operacao_arquivamento(
+        &self,
+        id: &str,
+        obra_titulo: &str,
+        estado: &str,
+        payload_json: &str,
+    ) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        Self::garantir_tabela_operacoes_estado(&conn)?;
+        conn.execute(
+            "INSERT INTO operacoes_arquivamento_estado (id, obra_titulo, estado, payload_json, atualizado_em)
+             VALUES (?1, ?2, ?3, ?4, datetime('now'))
+             ON CONFLICT(id) DO UPDATE SET
+               obra_titulo = excluded.obra_titulo,
+               estado = excluded.estado,
+               payload_json = excluded.payload_json,
+               atualizado_em = excluded.atualizado_em",
+            params![id, obra_titulo, estado, payload_json],
+        )?;
+        Ok(())
+    }
+
+    /// Lista operações de arquivamento persistidas (para retomada após fechar o app).
+    pub async fn listar_estados_operacoes_arquivamento(
+        &self,
+    ) -> DbResult<Vec<(String, String, String, String)>> {
+        let conn = self.conn.lock().await;
+        Self::garantir_tabela_operacoes_estado(&conn)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, obra_titulo, estado, payload_json FROM operacoes_arquivamento_estado ORDER BY atualizado_em DESC",
+        )?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(rows)
+    }
+
+    /// Remove uma operação persistida (após conclusão ou cancelamento com rollback).
+    pub async fn remover_estado_operacao_arquivamento(&self, id: &str) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        Self::garantir_tabela_operacoes_estado(&conn)?;
+        conn.execute(
+            "DELETE FROM operacoes_arquivamento_estado WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    /// Remove um capítulo pelo ID (usado em rollback de cancelamento).
+    pub async fn excluir_capitulo_por_id(&self, id: &str) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        conn.execute("DELETE FROM capitulos WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Remove uma obra pelo ID caso tenha ficado sem capítulos após rollback.
+    pub async fn excluir_obra_se_vazia(&self, obra_id: &str) -> DbResult<bool> {
+        let conn = self.conn.lock().await;
+        let qtd: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM capitulos WHERE obra_id = ?1",
+            params![obra_id],
+            |r| r.get(0),
+        )?;
+        if qtd == 0 {
+            conn.execute("DELETE FROM obras WHERE id = ?1", params![obra_id])?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// Remove registros do histórico associados a uma operação cancelada.
+    pub async fn remover_historico_por_operacao(&self, id_operacao: &str) -> DbResult<()> {
+        let conn = self.conn.lock().await;
+        let like_pat = format!("%{}%", id_operacao);
+        conn.execute(
+            "DELETE FROM historico_operacoes WHERE detalhes_json LIKE ?1",
+            params![like_pat],
+        )?;
         Ok(())
     }
 }

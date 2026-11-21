@@ -241,6 +241,42 @@ async fn source_listar_operacoes(
 }
 
 #[tauri::command]
+async fn source_pausar_operacao(
+    source_manager: tauri::State<'_, Arc<SourceIntegrationManager>>,
+    id_operacao: String,
+) -> Result<(), String> {
+    mam_interface::source_pausar_operacao(source_manager.inner().clone(), id_operacao).await
+}
+
+#[tauri::command]
+async fn source_retomar_operacao(
+    source_manager: tauri::State<'_, Arc<SourceIntegrationManager>>,
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    id_operacao: String,
+) -> Result<(), String> {
+    mam_interface::source_retomar_operacao(
+        source_manager.inner().clone(),
+        library_manager.inner().clone(),
+        id_operacao,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn source_cancelar_operacao(
+    source_manager: tauri::State<'_, Arc<SourceIntegrationManager>>,
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    id_operacao: String,
+) -> Result<(), String> {
+    mam_interface::source_cancelar_operacao(
+        source_manager.inner().clone(),
+        library_manager.inner().clone(),
+        id_operacao,
+    )
+    .await
+}
+
+#[tauri::command]
 async fn source_obter_capa(url: String) -> Result<String, String> {
     if_source_obter_capa(url).await
 }
@@ -646,6 +682,9 @@ pub fn run() {
       reader_listar_lidos,
       source_obter_capa,
       source_descobrir_por_link,
+      source_pausar_operacao,
+      source_retomar_operacao,
+      source_cancelar_operacao,
       library_listar_obras_resumo,
       source_listar_historico_downloads,
     ])
@@ -714,6 +753,16 @@ pub fn run() {
       app.manage(Arc::new(ai_manager));
 
       Ok(())
+    })
+    .on_window_event(|window, event| {
+      if let tauri::WindowEvent::CloseRequested { .. } = event {
+        if let Some(source_manager) = window.try_state::<Arc<SourceIntegrationManager>>() {
+          let sm = source_manager.inner().clone();
+          let _ = tauri::async_runtime::block_on(async move {
+            sm.pausar_todas_operacoes_ativas().await;
+          });
+        }
+      }
     })
     .run(tauri::generate_context!())
     .expect("error while building tauri application");

@@ -90,6 +90,7 @@ function App() {
   const [volCapitulosIds, setVolCapitulosIds] = useState<string[]>([])
 
   const [modalImportarUrlAberto, setModalImportarUrlAberto] = useState(false)
+  const [modalInfoImportacaoAberto, setModalInfoImportacaoAberto] = useState(false)
   const [modoImportacao, setModoImportacao] = useState<'obra' | 'capitulo'>('obra')
   const [extratores, setExtratores] = useState<ExtratorInfo[]>([])
   const [extObraTitulo, setExtObraTitulo] = useState('')
@@ -301,7 +302,12 @@ function App() {
         : subAbaLogs === 'exclusoes'
           ? 'exclusao'
           : 'renomeacao'
-    if (!window.confirm(`Limpar todo o histórico de ${subAbaLogs}?`)) return
+    if (
+      !window.confirm(
+        `Limpar o histórico de ${subAbaLogs}? (Downloads em andamento ou pausados serão preservados automaticamente.)`,
+      )
+    )
+      return
     try {
       await mamApi.limparHistoricoLogs(tipo)
       if (subAbaLogs === 'downloads') {
@@ -1392,12 +1398,22 @@ function App() {
                   {extratores.map((e) => e.id).join(', ') || '...'}
                 </p>
               </div>
-              <button
-                className="mam-btn mam-btn-primary"
-                onClick={() => setModalImportarUrlAberto(true)}
-              >
-                + Importar por Link / HTML
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="mam-btn"
+                  title="Como usar o Importar por Link e quais sites têm suporte direto"
+                  onClick={() => setModalInfoImportacaoAberto(true)}
+                >
+                  ⓘ Guia / Sites
+                </button>
+                <button
+                  className="mam-btn mam-btn-primary"
+                  onClick={() => setModalImportarUrlAberto(true)}
+                >
+                  + Importar por Link / HTML
+                </button>
+              </div>
             </div>
 
             <form onSubmit={handleBuscarNaFonte} className="mam-panel">
@@ -1469,7 +1485,20 @@ function App() {
                             className="mam-select"
                             aria-label="Filtrar capítulos da fonte por idioma"
                             value={filtroIdiomaFonte}
-                            onChange={(e) => setFiltroIdiomaFonte(e.target.value)}
+                            onChange={(e) => {
+                              const novoIdioma = e.target.value
+                              setFiltroIdiomaFonte(novoIdioma)
+                              if (novoIdioma !== 'TODOS') {
+                                const permitidos = new Set(
+                                  capitulosFonte
+                                    .filter((c) => c.idioma === novoIdioma)
+                                    .map((c) => c.capitulo_id_fonte),
+                                )
+                                setSelecionadosIds((prev) =>
+                                  prev.filter((id) => permitidos.has(id)),
+                                )
+                              }
+                            }}
                           >
                             <option value="TODOS">LANG: Todos ({capitulosFonte.length})</option>
                             {idiomasFonteDisponiveis.map((lang) => (
@@ -1627,6 +1656,9 @@ function App() {
                 total: number
                 percentual: number
                 concluida: boolean
+                pausada: boolean
+                cancelada: boolean
+                estado: string
                 itens: DownloadLogItem[]
               }
 
@@ -1642,6 +1674,9 @@ function App() {
                   total: op.total_capitulos,
                   percentual: op.percentual,
                   concluida: op.concluida,
+                  pausada: Boolean(op.pausada || op.estado === 'pausado'),
+                  cancelada: Boolean(op.cancelada || op.estado === 'cancelado'),
+                  estado: op.estado ?? (op.concluida ? 'concluido' : 'executando'),
                   itens: downloadsLog.filter((item) => item.operacao_id === op.id),
                 })
               }
@@ -1667,6 +1702,9 @@ function App() {
                   total: itens.length,
                   percentual: 100,
                   concluida: true,
+                  pausada: false,
+                  cancelada: false,
+                  estado: 'concluido',
                   itens,
                 })
               }
@@ -1724,12 +1762,74 @@ function App() {
                           >
                             <strong>
                               {aberto ? '▾' : '▸'}{' '}
-                              {grupo.concluida ? '✓ Concluído' : '⬇️ Baixando conjunto'}:{' '}
-                              {grupo.titulo}
+                              {grupo.cancelada
+                                ? '✖ Cancelado (removido)'
+                                : grupo.pausada
+                                  ? '⏸ Pausado'
+                                  : grupo.concluida
+                                    ? '✓ Concluído'
+                                    : '⬇️ Baixando conjunto'}
+                              : {grupo.titulo}
                             </strong>
-                            <span className="mam-pill-badge">
-                              {grupo.processados}/{grupo.total} ({Math.round(grupo.percentual)}%)
-                            </span>
+                            <div
+                              style={{ display: 'flex', gap: '0.45rem', alignItems: 'center' }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {!grupo.concluida && !grupo.cancelada && (
+                                <>
+                                  {grupo.pausada ? (
+                                    <button
+                                      type="button"
+                                      className="mam-btn mam-btn-primary"
+                                      onClick={async () => {
+                                        await mamApi.sourceRetomarOperacao(grupo.id)
+                                        const ops = await mamApi.sourceListarOperacoes()
+                                        setOperacoesDownload(ops)
+                                      }}
+                                    >
+                                      ▶ Despausar
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="mam-btn"
+                                      onClick={async () => {
+                                        await mamApi.sourcePausarOperacao(grupo.id)
+                                        const ops = await mamApi.sourceListarOperacoes()
+                                        setOperacoesDownload(ops)
+                                      }}
+                                    >
+                                      ⏸ Pausar
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className="mam-btn mam-btn-danger"
+                                    onClick={async () => {
+                                      if (
+                                        !window.confirm(
+                                          `Cancelar o download de "${grupo.titulo}" e excluir todos os capítulos já baixados deste conjunto?`,
+                                        )
+                                      )
+                                        return
+                                      await mamApi.sourceCancelarOperacao(grupo.id)
+                                      const [ops, hist] = await Promise.all([
+                                        mamApi.sourceListarOperacoes(),
+                                        mamApi.sourceListarHistoricoDownloads(),
+                                      ])
+                                      setOperacoesDownload(ops)
+                                      setDownloadsLog(hist)
+                                      await carregarObras()
+                                    }}
+                                  >
+                                    ✖ Cancelar
+                                  </button>
+                                </>
+                              )}
+                              <span className="mam-pill-badge">
+                                {grupo.processados}/{grupo.total} ({Math.round(grupo.percentual)}%)
+                              </span>
+                            </div>
                           </div>
                           <div
                             style={{
@@ -1968,6 +2068,75 @@ function App() {
           </section>
         )}
       </main>
+
+      {/* Modal informativo de Como Usar o Importar por Link e Sites Suportados */}
+      {modalInfoImportacaoAberto && (
+        <div
+          className="mam-modal-backdrop"
+          onClick={() => setModalInfoImportacaoAberto(false)}
+        >
+          <div
+            className="mam-modal"
+            style={{ maxWidth: 620 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mam-modal-header">
+              <strong>ⓘ Como usar o Importar por Link & Sites Suportados</strong>
+              <button
+                type="button"
+                className="mam-btn"
+                onClick={() => setModalInfoImportacaoAberto(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ display: 'grid', gap: '0.75rem', fontSize: '0.92rem' }}>
+              <div>
+                <strong>1. Página Central da Obra (Lote):</strong> cole o link principal do mangá
+                (ex.: <code>https://mangafire.to/title/...</code> ou{' '}
+                <code>https://mangalivre.to/manga/...</code>), escolha o idioma preferido (padrão{' '}
+                <strong>PT-BR</strong> com sequência automática em <strong>ENG</strong> caso haja
+                capítulos pendentes) e clique em <strong>Descobrir Capítulos</strong>. Depois marque
+                os capítulos e clique em <strong>Arquivar Selecionados</strong>.
+              </div>
+              <div>
+                <strong>2. Capítulo Único / URLs Manuais:</strong> ideal para baixar um capítulo
+                específico pelo link direto, lista ordenada de URLs de imagens ou HTML copiado.
+              </div>
+              <div>
+                <strong>3. Sites com suporte direto:</strong>
+                <ul style={{ margin: '0.35rem 0 0 1.2rem', padding: 0 }}>
+                  <li>
+                    <strong>MangaDex</strong> (API pública oficial via busca na barra principal ou
+                    link)
+                  </li>
+                  <li>
+                    <strong>MangaFire</strong> (<code>mangafire.to</code> — descoberta paginada
+                    automática e leitor SPA)
+                  </li>
+                  <li>
+                    <strong>MangaLivre</strong> (<code>mangalivre.to</code> — página central e
+                    capítulos)
+                  </li>
+                  <li>
+                    <strong>Genérico / Outros sites públicos</strong> (qualquer página com links{' '}
+                    <code>/chapter/</code>, <code>/capitulo-</code> ou HTML colado)
+                  </li>
+                </ul>
+              </div>
+            </div>
+            <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="mam-btn mam-btn-primary"
+                onClick={() => setModalInfoImportacaoAberto(false)}
+              >
+                Entendi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal flutuante de Importação por Link Direto / HTML / Lista Ordenada */}
       {modalImportarUrlAberto && (

@@ -108,6 +108,9 @@ export interface StatusOperacao {
   capitulos_processados: number
   percentual: number
   concluida: boolean
+  estado?: string
+  pausada?: boolean
+  cancelada?: boolean
 }
 
 export interface ResultadoIA {
@@ -251,6 +254,12 @@ export const mamApi = {
     invoke<DownloadLogItem[]>('source_listar_historico_downloads'),
   sourceStatusOperacao: (idOperacao: string) =>
     invoke<StatusOperacao | null>('source_status_operacao', { idOperacao }),
+  sourcePausarOperacao: (idOperacao: string) =>
+    invoke<void>('source_pausar_operacao', { idOperacao }),
+  sourceRetomarOperacao: (idOperacao: string) =>
+    invoke<void>('source_retomar_operacao', { idOperacao }),
+  sourceCancelarOperacao: (idOperacao: string) =>
+    invoke<void>('source_cancelar_operacao', { idOperacao }),
   aiListarResultadosCapitulo: (capituloId: string) =>
     invoke<ResultadoIA[]>('ai_listar_resultados_capitulo', { capituloId }),
   aiRevisarResultado: (resultadoId: string, resultadoJsonRevisado: string) =>
