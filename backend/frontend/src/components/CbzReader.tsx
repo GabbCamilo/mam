@@ -57,6 +57,7 @@ export function CbzReader({
 
   const [mostrarIa, setMostrarIa] = useState(false)
   const [mostrarSobreposicao, setMostrarSobreposicao] = useState(true)
+  const [idiomaDestinoIa, setIdiomaDestinoIa] = useState<'pt-BR' | 'en'>('pt-BR')
   const [processandoIa, setProcessandoIa] = useState(false)
   const [resultadosIa, setResultadosIa] = useState<ResultadoIA[]>([])
   const [textoRevisao, setTextoRevisao] = useState('')
@@ -477,6 +478,16 @@ export function CbzReader({
           >
             Sobreposição: {mostrarSobreposicao ? 'ON' : 'OFF'}
           </button>
+          <select
+            className="mam-select"
+            aria-label="Idioma de destino da tradução IA"
+            value={idiomaDestinoIa}
+            onChange={(e) => setIdiomaDestinoIa(e.target.value as 'pt-BR' | 'en')}
+            title="Idioma de destino para tradução dos balões (origem detectada automaticamente)"
+          >
+            <option value="pt-BR">Traduzir: PT-BR</option>
+            <option value="en">Traduzir: EN</option>
+          </select>
           <button
             className="mam-btn mam-btn-primary"
             disabled={processandoIa}
@@ -488,8 +499,8 @@ export function CbzReader({
                   capituloId: capitulo.id,
                   caminhoCbz: capitulo.caminho_relativo,
                   totalPaginas: Math.max(1, totalPaginas),
-                  idiomaOrigem: 'ja',
-                  idiomaDestino: 'pt-BR',
+                  idiomaOrigem: capitulo.idioma || 'auto',
+                  idiomaDestino: idiomaDestinoIa,
                 })
                 const atualizados = await mamApi.aiListarResultadosCapitulo(capitulo.id)
                 setResultadosIa(atualizados)

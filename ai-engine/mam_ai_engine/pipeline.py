@@ -48,21 +48,86 @@ def detectar_baloes(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def detectar_idioma_texto(texto: str) -> str:
+    """Identifica automaticamente o idioma predominante de um texto (estilo detector automático)."""
+    if not texto or not texto.strip():
+        return "auto"
+
+    tem_kana = any("\u3040" <= ch <= "\u30ff" for ch in texto)
+    if tem_kana:
+        return "ja"
+    tem_hangul = any("\uac00" <= ch <= "\ud7af" for ch in texto)
+    if tem_hangul:
+        return "ko"
+    tem_cjk = any("\u4e00" <= ch <= "\u9fff" for ch in texto)
+    if tem_cjk:
+        return "zh"
+
+    lower = f" {texto.lower()} "
+    if any(ch in lower for ch in "ãõçáéíóúâêôà"):
+        return "pt"
+    if any(w in lower for w in (" não ", " você ", " para ", " que ", " com ", " está ", " sim ")):
+        return "pt"
+    return "en"
+
+
+def normalizar_idioma_destino(idioma_destino: str) -> str:
+    """Normaliza o idioma de destino para as duas opções principais: 'pt-BR' ou 'en'."""
+    norm = (idioma_destino or "pt-BR").strip().lower()
+    if norm in ("en", "en-us", "en-gb", "eng", "english", "ingles", "inglês"):
+        return "en"
+    return "pt-BR"
+
+
+def traduzir_texto_isolado(texto: str, idioma_origem: str, idioma_destino: str) -> tuple[str, str]:
+    """Identifica o idioma do balão isolado e prepara/executa a tradução para pt-BR ou en."""
+    destino = normalizar_idioma_destino(idioma_destino)
+    origem = (idioma_origem or "auto").strip().lower()
+    if origem in ("", "auto"):
+        origem = detectar_idioma_texto(texto)
+
+    texto_limpo = texto.strip()
+    if not texto_limpo:
+        return origem, ""
+
+    if (origem == "pt" and destino == "pt-BR") or (origem == "en" and destino == "en"):
+        return origem, texto_limpo
+
+    # Suporte opcional a argostranslate offline caso instalado pelo usuário
+    if importlib.util.find_spec("argostranslate") is not None:
+        try:
+            import argostranslate.translate as argos_tr  # type: ignore[import-not-found]
+
+            src_code = "pt" if origem.startswith("pt") else origem[:2]
+            dst_code = "pt" if destino == "pt-BR" else "en"
+            traduzido = argos_tr.translate(texto_limpo, src_code, dst_code)
+            if traduzido:
+                return origem, str(traduzido)
+        except Exception:  # noqa: BLE001
+            pass
+
+    return origem, texto_limpo
+
+
 def traduzir_regioes(params: dict[str, Any]) -> dict[str, Any]:
     """Traduz textos reconhecidos mantendo o estado inicial como nao_revisado."""
     textos = params.get("textos") or []
-    idioma_origem = str(params.get("idioma_origem", "ja"))
-    idioma_destino = str(params.get("idioma_destino", "pt-BR"))
+    idioma_origem = str(params.get("idioma_origem", "auto"))
+    idioma_destino = normalizar_idioma_destino(str(params.get("idioma_destino", "pt-BR")))
     modalidade = str(params.get("modalidade", "sobreposicao"))
 
-    traducoes = [
-        {
-            "original": str(t),
-            "traduzido": str(t),
-            "estado_revisao": "nao_revisado",
-        }
-        for t in textos
-    ]
+    traducoes = []
+    for t in textos:
+        orig_txt = str(t)
+        lang_det, trad_txt = traduzir_texto_isolado(orig_txt, idioma_origem, idioma_destino)
+        traducoes.append(
+            {
+                "original": orig_txt,
+                "traduzido": trad_txt,
+                "idioma_detectado": lang_det,
+                "estado_revisao": "nao_revisado",
+            }
+        )
 
     return {
         "tipo": "translate",
@@ -78,8 +143,8 @@ def traduzir_regioes(params: dict[str, Any]) -> dict[str, Any]:
 def processar_pagina_completa(params: dict[str, Any]) -> dict[str, Any]:
     """Pipeline unificado (`process_page`) com dimensões reais da imagem e regiões normalizadas `[x,y,w,h]`."""
     caminho_imagem = str(params.get("caminho_imagem", ""))
-    idioma_origem = str(params.get("idioma_origem", "ja"))
-    idioma_destino = str(params.get("idioma_destino", "pt-BR"))
+    idioma_origem = str(params.get("idioma_origem", "auto"))
+    idioma_destino = normalizar_idioma_destino(str(params.get("idioma_destino", "pt-BR")))
     caminho_modelo = params.get("caminho_modelo")
     usar_gpu = bool(params.get("usar_gpu", False))
 
@@ -97,15 +162,20 @@ def processar_pagina_completa(params: dict[str, Any]) -> dict[str, Any]:
     baloes = detectar_baloes_cpu(caminho_imagem)
     regioes = []
     for idx, b in enumerate(baloes):
+        texto_orig = str(b.get("texto_original", ""))
+        idioma_det, texto_trad = traduzir_texto_isolado(texto_orig, idioma_origem, idioma_destino)
+        if not texto_trad:
+            rotulo = "Bubble" if idioma_destino == "en" else "Balão"
+            texto_trad = f"[{rotulo} {idx + 1}]"
         regioes.append(
             {
                 "id": b["id"],
                 "bbox": b["bbox"],
                 "cor_mascara": b.get("cor_mascara", "#ffffff"),
                 "confianca": b.get("confianca", 0.7),
-                "texto_original": "",
-                "texto_traduzido": f"[Balão {idx + 1}]",
-                "idioma_origem": idioma_origem,
+                "texto_original": texto_orig,
+                "texto_traduzido": texto_trad,
+                "idioma_origem": idioma_det,
                 "idioma_destino": idioma_destino,
                 "estado_revisao": "nao_revisado",
             }
