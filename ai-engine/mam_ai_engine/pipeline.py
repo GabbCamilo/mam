@@ -6,6 +6,7 @@ import importlib.util
 from typing import Any
 
 from .bubble_detector import detectar_baloes_cpu
+from .context_translator import traduzir_balao_com_contexto, traduzir_baloes_pagina_com_contexto
 from .onnx_runtime import OnnxSessionAdapter, carregar_imagem_rgb
 
 
@@ -80,54 +81,40 @@ def normalizar_idioma_destino(idioma_destino: str) -> str:
 
 
 def traduzir_texto_isolado(texto: str, idioma_origem: str, idioma_destino: str) -> tuple[str, str]:
-    """Identifica o idioma do balão isolado e prepara/executa a tradução para pt-BR ou en."""
-    destino = normalizar_idioma_destino(idioma_destino)
-    origem = (idioma_origem or "auto").strip().lower()
-    if origem in ("", "auto"):
-        origem = detectar_idioma_texto(texto)
-
-    texto_limpo = texto.strip()
-    if not texto_limpo:
-        return origem, ""
-
-    if (origem == "pt" and destino == "pt-BR") or (origem == "en" and destino == "en"):
-        return origem, texto_limpo
-
-    # Suporte opcional a argostranslate offline caso instalado pelo usuário
-    if importlib.util.find_spec("argostranslate") is not None:
-        try:
-            import argostranslate.translate as argos_tr  # type: ignore[import-not-found]
-
-            src_code = "pt" if origem.startswith("pt") else origem[:2]
-            dst_code = "pt" if destino == "pt-BR" else "en"
-            traduzido = argos_tr.translate(texto_limpo, src_code, dst_code)
-            if traduzido:
-                return origem, str(traduzido)
-        except Exception:  # noqa: BLE001
-            pass
-
-    return origem, texto_limpo
+    """Identifica o idioma do balão isolado e executa a tradução contextual para pt-BR ou en."""
+    res = traduzir_balao_com_contexto(
+        texto=texto,
+        idioma_origem=idioma_origem,
+        idioma_destino=idioma_destino,
+    )
+    return str(res["idioma_detectado"]), str(res["texto_traduzido"])
 
 
 def traduzir_regioes(params: dict[str, Any]) -> dict[str, Any]:
-    """Traduz textos reconhecidos mantendo o estado inicial como nao_revisado."""
-    textos = params.get("textos") or []
+    """Traduz textos reconhecidos com janela de contexto entre balões vizinhos."""
+    textos = [str(t) for t in (params.get("textos") or [])]
     idioma_origem = str(params.get("idioma_origem", "auto"))
     idioma_destino = normalizar_idioma_destino(str(params.get("idioma_destino", "pt-BR")))
     modalidade = str(params.get("modalidade", "sobreposicao"))
 
-    traducoes = []
-    for t in textos:
-        orig_txt = str(t)
-        lang_det, trad_txt = traduzir_texto_isolado(orig_txt, idioma_origem, idioma_destino)
-        traducoes.append(
-            {
-                "original": orig_txt,
-                "traduzido": trad_txt,
-                "idioma_detectado": lang_det,
-                "estado_revisao": "nao_revisado",
-            }
-        )
+    baloes_ctx = [{"texto_original": t} for t in textos]
+    processados = traduzir_baloes_pagina_com_contexto(
+        baloes_ctx,
+        idioma_origem=idioma_origem,
+        idioma_destino=idioma_destino,
+    )
+
+    traducoes = [
+        {
+            "original": item["texto_original"],
+            "traduzido": item["texto_traduzido"],
+            "idioma_detectado": item["idioma_detectado"],
+            "metodo_traducao": item["metodo_traducao"],
+            "analise_contexto": item["analise_contexto"],
+            "estado_revisao": "nao_revisado",
+        }
+        for item in processados
+    ]
 
     return {
         "tipo": "translate",
@@ -160,10 +147,16 @@ def processar_pagina_completa(params: dict[str, Any]) -> dict[str, Any]:
         adaptador.carregar()
 
     baloes = detectar_baloes_cpu(caminho_imagem)
+    baloes_ctx = traduzir_baloes_pagina_com_contexto(
+        baloes,
+        idioma_origem=idioma_origem,
+        idioma_destino=idioma_destino,
+        modelo_sessao=adaptador._sessao,
+    )
     regioes = []
-    for idx, b in enumerate(baloes):
+    for idx, b in enumerate(baloes_ctx):
         texto_orig = str(b.get("texto_original", ""))
-        idioma_det, texto_trad = traduzir_texto_isolado(texto_orig, idioma_origem, idioma_destino)
+        texto_trad = str(b.get("texto_traduzido", ""))
         if not texto_trad:
             rotulo = "Bubble" if idioma_destino == "en" else "Balão"
             texto_trad = f"[{rotulo} {idx + 1}]"
@@ -175,8 +168,10 @@ def processar_pagina_completa(params: dict[str, Any]) -> dict[str, Any]:
                 "confianca": b.get("confianca", 0.7),
                 "texto_original": texto_orig,
                 "texto_traduzido": texto_trad,
-                "idioma_origem": idioma_det,
+                "idioma_origem": b["idioma_detectado"],
                 "idioma_destino": idioma_destino,
+                "metodo_traducao": b["metodo_traducao"],
+                "analise_contexto": b["analise_contexto"],
                 "estado_revisao": "nao_revisado",
             }
         )

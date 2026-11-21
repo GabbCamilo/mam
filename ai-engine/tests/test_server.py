@@ -74,6 +74,20 @@ class AiEngineServerTests(unittest.TestCase):
             self.assertEqual(res["dimensoes_imagem"]["altura"], 240)
             self.assertIn("onnx_status", res)
 
+    def test_translate_contextual_preserva_expressoes_e_janela_baloes(self) -> None:
+        req, _ = parse_request(
+            '{"jsonrpc":"2.0","id":7,"method":"translate","params":{"textos":["Hold on...","What\'s going on?"],"idioma_origem":"auto","idioma_destino":"pt-BR"}}'
+        )
+        assert req is not None
+        resp, _ = handle_request(req)
+        traducoes = resp["result"]["traducoes"]
+        self.assertEqual(len(traducoes), 2)
+        self.assertEqual(traducoes[0]["idioma_detectado"], "en")
+        self.assertIn("Espera aí", traducoes[0]["traduzido"])
+        self.assertEqual(traducoes[0]["analise_contexto"]["tom"], "hesitante_ou_suspense")
+        self.assertTrue(traducoes[1]["analise_contexto"]["tem_contexto_anterior"])
+        self.assertIn("O que está acontecendo", traducoes[1]["traduzido"])
+
 
 if __name__ == "__main__":
     unittest.main()
