@@ -347,24 +347,38 @@ impl SourceIntegrationManager {
                 None => caminho_rel_obra.clone(),
             };
 
-            let fonte = {
-                let fontes = self.fontes.read().await;
-                fontes
-                    .get(&cap.fonte_id)
-                    .cloned()
-                    .ok_or_else(|| SourceError::FonteNaoEncontrada(cap.fonte_id.clone()))?
-            };
+            let cbz_bytes = if cap.fonte_id == "extrator-link" {
+                match extractors::RegistroExtratores::padrao()
+                    .baixar_capitulo_cbz_por_url(&cap.capitulo_id_fonte)
+                    .await
+                {
+                    Ok(b) => b,
+                    Err(_) => {
+                        self.arquivar_capitulo(id_operacao, &cap.fonte_id, &cap)
+                            .await?;
+                        continue;
+                    }
+                }
+            } else {
+                let fonte = {
+                    let fontes = self.fontes.read().await;
+                    fontes
+                        .get(&cap.fonte_id)
+                        .cloned()
+                        .ok_or_else(|| SourceError::FonteNaoEncontrada(cap.fonte_id.clone()))?
+                };
 
-            if !fonte.eh_autorizada() {
-                return Err(SourceError::FonteNaoAutorizada(cap.fonte_id));
-            }
+                if !fonte.eh_autorizada() {
+                    return Err(SourceError::FonteNaoAutorizada(cap.fonte_id));
+                }
 
-            let cbz_bytes = match fonte.obter_capitulo(&cap.capitulo_id_fonte).await {
-                Ok(b) => b,
-                Err(_) => {
-                    self.arquivar_capitulo(id_operacao, &cap.fonte_id, &cap)
-                        .await?;
-                    continue;
+                match fonte.obter_capitulo(&cap.capitulo_id_fonte).await {
+                    Ok(b) => b,
+                    Err(_) => {
+                        self.arquivar_capitulo(id_operacao, &cap.fonte_id, &cap)
+                            .await?;
+                        continue;
+                    }
                 }
             };
             let qtd_paginas = contar_paginas_cbz_bytes(&cbz_bytes) as i32;

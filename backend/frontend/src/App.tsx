@@ -391,6 +391,42 @@ function App() {
     }
   }
 
+  async function handleDescobrirCapitulosPorLink() {
+    if (!extUrl.trim()) {
+      setMensagem('Informe a URL principal da obra para descobrir os capítulos.')
+      return
+    }
+    try {
+      const res = await mamApi.sourceDescobrirPorLink(extUrl.trim(), extHtml.trim() || null)
+      const obraResult: ObraBuscaResultado = {
+        fonte_id: 'extrator-link',
+        obra_id_fonte: res.url_obra,
+        titulo: extObraTitulo.trim() || res.titulo,
+        autor: null,
+        descricao: null,
+        capa_url: res.capa_url ?? null,
+      }
+      setObrasFonte([obraResult])
+      setObraFonteSelecionada(obraResult)
+      setCapitulosFonte(res.capitulos)
+      setFiltroIdiomaFonte('TODOS')
+      setSelecionadosIds([])
+      if (res.capa_url && !capasCache[res.capa_url]) {
+        mamApi
+          .sourceObterCapa(res.capa_url)
+          .then((dataUrl) => {
+            setCapasCache((prev) => ({ ...prev, [res.capa_url!]: dataUrl }))
+          })
+          .catch(() => {})
+      }
+      setModalImportarUrlAberto(false)
+      setAbaAtiva('fontes')
+      setMensagem(`${res.capitulos.length} capítulo(s) encontrado(s) em "${obraResult.titulo}".`)
+    } catch (err) {
+      setMensagem(`Erro ao descobrir capítulos pelo link: ${String(err)}`)
+    }
+  }
+
   async function handleImportarExtrator(e: React.FormEvent) {
     e.preventDefault()
     if (!extObraTitulo.trim()) return
@@ -1952,7 +1988,7 @@ function App() {
             </div>
             <input
               className="mam-input"
-              placeholder="Link (mangadex.org/chapter/..., mangafire.to/...)"
+              placeholder="Link da obra ou capítulo (mangafire.to/title/..., mangalivre.to/manga/...)"
               value={extUrl}
               onChange={(e) => setExtUrl(e.target.value)}
             />
@@ -1965,12 +2001,12 @@ function App() {
             />
             <textarea
               className="mam-textarea"
-              placeholder="HTML da página do capítulo (opcional — útil para MangaFire/sites dinâmicos)"
+              placeholder="HTML da página (opcional — útil para sites dinâmicos ou protegidos)"
               value={extHtml}
               onChange={(e) => setExtHtml(e.target.value)}
               rows={3}
             />
-            <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end' }}>
+            <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className="mam-btn"
@@ -1978,8 +2014,15 @@ function App() {
               >
                 Fechar
               </button>
+              <button
+                type="button"
+                className="mam-btn"
+                onClick={handleDescobrirCapitulosPorLink}
+              >
+                🔎 Buscar Capítulos pelo Link
+              </button>
               <button className="mam-btn mam-btn-primary" type="submit">
-                Importar e Gerar CBZ
+                Importar Capítulo Único
               </button>
             </div>
             {resultadoImportacao && (

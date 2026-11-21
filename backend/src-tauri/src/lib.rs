@@ -246,6 +246,14 @@ async fn source_obter_capa(url: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn source_descobrir_por_link(
+    url_obra: String,
+    html: Option<String>,
+) -> Result<mam_source_integration::extractors::ObraExtraidaPorLink, String> {
+    mam_interface::source_descobrir_por_link(url_obra, html).await
+}
+
+#[tauri::command]
 async fn library_listar_obras_resumo(
     db: tauri::State<'_, Arc<Database>>,
     library_manager: tauri::State<'_, Arc<LibraryManager>>,
@@ -636,6 +644,7 @@ pub fn run() {
       reader_marcar_lido,
       reader_listar_lidos,
       source_obter_capa,
+      source_descobrir_por_link,
       library_listar_obras_resumo,
       source_listar_historico_downloads,
     ])

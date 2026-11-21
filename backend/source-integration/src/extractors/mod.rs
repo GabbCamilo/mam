@@ -19,7 +19,7 @@ use zip::write::{FileOptions, ZipWriter};
 use mam_core::{CaminhoRelativo, CapituloId, ObraId};
 use mam_database::Database;
 
-use crate::{SourceError, sanitizar_nome};
+use crate::{CapituloBuscaResultado, SourceError, sanitizar_nome};
 
 /// Dados de entrada para importação modular de um capítulo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +50,15 @@ pub struct ResultadoImportacao {
     pub caminho_relativo: String,
     pub quantidade_paginas: usize,
     pub hash_sha256: String,
+}
+
+/// Resultado da descoberta de uma obra e seus capítulos a partir de uma URL centralizadora.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ObraExtraidaPorLink {
+    pub titulo: String,
+    pub capa_url: Option<String>,
+    pub url_obra: String,
+    pub capitulos: Vec<CapituloBuscaResultado>,
 }
 
 /// Contrato modular que cada site de extração deve implementar.
@@ -217,6 +226,373 @@ impl RegistroExtratores {
             quantidade_paginas: paginas_bytes.len(),
             hash_sha256: hash,
         })
+    }
+
+    /// Baixa todas as páginas de um capítulo a partir da sua URL e retorna os bytes do `.cbz` em memória.
+    pub async fn baixar_capitulo_cbz_por_url(
+        &self,
+        url_capitulo: &str,
+    ) -> Result<Vec<u8>, SourceError> {
+        let extrator = self
+            .selecionar(Some(url_capitulo))
+            .ok_or_else(|| SourceError::Operacao("Nenhum extrator registrado".to_string()))?;
+
+        let entrada = EntradaImportacao {
+            obra_titulo: "Importacao".to_string(),
+            numero_capitulo: 0,
+            url: Some(url_capitulo.to_string()),
+            html: None,
+            urls_ordenadas: Vec::new(),
+        };
+
+        let urls_paginas = extrator.extrair_paginas(&entrada).await?;
+        if urls_paginas.is_empty() {
+            return Err(SourceError::Operacao(
+                "Nenhuma página encontrada para o capítulo informado".to_string(),
+            ));
+        }
+
+        let client = reqwest::Client::builder()
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+            .http1_only()
+            .pool_max_idle_per_host(0)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
+        let mut paginas_bytes: Vec<(&'static str, Vec<u8>)> = Vec::with_capacity(urls_paginas.len());
+        for url in &urls_paginas {
+            let resp = client
+                .get(url)
+                .header(reqwest::header::REFERER, url_capitulo)
+                .send()
+                .await?;
+            if !resp.status().is_success() {
+                return Err(SourceError::Rede(format!(
+                    "Falha ao baixar imagem {}: HTTP {}",
+                    url,
+                    resp.status()
+                )));
+            }
+            let ext = extensao_por_url(url);
+            let bytes = resp.bytes().await?.to_vec();
+            paginas_bytes.push((ext, bytes));
+        }
+
+        empacotar_paginas_em_cbz(&paginas_bytes)
+    }
+}
+
+/// Descobre capítulos relacionados a uma obra a partir da URL da página principal (ou HTML colado).
+pub async fn descobrir_capitulos_por_link(
+    url_obra: &str,
+    html_opcional: Option<&str>,
+) -> Result<ObraExtraidaPorLink, SourceError> {
+    let url_limpa = url_obra.trim();
+    if url_limpa.is_empty() {
+        return Err(SourceError::Operacao("Informe a URL da obra".to_string()));
+    }
+
+    let html = if let Some(h) = html_opcional.filter(|s| !s.trim().is_empty()) {
+        h.to_string()
+    } else {
+        let client = reqwest::Client::builder()
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+            .http1_only()
+            .pool_max_idle_per_host(0)
+            .timeout(std::time::Duration::from_secs(20))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        let resp = client.get(url_limpa).send().await?;
+        if !resp.status().is_success() {
+            return Err(SourceError::Rede(format!(
+                "HTTP {} ao acessar a página da obra (cole o HTML da página se o site exigir navegador).",
+                resp.status()
+            )));
+        }
+        resp.text().await?
+    };
+
+    let extraida = extrair_capitulos_de_html(url_limpa, &html);
+    if extraida.capitulos.is_empty() {
+        return Err(SourceError::Operacao(
+            "Nenhum link de capítulo reconhecido na página da obra. Se o site carregar capítulos dinamicamente, cole o HTML da página.".to_string(),
+        ));
+    }
+    Ok(extraida)
+}
+
+/// Extrai metadados e capítulos vinculados de um HTML de página principal de obra
+/// (suportando padrões como `mangafire.to/title/.../chapter/...` e `mangalivre.to/manga/.../capitulo-.../`).
+pub fn extrair_capitulos_de_html(url_obra: &str, html: &str) -> ObraExtraidaPorLink {
+    let base_origin = extrair_origem(url_obra);
+    let caminho_obra = extrair_caminho_url(url_obra);
+    let titulo = extrair_titulo_obra(html, &caminho_obra);
+    let capa_url = extrair_meta_og_image(html, &base_origin);
+
+    let mut vistos = std::collections::HashSet::new();
+    let mut capitulos: Vec<CapituloBuscaResultado> = Vec::new();
+    let lower = html.to_lowercase();
+    let mut offset = 0;
+
+    while let Some(pos) = lower[offset..].find("<a ") {
+        let abs_pos = offset + pos;
+        let Some(tag_end_rel) = lower[abs_pos..].find('>') else {
+            break;
+        };
+        let tag_end = abs_pos + tag_end_rel;
+        let tag_html = &html[abs_pos..=tag_end];
+        let close_pos = lower[tag_end + 1..]
+            .find("</a>")
+            .map(|p| tag_end + 1 + p)
+            .unwrap_or(tag_end + 1);
+        let anchor_text = limpar_tags_html(&html[tag_end + 1..close_pos]);
+        offset = tag_end + 1;
+
+        let Some(raw_href) = extrair_atributo_href(tag_html) else {
+            continue;
+        };
+        let href_trim = raw_href.trim();
+        if href_trim.is_empty()
+            || href_trim.starts_with('#')
+            || href_trim.starts_with("javascript:")
+        {
+            continue;
+        }
+
+        let url_completa = resolver_url(href_trim, &base_origin, url_obra);
+        if !eh_link_capitulo(&url_completa, &caminho_obra) {
+            continue;
+        }
+        let normalizada = url_completa.trim_end_matches('/').to_string();
+        if !vistos.insert(normalizada) {
+            continue;
+        }
+
+        let numero = extrair_numero_capitulo(&url_completa, &anchor_text);
+        let idioma = detectar_idioma_link(&url_completa, &anchor_text);
+        let titulo_cap = if anchor_text.is_empty() {
+            None
+        } else {
+            Some(anchor_text)
+        };
+
+        capitulos.push(CapituloBuscaResultado {
+            fonte_id: "extrator-link".to_string(),
+            obra_id_fonte: url_obra.to_string(),
+            capitulo_id_fonte: url_completa.clone(),
+            numero,
+            titulo: titulo_cap,
+            url: Some(url_completa),
+            idioma,
+        });
+    }
+
+    capitulos.sort_by_key(|c| c.numero.unwrap_or(i32::MAX));
+
+    ObraExtraidaPorLink {
+        titulo,
+        capa_url,
+        url_obra: url_obra.to_string(),
+        capitulos,
+    }
+}
+
+fn extrair_origem(url: &str) -> String {
+    if let Some(idx_scheme) = url.find("://") {
+        let after = idx_scheme + 3;
+        if let Some(slash) = url[after..].find('/') {
+            return url[..after + slash].to_string();
+        }
+        return url.to_string();
+    }
+    String::new()
+}
+
+fn extrair_caminho_url(url: &str) -> String {
+    let sem_query = url.split('?').next().unwrap_or(url).split('#').next().unwrap_or(url);
+    if let Some(idx_scheme) = sem_query.find("://") {
+        let after = idx_scheme + 3;
+        if let Some(slash) = sem_query[after..].find('/') {
+            return sem_query[after + slash..].trim_end_matches('/').to_lowercase();
+        }
+        return String::new();
+    }
+    sem_query.trim_end_matches('/').to_lowercase()
+}
+
+fn resolver_url(href: &str, base_origin: &str, url_obra: &str) -> String {
+    if href.starts_with("http://") || href.starts_with("https://") {
+        href.to_string()
+    } else if href.starts_with("//") {
+        format!("https:{}", href)
+    } else if href.starts_with('/') {
+        format!("{}{}", base_origin, href)
+    } else {
+        let base = url_obra.trim_end_matches('/');
+        format!("{}/{}", base, href)
+    }
+}
+
+fn extrair_atributo_href(tag: &str) -> Option<String> {
+    let lower = tag.to_lowercase();
+    let idx = lower.find("href=")?;
+    let rest = tag[idx + 5..].trim_start();
+    let quote = rest.chars().next()?;
+    if quote == '"' || quote == '\'' {
+        let end = rest[1..].find(quote)?;
+        Some(rest[1..1 + end].to_string())
+    } else {
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == '>')
+            .unwrap_or(rest.len());
+        Some(rest[..end].to_string())
+    }
+}
+
+fn eh_link_capitulo(url_completa: &str, caminho_obra: &str) -> bool {
+    let caminho = extrair_caminho_url(url_completa);
+    if caminho.is_empty() || caminho == caminho_obra {
+        return false;
+    }
+    let prefixo_obra = if !caminho_obra.is_empty() && caminho.starts_with(caminho_obra) {
+        let resto = &caminho[caminho_obra.len()..];
+        resto.starts_with('/')
+    } else {
+        false
+    };
+
+    let tem_padrao_capitulo = caminho.contains("/chapter/")
+        || caminho.contains("/capitulo-")
+        || caminho.contains("/chapter-")
+        || caminho.contains("/cap-")
+        || caminho.contains("/ch-");
+
+    if !caminho_obra.is_empty() && caminho.contains("/title/") {
+        return prefixo_obra && tem_padrao_capitulo;
+    }
+    if !caminho_obra.is_empty() && caminho.contains("/manga/") {
+        return prefixo_obra && tem_padrao_capitulo;
+    }
+    tem_padrao_capitulo
+}
+
+fn extrair_numero_capitulo(url: &str, texto: &str) -> Option<i32> {
+    let caminho = extrair_caminho_url(url);
+    for seg in caminho.split('/').rev() {
+        for pref in ["capitulo-", "chapter-", "cap-", "ch-"] {
+            if let Some(rest) = seg.strip_prefix(pref) {
+                let digitos: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect();
+                if let Ok(n) = digitos.parse::<i32>() {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    let lower_txt = texto.to_lowercase();
+    for palavra in ["capítulo", "capitulo", "chapter", "cap.", "cap ", "ch.", "ch "] {
+        if let Some(pos) = lower_txt.find(palavra) {
+            let after = lower_txt[pos + palavra.len()..].trim_start();
+            let digitos: String = after
+                .chars()
+                .skip_while(|c| !c.is_ascii_digit())
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
+            if let Ok(n) = digitos.parse::<i32>() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+fn detectar_idioma_link(url: &str, texto: &str) -> Option<String> {
+    let comb = format!("{} {}", url, texto).to_lowercase();
+    if comb.contains("pt-br") || comb.contains("/pt/") || comb.contains("portugues") {
+        Some("PT".to_string())
+    } else if comb.contains("/en/") || comb.contains("-en-") || comb.contains("english") {
+        Some("ENG".to_string())
+    } else if comb.contains("/ja/") || comb.contains("/jp/") || comb.contains("japanese") {
+        Some("JPN".to_string())
+    } else {
+        None
+    }
+}
+
+fn limpar_tags_html(s: &str) -> String {
+    let mut out = String::new();
+    let mut dentro = false;
+    for ch in s.chars() {
+        match ch {
+            '<' => dentro = true,
+            '>' => {
+                dentro = false;
+                out.push(' ');
+            }
+            _ if !dentro => out.push(ch),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn extrair_titulo_obra(html: &str, caminho_obra: &str) -> String {
+    let lower = html.to_lowercase();
+    if let (Some(a), Some(b)) = (lower.find("<h1"), lower.find("</h1>")) {
+        if let Some(gt) = html[a..b].find('>') {
+            let txt = limpar_tags_html(&html[a + gt + 1..b]);
+            if !txt.is_empty() {
+                return txt;
+            }
+        }
+    }
+    if let (Some(a), Some(b)) = (lower.find("<title>"), lower.find("</title>")) {
+        let txt = limpar_tags_html(&html[a + 7..b]);
+        let limpo = txt
+            .split(" - ")
+            .next()
+            .unwrap_or(&txt)
+            .split(" | ")
+            .next()
+            .unwrap_or(&txt)
+            .trim()
+            .to_string();
+        if !limpo.is_empty() {
+            return limpo;
+        }
+    }
+    let slug = caminho_obra
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .last()
+        .unwrap_or("Obra Importada");
+    slug.replace('-', " ")
+}
+
+fn extrair_meta_og_image(html: &str, base_origin: &str) -> Option<String> {
+    let lower = html.to_lowercase();
+    let pos = lower.find("og:image")?;
+    let trecho_start = pos.saturating_sub(120);
+    let trecho_end = (pos + 240).min(html.len());
+    let trecho = &html[trecho_start..trecho_end];
+    let lower_trecho = trecho.to_lowercase();
+    let idx = lower_trecho.find("content=")?;
+    let rest = trecho[idx + 8..].trim_start();
+    let quote = rest.chars().next()?;
+    if quote == '"' || quote == '\'' {
+        let end = rest[1..].find(quote)?;
+        let raw = rest[1..1 + end].trim();
+        if raw.starts_with("http") {
+            Some(raw.to_string())
+        } else if raw.starts_with('/') && !base_origin.is_empty() {
+            Some(format!("{}{}", base_origin, raw))
+        } else {
+            None
+        }
+    } else {
+        None
     }
 }
 

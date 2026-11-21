@@ -145,6 +145,13 @@ export interface ResultadoImportacao {
   hash_sha256: string
 }
 
+export interface ObraExtraidaPorLink {
+  titulo: string
+  capa_url?: string | null
+  url_obra: string
+  capitulos: CapituloBuscaResultado[]
+}
+
 export interface ObraResumo {
   obra: Obra
   total_capitulos: number
@@ -265,6 +272,11 @@ export const mamApi = {
       caminhoModelo: params.caminhoModelo ?? null,
     }),
   sourceListarExtratores: () => invoke<ExtratorInfo[]>('source_listar_extratores'),
+  sourceDescobrirPorLink: (urlObra: string, html?: string | null) =>
+    invoke<ObraExtraidaPorLink>('source_descobrir_por_link', {
+      urlObra,
+      html: html ?? null,
+    }),
   sourceImportarExtrator: (entrada: EntradaImportacao) =>
     invoke<ResultadoImportacao>('source_importar_extrator', { entrada }),
   excluirCapitulo: (capituloId: string, removerArquivo: boolean) =>
