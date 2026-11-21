@@ -280,6 +280,39 @@ def _select_preferred_language(cdp: _CdpClient, preferred_lang: str) -> bool:
     if not aliases:
         return False
     aliases_json = json.dumps(aliases)
+    # 1. Tenta <select> nativo ou abre dropdown customizado
+    state = cdp.eval_js(
+        f"""
+        const aliases = {aliases_json};
+        const matches = (txt) => {{
+          const t = (txt || '').toLowerCase().trim();
+          return aliases.some(a => t === a || t.includes(a));
+        }};
+        for (const sel of document.querySelectorAll('select')) {{
+          for (const opt of sel.options) {{
+            if (matches(opt.textContent) || matches(opt.value)) {{
+              sel.value = opt.value;
+              sel.dispatchEvent(new Event('change', {{ bubbles: true }}));
+              return 'selected';
+            }}
+          }}
+        }}
+        const triggers = Array.from(document.querySelectorAll('button.select, [aria-haspopup="menu"], [class*="lang"] button'));
+        const langBtn = triggers.find(b => /lang|idioma/i.test(b.textContent || '') || /english|portuguese|japanese/i.test(b.textContent || ''));
+        if (!langBtn) return 'none';
+        if (matches(langBtn.textContent)) return 'selected';
+        langBtn.click();
+        return 'opened';
+        """
+    )
+    if state == "selected":
+        time.sleep(0.6)
+        return True
+    if state != "opened":
+        return False
+
+    # 2. Aguarda o menu portal renderizar e clica na opção correspondente
+    time.sleep(0.35)
     clicked = cdp.eval_js(
         f"""
         const aliases = {aliases_json};
@@ -287,34 +320,19 @@ def _select_preferred_language(cdp: _CdpClient, preferred_lang: str) -> bool:
           const t = (txt || '').toLowerCase().trim();
           return aliases.some(a => t === a || t.includes(a));
         }};
-        // 1. <select> nativo
-        for (const sel of document.querySelectorAll('select')) {{
-          for (const opt of sel.options) {{
-            if (matches(opt.textContent) || matches(opt.value)) {{
-              sel.value = opt.value;
-              sel.dispatchEvent(new Event('change', {{ bubbles: true }}));
-              return true;
-            }}
-          }}
-        }}
-        // 2. Dropdown customizado (ex.: MangaFire .select com aria-haspopup="menu")
-        const triggers = Array.from(document.querySelectorAll('button.select, [aria-haspopup="menu"], [class*="lang"] button'));
-        const langBtn = triggers.find(b => /lang|idioma/i.test(b.textContent || '') || /english|portuguese|japanese/i.test(b.textContent || ''));
-        if (langBtn) {{
-          if (matches(langBtn.textContent)) return true;
-          langBtn.click();
-          const items = Array.from(document.querySelectorAll('[role="menuitem"], [role="option"], .select__menu button, .select__menu li, .dropdown-menu a, .dropdown-menu button'));
-          const target = items.find(el => matches(el.textContent) || matches(el.getAttribute('data-value') || ''));
-          if (target) {{
-            target.click();
-            return true;
-          }}
+        const items = Array.from(document.querySelectorAll(
+          '[role="menuitem"], [role="option"], [role="menu"] button, [role="menu"] a, .select__menu button, .select__menu li, .dropdown-menu a, .dropdown-menu button, .popover button, .menu button'
+        ));
+        const target = items.find(el => matches(el.textContent) || matches(el.getAttribute('data-value') || '') || matches(el.getAttribute('title') || ''));
+        if (target) {{
+          target.click();
+          return true;
         }}
         return false;
         """
     )
     if clicked:
-        time.sleep(0.8)
+        time.sleep(0.9)
     return bool(clicked)
 
 
@@ -396,20 +414,24 @@ def discover_work_chapters(
 
             avancou = cdp.eval_js(
                 """
-                // 1. Paginação numérica (ex.: .npager__num.is-active -> próximo irmão)
+                // 1. Paginação numérica (ex.: .npager__num.is-active -> próximo irmão ou botão Next com ícone SVG)
                 const active = document.querySelector('.npager__num.is-active, .pagination .active, [aria-current="page"]');
                 if (active) {
                   let next = active.nextElementSibling;
                   while (next && (next.disabled || next.classList.contains('disabled'))) {
                     next = next.nextElementSibling;
                   }
-                  if (next && /\\d+|>|next|próxima/i.test(next.textContent || '')) {
-                    next.click();
-                    return true;
+                  if (next) {
+                    const txt = (next.textContent || '').trim();
+                    const aria = (next.getAttribute('aria-label') || '').toLowerCase();
+                    if (/^\d+$|^>$|^›$|next|próxima/i.test(txt) || /next|próxim/i.test(aria) || (txt === '' && next.querySelector('svg'))) {
+                      next.click();
+                      return true;
+                    }
                   }
                 }
-                // 2. Link/botão Próxima ou Load More
-                const nextBtn = document.querySelector('a[rel="next"], button.load-more, .load-more button');
+                // 2. Link/botão Próxima explícito ou Load More
+                const nextBtn = document.querySelector('a[rel="next"], button[aria-label*="Next" i], button.load-more, .load-more button');
                 if (nextBtn && !nextBtn.disabled) {
                   nextBtn.click();
                   return true;
