@@ -828,6 +828,26 @@ pub fn run() {
             sm.pausar_todas_operacoes_ativas().await;
           });
         }
+        if let Some(ai_manager) = window.try_state::<Arc<AiEngineManager>>() {
+          let ai = ai_manager.inner().clone();
+          let _ = tauri::async_runtime::block_on(async move {
+            let _ = ai.chamar("shutdown", serde_json::json!({})).await;
+          });
+        }
+        #[cfg(windows)]
+        {
+          use std::os::windows::process::CommandExt;
+          let _ = std::process::Command::new("powershell")
+            .args([
+              "-NoProfile",
+              "-WindowStyle",
+              "Hidden",
+              "-Command",
+              "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | Where-Object { $_.CommandLine -like '*mam_cdp_*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+            ])
+            .creation_flags(0x08000000)
+            .spawn();
+        }
       }
     })
     .run(tauri::generate_context!())

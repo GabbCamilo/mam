@@ -332,6 +332,12 @@ pub async fn descobrir_capitulos_por_link_com_opcoes(
     if let Ok(resp) = client.get(url_limpa).send().await {
         if resp.status().is_success() {
             if let Ok(html) = resp.text().await {
+                if url_limpa.to_lowercase().contains("nhentai.net/") {
+                    let colecao = nhentai::extrair_colecao_html(url_limpa, &html);
+                    if !colecao.capitulos.is_empty() {
+                        return Ok(colecao);
+                    }
+                }
                 let mut extraida = extrair_capitulos_de_html(url_limpa, &html);
 
                 // Suporte automático a temas WordPress Madara (lista completa via POST .../ajax/chapters/)
