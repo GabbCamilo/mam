@@ -171,6 +171,7 @@ class _CdpClient:
         if b"101" not in resp.split(b"\r\n", 1)[0]:
             raise ConnectionError(f"Handshake CDP rejeitado: {resp[:120]!r}")
         self._msg_id = 0
+        self.events: list[dict[str, Any]] = []
 
     def call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         self._msg_id += 1
@@ -188,6 +189,10 @@ class _CdpClient:
             if opcode not in (0x1, 0x0):
                 continue
             data = json.loads(payload.decode("utf-8", errors="replace"))
+            if "method" in data and "id" not in data:
+                if len(self.events) < 300:
+                    self.events.append(data)
+                continue
             if data.get("id") == target_id:
                 if "error" in data:
                     raise RuntimeError(f"Erro CDP em {method}: {data['error']}")
@@ -263,6 +268,7 @@ class _BrowserSession:
                         self.cdp = _CdpClient(page_ws, timeout=20.0)
                         self.cdp.call("Page.enable")
                         self.cdp.call("Runtime.enable")
+                        self.cdp.call("Network.enable")
                         return self.cdp
             time.sleep(0.15)
         raise RuntimeError("Navegador headless não expôs DevToolsActivePort a tempo")
@@ -506,6 +512,125 @@ def _collect_paginated_chapters(
     return titulo_obra, capa_url, page_idx, capitulos
 
 
+def _collect_json_network_bodies(cdp: _CdpClient) -> list[tuple[str, Any]]:
+    """Coleta corpos JSON capturados via Network.responseReceived para SPAs orientadas a API."""
+    bodies: list[tuple[str, Any]] = []
+    vistos: set[str] = set()
+    for ev in list(cdp.events):
+        if ev.get("method") != "Network.responseReceived":
+            continue
+        params = ev.get("params") or {}
+        resp = params.get("response") or {}
+        mime = str(resp.get("mimeType") or "").lower()
+        req_url = str(resp.get("url") or "")
+        req_id = str(params.get("requestId") or "")
+        if not req_id or req_id in vistos or "json" not in mime:
+            continue
+        vistos.add(req_id)
+        try:
+            body_res = cdp.call("Network.getResponseBody", {"requestId": req_id})
+            raw = body_res.get("body") or ""
+            if body_res.get("base64Encoded"):
+                raw = base64.b64decode(raw).decode("utf-8", errors="replace")
+            parsed = json.loads(raw)
+            bodies.append((req_url, parsed))
+        except Exception:  # noqa: BLE001
+            continue
+    return bodies
+
+
+def _extract_chapters_from_json_bodies(
+    bodies: list[tuple[str, Any]],
+    base_url: str,
+) -> list[dict[str, Any]]:
+    """Extrai capítulos candidatos de respostas JSON de APIs SPA (ex.: atsu.moe, mangaball, comick)."""
+    parsed_base = urllib.parse.urlparse(base_url)
+    origin = f"{parsed_base.scheme}://{parsed_base.netloc}" if parsed_base.scheme and parsed_base.netloc else ""
+    capitulos: list[dict[str, Any]] = []
+    vistos: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for it in node:
+                walk(it)
+            return
+        if not isinstance(node, dict):
+            return
+
+        href_cand = node.get("url") or node.get("href") or node.get("path")
+        num_cand = node.get("number") or node.get("chapter") or node.get("chap")
+        title_cand = node.get("title") or node.get("name")
+        id_cand = node.get("id") or node.get("hid") or node.get("slug")
+
+        if isinstance(href_cand, str) and href_cand.strip():
+            full = urllib.parse.urljoin(origin or base_url, href_cand.strip())
+            if any(
+                p in full.lower()
+                for p in ("/chapter", "/chapters/", "/chapter-detail/", "/read/", "/reader/", "/viewer/")
+            ):
+                if full not in vistos:
+                    vistos.add(full)
+                    num_int: int | None = None
+                    if isinstance(num_cand, (int, float)):
+                        num_int = int(num_cand)
+                    elif isinstance(num_cand, str) and num_cand.strip().isdigit():
+                        num_int = int(num_cand.strip())
+                    capitulos.append(
+                        {
+                            "href": full,
+                            "text": str(title_cand or (f"Chapter {num_int}" if num_int is not None else "")),
+                            "numero": num_int,
+                            "idioma": str(node.get("lang") or node.get("language") or "") or None,
+                        }
+                    )
+        elif id_cand is not None and num_cand is not None and origin:
+            # Síntese de URL para SPAs que retornam apenas ID + número do capítulo
+            base_clean = base_url.rstrip("/")
+            synth = f"{base_clean}/{id_cand}" if "/manga/" in base_clean else f"{origin}/read/{id_cand}"
+            if synth not in vistos:
+                vistos.add(synth)
+                num_int = int(float(num_cand)) if str(num_cand).replace(".", "", 1).isdigit() else None
+                capitulos.append(
+                    {
+                        "href": synth,
+                        "text": str(title_cand or (f"Chapter {num_int}" if num_int is not None else "")),
+                        "numero": num_int,
+                        "idioma": str(node.get("lang") or node.get("language") or "") or None,
+                    }
+                )
+
+        for val in node.values():
+            if isinstance(val, (dict, list)):
+                walk(val)
+
+    for _, payload in bodies:
+        walk(payload)
+    return capitulos
+
+
+def _extract_images_from_json_bodies(bodies: list[tuple[str, Any]]) -> list[str]:
+    """Extrai URLs de imagens de respostas JSON capturadas pelo CDP."""
+    urls: list[str] = []
+    vistos: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for it in node:
+                walk(it)
+        elif isinstance(node, dict):
+            for val in node.values():
+                walk(val)
+        elif isinstance(node, str):
+            u = node.strip()
+            if u not in vistos and is_valid_reader_image_url(u):
+                vistos.add(u)
+                urls.append(u)
+
+    for _, payload in bodies:
+        walk(payload)
+    return urls
+
+
 def _extract_num_set(items: list[dict[str, Any]]) -> set[int]:
     nums: set[int] = set()
     for it in items:
@@ -560,6 +685,11 @@ def discover_work_chapters(
                     if h and h not in vistos_urls:
                         vistos_urls.add(h)
                         capitulos.append(ex)
+
+        if not capitulos:
+            json_bodies = _collect_json_network_bodies(cdp)
+            if json_bodies:
+                capitulos = _extract_chapters_from_json_bodies(json_bodies, url)
 
         return {
             "titulo": titulo_obra or "Obra Importada",
@@ -649,6 +779,11 @@ def extract_chapter_pages(url: str) -> dict[str, Any]:
                 """
             )
             time.sleep(0.45)
+
+        if not urls_ordenadas:
+            json_bodies = _collect_json_network_bodies(cdp)
+            if json_bodies:
+                urls_ordenadas = _extract_images_from_json_bodies(json_bodies)
 
         return {"url": url, "paginas": urls_ordenadas}
 

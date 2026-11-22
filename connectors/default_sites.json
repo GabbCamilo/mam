@@ -67,7 +67,7 @@
       "nome": "WeebCentral",
       "versao": "1.0.0",
       "tipo": "web",
-      "dominios": ["weebcentral.com"],
+      "dominios": ["weebcentral.com", "temp.compsci88.com", "official.lowee.us"],
       "url_busca": "https://weebcentral.com/search?text={query}",
       "padroes_url_capitulo": ["/chapters/"],
       "seletor_link": "a[href*='/chapters/']",
@@ -75,7 +75,8 @@
       "seletor_paginacao": null,
       "requer_cdp": "auto",
       "seletores_imagem": ["img[src]", "img[data-src]"],
-      "rejeitar_tokens_imagem": ["broken_image", "chapter-badge", "logo", "avatar", "favicon"]
+      "rejeitar_tokens_imagem": ["broken_image", "chapter-badge", "logo", "avatar", "favicon"],
+      "headers_imagem": { "Referer": "https://weebcentral.com/" }
     },
     {
       "id": "mangaball",
@@ -84,7 +85,7 @@
       "tipo": "web-cdp",
       "dominios": ["mangaball.com"],
       "url_busca": "https://mangaball.com/?s={query}",
-      "padroes_url_capitulo": ["/chapter/", "/chapter-", "/read/"],
+      "padroes_url_capitulo": ["/chapter-detail/", "/chapter/", "/chapter-", "/read/"],
       "seletor_link": null,
       "seletor_idioma_linha": null,
       "seletor_paginacao": null,
@@ -97,7 +98,7 @@
       "nome": "Atsumaru (atsu.moe)",
       "versao": "1.0.0",
       "tipo": "web-cdp",
-      "dominios": ["atsu.moe"],
+      "dominios": ["atsu.moe", "cdn.atsu.moe"],
       "url_busca": "https://atsu.moe/search?q={query}",
       "padroes_url_capitulo": ["/read/", "/chapter/"],
       "seletor_link": null,
@@ -105,7 +106,9 @@
       "seletor_paginacao": null,
       "requer_cdp": "auto",
       "seletores_imagem": ["img[src]", "img[data-src]"],
-      "rejeitar_tokens_imagem": ["logo", "avatar", "favicon"]
+      "rejeitar_tokens_imagem": ["logo", "avatar", "favicon"],
+      "headers_imagem": { "Referer": "https://atsu.moe/" },
+      "estrategia_descoberta": "cdp-network-json"
     },
     {
       "id": "onisaga",
@@ -247,7 +250,7 @@
       "nome": "MangaGo",
       "versao": "1.0.0",
       "tipo": "web-cdp",
-      "dominios": ["mangago.me"],
+      "dominios": ["mangago.me", "mangapicgallery.com"],
       "url_busca": "https://mangago.me/r/l_search/?name={query}",
       "padroes_url_capitulo": ["/chapter/", "/read-manga/"],
       "seletor_link": null,
@@ -255,7 +258,8 @@
       "seletor_paginacao": null,
       "requer_cdp": "auto",
       "seletores_imagem": ["img[src]", "img[data-src]"],
-      "rejeitar_tokens_imagem": ["logo", "avatar", "favicon"]
+      "rejeitar_tokens_imagem": ["logo", "avatar", "favicon"],
+      "headers_imagem": { "Referer": "https://www.mangago.me/" }
     },
     {
       "id": "allmanga",

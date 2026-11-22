@@ -729,14 +729,19 @@ impl SourceIntegrationManager {
     }
 }
 
-/// Baixa uma imagem externa via HTTP (sem Referer de WebView) e retorna Data URL Base64.
+/// Baixa uma imagem externa via HTTP (aplicando `Referer`/headers do conector) e retorna Data URL Base64.
 pub async fn baixar_imagem_data_url(url: &str) -> Result<String, SourceError> {
     let client = reqwest::Client::builder()
-        .user_agent("MAM-MangaArchiveManager/0.1.0")
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    let resp = client.get(url).send().await?;
+    let mut req = client.get(url);
+    for (k, v) in crate::connectors::GerenciadorConectores::headers_para_url(url, None) {
+        req = req.header(&k, &v);
+    }
+
+    let resp = req.send().await?;
     if !resp.status().is_success() {
         return Err(SourceError::Operacao(format!(
             "Falha ao obter imagem: HTTP {}",
@@ -759,11 +764,16 @@ pub async fn baixar_imagem_data_url(url: &str) -> Result<String, SourceError> {
 /// Baixa e salva `cover.jpg` na pasta da obra para exibição offline na Biblioteca.
 pub async fn salvar_capa_local(url: &str, pasta_obra: &std::path::Path) -> Result<(), SourceError> {
     let client = reqwest::Client::builder()
-        .user_agent("MAM-MangaArchiveManager/0.1.0")
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    let resp = client.get(url).send().await?;
+    let mut req = client.get(url);
+    for (k, v) in crate::connectors::GerenciadorConectores::headers_para_url(url, None) {
+        req = req.header(&k, &v);
+    }
+
+    let resp = req.send().await?;
     if !resp.status().is_success() {
         return Err(SourceError::Operacao(format!(
             "Falha ao baixar capa: HTTP {}",

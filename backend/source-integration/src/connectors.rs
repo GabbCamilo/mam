@@ -5,6 +5,7 @@
 //! 2. `<exe_dir>/connectors/default_sites.json` (embutido no pacote portátil)
 //! 3. Fallback embutido no binário (`include_str!`)
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -43,6 +44,10 @@ pub struct ConectorSiteConfig {
     pub seletores_imagem: Vec<String>,
     #[serde(default)]
     pub rejeitar_tokens_imagem: Vec<String>,
+    #[serde(default)]
+    pub headers_imagem: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub estrategia_descoberta: Option<String>,
 }
 
 fn versao_padrao() -> String {
@@ -305,6 +310,20 @@ impl GerenciadorConectores {
         )
         .map_err(|e| SourceError::Operacao(e.to_string()))?;
         Ok(obras)
+    }
+
+    /// Retorna os headers HTTP extras (ex.: `Referer`) configurados para o domínio da URL.
+    pub fn headers_para_url(url: &str, raiz_biblioteca: Option<&Path>) -> HashMap<String, String> {
+        let lower = url.to_lowercase();
+        let catalogo = Self::carregar(raiz_biblioteca);
+        for site in catalogo.sites {
+            if site.dominios.iter().any(|d| !d.is_empty() && lower.contains(&d.to_lowercase())) {
+                if let Some(h) = site.headers_imagem {
+                    return h;
+                }
+            }
+        }
+        HashMap::new()
     }
 }
 

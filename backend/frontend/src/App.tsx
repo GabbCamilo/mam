@@ -2482,12 +2482,24 @@ function App() {
 
             {modoImportacao === 'obra' ? (
               <>
-                <input
-                  className="mam-input"
-                  placeholder="URL central da obra (ex.: https://mangafire.to/title/jw2-medaka-boxx)"
-                  value={extUrl}
-                  onChange={(e) => setExtUrl(e.target.value)}
-                />
+                <div className="mam-toolbar-row">
+                  <input
+                    className="mam-input mam-search-input"
+                    placeholder="URL central da obra (ex.: weebcentral.com/series/... ou mangafire.to/title/...)"
+                    value={extUrl}
+                    onChange={(e) => setExtUrl(e.target.value)}
+                  />
+                  {extUrl.trim().startsWith('http') && (
+                    <button
+                      type="button"
+                      className="mam-btn"
+                      onClick={() => window.open(extUrl.trim(), '_blank', 'noopener,noreferrer')}
+                      title="Abrir página no navegador para copiar o HTML caso o site possua proteção anti-bot"
+                    >
+                      Abrir no Navegador
+                    </button>
+                  )}
+                </div>
                 <input
                   className="mam-input"
                   placeholder="Título personalizado (opcional — detectado automaticamente)"

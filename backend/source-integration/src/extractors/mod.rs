@@ -706,12 +706,22 @@ fn extrair_urls_scripts(html: &str, base_origin: &str, url_obra: &str) -> Vec<St
             .find("</script>")
             .map(|p| start_body + p)
             .unwrap_or(html.len());
-        let body = &html[start_body..end_body];
+        let body = html[start_body..end_body]
+            .replace("\\/", "/")
+            .replace("\\u002F", "/")
+            .replace("\\u002f", "/");
         offset = end_body;
 
         for token in body.split(['"', '\'']) {
             let t = token.trim();
-            if t.contains("/chapter/") || t.contains("/capitulo-") || t.contains("/chapter-") {
+            if t.contains("/chapter/")
+                || t.contains("/chapters/")
+                || t.contains("/chapter-detail/")
+                || t.contains("/capitulo-")
+                || t.contains("/chapter-")
+                || t.contains("/read/")
+                || t.contains("/reader/")
+            {
                 out.push(resolver_url(t, base_origin, url_obra));
             }
         }
