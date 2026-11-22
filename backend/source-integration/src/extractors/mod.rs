@@ -340,6 +340,25 @@ pub async fn descobrir_capitulos_por_link_com_opcoes(
                 }
                 let mut extraida = extrair_capitulos_de_html(url_limpa, &html);
 
+                // Suporte nativo ao WeebCentral (HTMX /series/<id>/full-chapter-list)
+                if let Some(wc_list_url) = weebcentral_full_chapter_list_url(url_limpa) {
+                    if let Ok(resp_wc) = client
+                        .get(&wc_list_url)
+                        .header("HX-Request", "true")
+                        .send()
+                        .await
+                    {
+                        if resp_wc.status().is_success() {
+                            if let Ok(wc_html) = resp_wc.text().await {
+                                let via_wc = extrair_capitulos_de_html(url_limpa, &wc_html);
+                                if via_wc.capitulos.len() > extraida.capitulos.len() {
+                                    extraida.capitulos = via_wc.capitulos;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Suporte automático a temas WordPress Madara (lista completa via POST .../ajax/chapters/)
                 if extraida.capitulos.len() <= 2
                     || html.contains("wp-manga")
@@ -752,11 +771,43 @@ fn extrair_atributo_href(tag: &str) -> Option<String> {
     }
 }
 
+fn weebcentral_full_chapter_list_url(url: &str) -> Option<String> {
+    let lower = url.to_lowercase();
+    let idx = lower.find("weebcentral.com/series/")?;
+    let after = &url[idx + "weebcentral.com/series/".len()..];
+    let series_id = after.split('/').next()?.trim();
+    if series_id.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "https://weebcentral.com/series/{}/full-chapter-list",
+            series_id
+        ))
+    }
+}
+
 fn eh_link_capitulo(url_completa: &str, caminho_obra: &str, padroes_extra: &[String]) -> bool {
     let caminho = extrair_caminho_url(url_completa);
     if caminho.is_empty() || caminho == caminho_obra {
         return false;
     }
+    if [
+        "/comments/",
+        "/login",
+        "/register",
+        "/user/",
+        "/tag/",
+        "/genre/",
+        "/author/",
+        "/search",
+        "/random",
+    ]
+    .iter()
+    .any(|ruido| caminho.contains(ruido))
+    {
+        return false;
+    }
+
     let prefixo_obra = if !caminho_obra.is_empty() && caminho.starts_with(caminho_obra) {
         let resto = &caminho[caminho_obra.len()..];
         resto.starts_with('/')
@@ -765,10 +816,22 @@ fn eh_link_capitulo(url_completa: &str, caminho_obra: &str, padroes_extra: &[Str
     };
 
     let tem_padrao_capitulo = caminho.contains("/chapter/")
+        || caminho.contains("/chapters/")
         || caminho.contains("/capitulo-")
         || caminho.contains("/chapter-")
         || caminho.contains("/cap-")
         || caminho.contains("/ch-")
+        || caminho.contains("/read/")
+        || caminho.contains("/reader/")
+        || caminho.contains("/viewer/")
+        || caminho.contains("/episode/")
+        || caminho.contains("/ep-")
+        || caminho.contains("/volume-")
+        || caminho.contains("/vol-")
+        || caminho.contains("/issue-")
+        || caminho.contains("-chapter-")
+        || caminho.contains("-ch-")
+        || caminho.contains("-cap-")
         || padroes_extra
             .iter()
             .any(|p| !p.is_empty() && caminho.contains(p.as_str()));
@@ -785,7 +848,17 @@ fn eh_link_capitulo(url_completa: &str, caminho_obra: &str, padroes_extra: &[Str
 fn extrair_numero_capitulo(url: &str, texto: &str) -> Option<i32> {
     let caminho = extrair_caminho_url(url);
     for seg in caminho.split('/').rev() {
-        for pref in ["capitulo-", "chapter-", "cap-", "ch-"] {
+        for pref in [
+            "capitulo-",
+            "chapter-",
+            "cap-",
+            "ch-",
+            "episode-",
+            "ep-",
+            "volume-",
+            "vol-",
+            "issue-",
+        ] {
             if let Some(rest) = seg.strip_prefix(pref) {
                 let digitos: String = rest
                     .chars()
@@ -799,7 +872,22 @@ fn extrair_numero_capitulo(url: &str, texto: &str) -> Option<i32> {
     }
     let lower_txt = texto.to_lowercase();
     let mut melhor_match: Option<(usize, i32)> = None;
-    for palavra in ["capítulo", "capitulo", "chapter", "cap.", "cap ", "ch.", "ch "] {
+    for palavra in [
+        "capítulo",
+        "capitulo",
+        "chapter",
+        "cap.",
+        "cap ",
+        "ch.",
+        "ch ",
+        "volume",
+        "vol.",
+        "vol ",
+        "episode",
+        "ep.",
+        "ep ",
+        "#",
+    ] {
         if let Some(pos) = lower_txt.find(palavra) {
             let after = lower_txt[pos + palavra.len()..].trim_start();
             let digitos: String = after
@@ -814,7 +902,16 @@ fn extrair_numero_capitulo(url: &str, texto: &str) -> Option<i32> {
             }
         }
     }
-    melhor_match.map(|(_, n)| n)
+    if melhor_match.is_some() {
+        return melhor_match.map(|(_, n)| n);
+    }
+
+    // Fallback: último segmento puramente numérico na URL (ex.: /read/obra/123)
+    caminho
+        .split('/')
+        .rev()
+        .find(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
+        .and_then(|s| s.parse::<i32>().ok())
 }
 
 fn detectar_idioma_link(url: &str, texto: &str) -> Option<String> {
@@ -986,9 +1083,20 @@ fn eh_url_imagem_valida(url: &str) -> bool {
     {
         return false;
     }
-    if ["favicon", "logo", "avatar", "banner", "badge", "flag"]
-        .iter()
-        .any(|tok| sem_query.contains(tok))
+    if [
+        "favicon",
+        "logo",
+        "avatar",
+        "banner",
+        "badge",
+        "flag",
+        "broken_image",
+        "chapter-badge",
+        "spinner",
+        "placeholder",
+    ]
+    .iter()
+    .any(|tok| sem_query.contains(tok))
     {
         return false;
     }
@@ -1165,6 +1273,42 @@ mod tests {
 
         assert!(!eh_url_imagem_valida("https://s.mfcdn.nl/build/mf/assets/main-B7h3oPSn.js"));
         assert!(!eh_url_imagem_valida("https://cdn.exemplo.com/assets/logo.png"));
+        assert!(!eh_url_imagem_valida("https://weebcentral.com/static/images/broken_image.jpg"));
         assert!(eh_url_imagem_valida("https://pw6.mfcdn2.xyz/mf/abc123/h/p.jpg"));
+    }
+
+    #[test]
+    fn extrai_weebcentral_volumes_e_padroes_tbcpl() {
+        let html_wc = r#"
+            <div class="flex items-center">
+              <a href="/chapters/01J76XYY7Q5DA1HQMDD9D7GQTC">
+                <img src="/static/images/chapter-badge-official.svg"/>
+                <span>Volume 6</span>
+              </a>
+            </div>
+            <div class="flex items-center">
+              <a href="/chapters/01J76XYY7QVSM10TSM7XBV0PS9">
+                <span>Chapter 12</span>
+              </a>
+            </div>
+        "#;
+        let wc = extrair_capitulos_de_html(
+            "https://weebcentral.com/series/01J76XY7E2VCSR0ZCC21KGXS1K/Kobato",
+            html_wc,
+        );
+        assert_eq!(wc.capitulos.len(), 2);
+        assert_eq!(wc.capitulos[0].numero, Some(6));
+        assert_eq!(
+            wc.capitulos[0].url.as_deref(),
+            Some("https://weebcentral.com/chapters/01J76XYY7Q5DA1HQMDD9D7GQTC")
+        );
+        assert_eq!(wc.capitulos[1].numero, Some(12));
+        assert_eq!(
+            weebcentral_full_chapter_list_url(
+                "https://weebcentral.com/series/01J76XY7E2VCSR0ZCC21KGXS1K/Kobato"
+            )
+            .as_deref(),
+            Some("https://weebcentral.com/series/01J76XY7E2VCSR0ZCC21KGXS1K/full-chapter-list")
+        );
     }
 }

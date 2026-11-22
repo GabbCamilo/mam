@@ -123,18 +123,36 @@ def classificar_links_capitulos(params: dict[str, Any]) -> dict[str, Any]:
         lower_href = href.lower()
         lower_txt = texto.lower()
         score = 0.0
-        if any(p in lower_href for p in ("/chapter/", "/capitulo-", "/chapter-", "/cap-", "/ch-")):
+        if any(
+            p in lower_href
+            for p in (
+                "/chapter/",
+                "/chapters/",
+                "/capitulo-",
+                "/chapter-",
+                "/cap-",
+                "/ch-",
+                "/read/",
+                "/reader/",
+                "/viewer/",
+                "/episode/",
+                "/ep-",
+                "/volume-",
+                "/vol-",
+                "-chapter-",
+            )
+        ):
             score += 0.65
         if url_obra and lower_href.startswith(url_obra) and len(lower_href) > len(url_obra) + 1:
             score += 0.2
-        if any(p in lower_txt for p in ("cap", "chapter", "ch.")):
+        if any(p in lower_txt for p in ("cap", "chapter", "ch.", "volume", "vol.", "episode", "ep.")):
             score += 0.15
 
         if score < 0.5:
             continue
 
         vistos.add(href)
-        m = re.search(r"(?:capitulo-|chapter-|cap\.?\s*|ch\.?\s*)(\d+)", f"{lower_href} {lower_txt}")
+        m = re.search(r"(?:capitulo-|chapter-|cap\.?\s*|ch\.?\s*|volume\s*|vol\.?\s*)(\d+)", f"{lower_href} {lower_txt}")
         numero = int(m.group(1)) if m else None
         idioma = None
         if "pt-br" in lower_href or "/pt/" in lower_href:

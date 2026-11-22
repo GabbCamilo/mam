@@ -53,6 +53,38 @@ impl ExtratorSite for GenericoExtractor {
         }
 
         if let Some(url) = entrada.url.as_deref().filter(|u| !u.trim().is_empty()) {
+            // Suporte nativo ao WeebCentral (/chapters/<id>/images?reading_style=long_strip)
+            if url.to_lowercase().contains("weebcentral.com/chapters/") {
+                let base = url.trim_end_matches('/').split('?').next().unwrap_or(url);
+                let images_url = if base.ends_with("/images") {
+                    format!(
+                        "{}?is_prev=False&current_page=1&reading_style=long_strip",
+                        base
+                    )
+                } else {
+                    format!(
+                        "{}/images?is_prev=False&current_page=1&reading_style=long_strip",
+                        base
+                    )
+                };
+                if let Ok(resp) = self
+                    .client
+                    .get(&images_url)
+                    .header("HX-Request", "true")
+                    .send()
+                    .await
+                {
+                    if resp.status().is_success() {
+                        if let Ok(html) = resp.text().await {
+                            let paginas = extrair_urls_imagens_html(&html);
+                            if !paginas.is_empty() {
+                                return Ok(paginas);
+                            }
+                        }
+                    }
+                }
+            }
+
             let mut paginas_estaticas = Vec::new();
             if let Ok(resp) = self.client.get(url).send().await {
                 if resp.status().is_success() {

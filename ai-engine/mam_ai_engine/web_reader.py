@@ -26,7 +26,19 @@ from pathlib import Path
 from typing import Any
 
 _NON_IMAGE_EXTS = (".js", ".mjs", ".css", ".html", ".htm", ".svg", ".ico", ".json", ".woff", ".woff2", ".ttf")
-_UI_NOISE_TOKENS = ("favicon", "logo", "avatar", "banner", "badge", "flag", "/assets/mangafire/logo")
+_UI_NOISE_TOKENS = (
+    "favicon",
+    "logo",
+    "avatar",
+    "banner",
+    "badge",
+    "flag",
+    "broken_image",
+    "chapter-badge",
+    "spinner",
+    "placeholder",
+    "/assets/mangafire/logo",
+)
 _ACTIVE_BROWSER_PROCS: set[subprocess.Popen[bytes]] = set()
 
 
@@ -408,7 +420,25 @@ def _collect_paginated_chapters(
             if not href:
                 continue
             lower_href = href.lower()
-            if not any(p in lower_href for p in ("/chapter/", "/capitulo-", "/chapter-", "/cap-", "/ch-")):
+            if not any(
+                p in lower_href
+                for p in (
+                    "/chapter/",
+                    "/chapters/",
+                    "/capitulo-",
+                    "/chapter-",
+                    "/cap-",
+                    "/ch-",
+                    "/read/",
+                    "/reader/",
+                    "/viewer/",
+                    "/episode/",
+                    "/ep-",
+                    "/volume-",
+                    "/vol-",
+                    "-chapter-",
+                )
+            ):
                 continue
             norm = href.rstrip("/")
             if norm in vistos:
@@ -417,7 +447,7 @@ def _collect_paginated_chapters(
             novos_nesta_pagina += 1
             if stop_when_all_numbers_in is not None:
                 m = re.search(
-                    r"(?:cap[íi]tulo|chapter|cap\.?|ch\.?)\s*[-:]?\s*(\d+)",
+                    r"(?:cap[íi]tulo|chapter|cap\.?|ch\.?|volume|vol\.?|episode|ep\.?)\s*[-:]?\s*(\d+)",
                     f"{item.get('text', '')} {href}".lower(),
                 )
                 num = int(m.group(1)) if m else None
