@@ -354,7 +354,7 @@
       "tipo": "web-cdp",
       "dominios": ["mangakatana.com"],
       "url_busca": "https://mangakatana.com/?search={query}&search_by=book_name",
-      "padroes_url_capitulo": ["/c", "/chapter-", "/chapter/"],
+      "padroes_url_capitulo": ["/chapter-", "/chapter/", "/c/"],
       "seletor_link": null,
       "seletor_idioma_linha": null,
       "seletor_paginacao": null,

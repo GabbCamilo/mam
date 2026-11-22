@@ -793,6 +793,12 @@ fn eh_link_capitulo(url_completa: &str, caminho_obra: &str, padroes_extra: &[Str
     }
     if [
         "/comments/",
+        "/contact",
+        "/about",
+        "/privacy",
+        "/terms",
+        "/dmca",
+        "/faq",
         "/login",
         "/register",
         "/user/",
@@ -834,7 +840,7 @@ fn eh_link_capitulo(url_completa: &str, caminho_obra: &str, padroes_extra: &[Str
         || caminho.contains("-cap-")
         || padroes_extra
             .iter()
-            .any(|p| !p.is_empty() && caminho.contains(p.as_str()));
+            .any(|p| p.len() >= 3 && caminho.contains(p.as_str()));
 
     if !caminho_obra.is_empty() && caminho.contains("/title/") {
         return prefixo_obra && tem_padrao_capitulo;
@@ -1000,27 +1006,73 @@ fn extrair_titulo_obra(html: &str, caminho_obra: &str) -> String {
 
 fn extrair_meta_og_image(html: &str, base_origin: &str) -> Option<String> {
     let lower = html.to_lowercase();
-    let pos = lower.find("og:image")?;
-    let trecho_start = pos.saturating_sub(120);
-    let trecho_end = (pos + 240).min(html.len());
-    let trecho = &html[trecho_start..trecho_end];
-    let lower_trecho = trecho.to_lowercase();
-    let idx = lower_trecho.find("content=")?;
-    let rest = trecho[idx + 8..].trim_start();
-    let quote = rest.chars().next()?;
-    if quote == '"' || quote == '\'' {
-        let end = rest[1..].find(quote)?;
-        let raw = rest[1..1 + end].trim();
-        if raw.starts_with("http") {
-            Some(raw.to_string())
-        } else if raw.starts_with('/') && !base_origin.is_empty() {
-            Some(format!("{}{}", base_origin, raw))
-        } else {
-            None
+    let mut offset = 0;
+    while let Some(pos) = lower[offset..].find("<meta") {
+        let abs = offset + pos;
+        let Some(end_rel) = lower[abs..].find('>') else {
+            break;
+        };
+        let tag = &html[abs..=abs + end_rel];
+        let tag_lower = &lower[abs..=abs + end_rel];
+        offset = abs + end_rel + 1;
+
+        let eh_og_image = tag_lower.contains("property=\"og:image\"")
+            || tag_lower.contains("property='og:image'")
+            || tag_lower.contains("name=\"og:image\"")
+            || tag_lower.contains("name='og:image'")
+            || tag_lower.contains("name=\"twitter:image\"")
+            || tag_lower.contains("name='twitter:image'");
+        if !eh_og_image {
+            continue;
         }
-    } else {
-        None
+
+        if let Some(idx) = tag_lower.find("content=") {
+            let rest = tag[idx + 8..].trim_start();
+            if let Some(quote @ ('"' | '\'')) = rest.chars().next() {
+                if let Some(end) = rest[1..].find(quote) {
+                    let raw = rest[1..1 + end].trim();
+                    if raw.starts_with("http://") || raw.starts_with("https://") {
+                        return Some(raw.to_string());
+                    }
+                    if raw.starts_with('/') && !base_origin.is_empty() {
+                        return Some(format!("{}{}", base_origin, raw));
+                    }
+                }
+            }
+        }
     }
+
+    // Fallback: primeira <img> com "cover" no src ou alt (ex.: WeebCentral / mangás sem og:image)
+    let mut img_offset = 0;
+    while let Some(pos) = lower[img_offset..].find("<img") {
+        let abs = img_offset + pos;
+        let Some(end_rel) = lower[abs..].find('>') else {
+            break;
+        };
+        let tag = &html[abs..=abs + end_rel];
+        let tag_lower = &lower[abs..=abs + end_rel];
+        img_offset = abs + end_rel + 1;
+
+        if !tag_lower.contains("cover") {
+            continue;
+        }
+        if let Some(idx) = tag_lower.find("src=") {
+            let rest = tag[idx + 4..].trim_start();
+            if let Some(quote @ ('"' | '\'')) = rest.chars().next() {
+                if let Some(end) = rest[1..].find(quote) {
+                    let raw = rest[1..1 + end].trim();
+                    if raw.starts_with("http://") || raw.starts_with("https://") {
+                        return Some(raw.to_string());
+                    }
+                    if raw.starts_with('/') && !base_origin.is_empty() {
+                        return Some(format!("{}{}", base_origin, raw));
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Empacota bytes de imagens em um arquivo CBZ (ZIP) preservando a ordem sequencial exata.
