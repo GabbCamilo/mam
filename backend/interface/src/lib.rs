@@ -519,6 +519,69 @@ pub struct ListagemDiretorio {
     pub itens: Vec<EntradaDiretorio>,
 }
 
+/// Abre o seletor de arquivos nativo do sistema operacional para escolher um `.cbz` ou `.cbr`.
+pub async fn system_selecionar_arquivo_local() -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(|| {
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            let script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$dlg = New-Object System.Windows.Forms.OpenFileDialog
+$dlg.Title = 'Selecionar arquivo .CBZ ou .CBR'
+$dlg.Filter = 'Arquivos de Mangá (*.cbz;*.cbr)|*.cbz;*.cbr|Todos os arquivos (*.*)|*.*'
+$downloads = Join-Path $env:USERPROFILE 'Downloads'
+if (Test-Path $downloads) { $dlg.InitialDirectory = $downloads }
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+if ($dlg.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    Write-Output $dlg.FileName
+}
+"#;
+            let out = std::process::Command::new("powershell")
+                .args(["-NoProfile", "-STA", "-Command", script])
+                .creation_flags(0x08000000)
+                .output()
+                .map_err(|e| format!("Falha ao abrir seletor de arquivos: {}", e))?;
+            if !out.status.success() {
+                return Err("Não foi possível abrir o seletor de arquivos do Windows.".to_string());
+            }
+            let selecionado = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if selecionado.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(selecionado))
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            for (bin, args) in [
+                (
+                    "zenity",
+                    vec![
+                        "--file-selection",
+                        "--title=Selecionar arquivo .CBZ ou .CBR",
+                        "--file-filter=Arquivos de Mangá (*.cbz *.cbr) | *.cbz *.cbr",
+                    ],
+                ),
+                ("kdialog", vec!["--getopenfilename", ".", "*.cbz *.cbr"]),
+            ] {
+                if let Ok(out) = std::process::Command::new(bin).args(&args).output() {
+                    if out.status.success() {
+                        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                        return Ok(if s.is_empty() { None } else { Some(s) });
+                    }
+                    return Ok(None);
+                }
+            }
+            Err("Nenhum seletor gráfico (zenity/kdialog) encontrado; use o navegador de pastas abaixo.".to_string())
+        }
+    })
+    .await
+    .map_err(|e| format!("Falha na tarefa do seletor: {}", e))?
+}
+
 /// Lista pastas e arquivos `.cbz`/`.cbr` de um diretório local para navegação no modal de importação.
 pub async fn system_listar_diretorio(caminho: Option<String>) -> Result<ListagemDiretorio, String> {
     tokio::task::spawn_blocking(move || {

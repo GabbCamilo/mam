@@ -3093,13 +3093,31 @@ function App() {
               }}
               style={{ display: 'grid', gap: '0.7rem' }}
             >
-              <input
-                className="mam-input"
-                placeholder="Caminho do arquivo (ex: C:\Users\Gabriel\Downloads\Red Sonja.cbr)"
-                value={localArquivoPath}
-                onChange={(e) => setLocalArquivoPath(e.target.value)}
-                required
-              />
+              <div className="mam-toolbar-row">
+                <input
+                  className="mam-input mam-search-input"
+                  placeholder="Caminho do arquivo (ex: C:\Users\Gabriel\Downloads\Red Sonja.cbr)"
+                  value={localArquivoPath}
+                  onChange={(e) => setLocalArquivoPath(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  className="mam-btn"
+                  onClick={async () => {
+                    try {
+                      const selecionado = await mamApi.selecionarArquivoLocal()
+                      if (selecionado) {
+                        setLocalArquivoPath(selecionado)
+                      }
+                    } catch (err) {
+                      setMensagem(String(err))
+                    }
+                  }}
+                >
+                  📁 Procurar no PC...
+                </button>
+              </div>
               <div className="mam-toolbar-row">
                 <input
                   className="mam-input mam-search-input"

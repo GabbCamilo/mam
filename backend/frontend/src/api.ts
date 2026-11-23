@@ -438,4 +438,5 @@ export const mamApi = {
     invoke<ListagemDiretorio>('system_listar_diretorio', {
       caminho: caminho ?? null,
     }),
+  selecionarArquivoLocal: () => invoke<string | null>('system_selecionar_arquivo_local'),
 }

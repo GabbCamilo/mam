@@ -8,7 +8,7 @@ use mam_chapter::ChapterManager;
 use mam_archive::{ArchiveManager, PaginaExtraida};
 use mam_interface::{db_health as if_db_health, db_list_obras as if_db_list_obras};
 use mam_interface::{chapter_detectar as if_chapter_detectar, chapter_listar_por_obra as if_chapter_listar_por_obra};
-use mam_interface::{library_raiz as if_library_raiz, library_criar_obra as if_library_criar_obra, library_listar_obras as if_library_listar_obras, library_obter_detalhes_obra as if_library_obter_detalhes_obra, library_criar_volume as if_library_criar_volume, library_atualizar_metadados as if_library_atualizar_metadados, library_importar_arquivo_local as if_library_importar_arquivo_local, system_listar_diretorio as if_system_listar_diretorio, ListagemDiretorio};
+use mam_interface::{library_raiz as if_library_raiz, library_criar_obra as if_library_criar_obra, library_listar_obras as if_library_listar_obras, library_obter_detalhes_obra as if_library_obter_detalhes_obra, library_criar_volume as if_library_criar_volume, library_atualizar_metadados as if_library_atualizar_metadados, library_importar_arquivo_local as if_library_importar_arquivo_local, system_listar_diretorio as if_system_listar_diretorio, system_selecionar_arquivo_local as if_system_selecionar_arquivo_local, ListagemDiretorio};
 use mam_database::models::{Obra, ResultadoIA, Volume};
 use mam_library::{DetalhesObra, LibraryManager};
 use mam_interface::{archive_criar_cbz as if_archive_criar_cbz, archive_ler_cbz as if_archive_ler_cbz, archive_validar_cbz as if_archive_validar_cbz};
@@ -192,6 +192,11 @@ async fn library_importar_arquivo_local(
 #[tauri::command]
 async fn system_listar_diretorio(caminho: Option<String>) -> Result<ListagemDiretorio, String> {
     if_system_listar_diretorio(caminho).await
+}
+
+#[tauri::command]
+async fn system_selecionar_arquivo_local() -> Result<Option<String>, String> {
+    if_system_selecionar_arquivo_local().await
 }
 
 #[tauri::command]
@@ -949,6 +954,7 @@ pub fn run() {
       archive_validar_cbz,
       library_importar_arquivo_local,
       system_listar_diretorio,
+      system_selecionar_arquivo_local,
       source_listar_fontes,
       source_buscar_obras,
       source_listar_capitulos,
