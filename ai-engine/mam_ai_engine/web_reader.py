@@ -391,7 +391,11 @@ def _collect_paginated_chapters(
         page_idx += 1
         snap = cdp.eval_js(
             """
-            const h1 = document.querySelector('h1');
+            const noiseTitles = new Set(['status', 'filter', 'filters', 'menu', 'search', 'genres', 'genre', 'chapters', 'chapter list', 'comments', 'home', 'login', 'register', 'loading', '404', 'error']);
+            const h1List = Array.from(document.querySelectorAll('h1'))
+              .map(el => (el.textContent || '').replace(/\\s+/g, ' ').trim())
+              .filter(t => t.length > 0 && !noiseTitles.has(t.toLowerCase()));
+            const ogTitle = document.querySelector('meta[property="og:title"]');
             const ogImg = document.querySelector('meta[property="og:image"]');
             const coverImg = document.querySelector(
               '.title-detail__cover img, .title-detail__top img, .manga-poster img, img[class*="cover"], img[class*="poster"]'
@@ -410,7 +414,7 @@ def _collect_paginated_chapters(
               };
             });
             return {
-              title: h1 ? h1.textContent.trim() : document.title,
+              title: h1List[0] || (ogTitle && ogTitle.content) || document.title,
               cover: (ogImg && ogImg.content) || (coverImg && (coverImg.currentSrc || coverImg.src)) || null,
               anchors
             };

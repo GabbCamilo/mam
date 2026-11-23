@@ -1182,12 +1182,44 @@ fn eh_titulo_de_capitulo(txt: &str) -> bool {
     false
 }
 
+fn eh_titulo_ruido_ui(txt: &str) -> bool {
+    let lower = txt.trim().to_lowercase();
+    matches!(
+        lower.as_str(),
+        "status"
+            | "filter"
+            | "filters"
+            | "menu"
+            | "search"
+            | "genres"
+            | "genre"
+            | "chapters"
+            | "chapter list"
+            | "comments"
+            | "home"
+            | "login"
+            | "sign in"
+            | "register"
+            | "loading"
+            | "loading..."
+            | "404"
+            | "error"
+    )
+}
+
 fn extrair_titulo_obra(html: &str, caminho_obra: &str) -> String {
     let lower = html.to_lowercase();
-    if let (Some(a), Some(b)) = (lower.find("<h1"), lower.find("</h1>")) {
-        if let Some(gt) = html[a..b].find('>') {
-            let txt = limpar_tags_html(&html[a + gt + 1..b]);
-            if !txt.is_empty() && !eh_titulo_de_capitulo(&txt) {
+    let mut offset = 0;
+    while let Some(pos) = lower[offset..].find("<h1") {
+        let abs = offset + pos;
+        let Some(end_rel) = lower[abs..].find("</h1>") else {
+            break;
+        };
+        let end = abs + end_rel;
+        offset = end + 5;
+        if let Some(gt) = html[abs..end].find('>') {
+            let txt = limpar_tags_html(&html[abs + gt + 1..end]);
+            if !txt.is_empty() && !eh_titulo_de_capitulo(&txt) && !eh_titulo_ruido_ui(&txt) {
                 return txt;
             }
         }
@@ -1203,7 +1235,7 @@ fn extrair_titulo_obra(html: &str, caminho_obra: &str) -> String {
             .unwrap_or(&txt)
             .trim()
             .to_string();
-        if !limpo.is_empty() {
+        if !limpo.is_empty() && !eh_titulo_ruido_ui(&limpo) {
             return limpo;
         }
     }
@@ -1754,5 +1786,22 @@ mod tests {
         assert_eq!(res.capitulos[0].titulo.as_deref(), Some("2 páginas"));
         assert_eq!(res.capitulos[0].capitulo_id_fonte, url_cap);
         assert_eq!(res.capa_url.as_deref(), Some("https://cdn.example.com/001.png"));
+    }
+
+    #[test]
+    fn extrair_titulo_obra_ignora_h1_ruido_ui_como_status() {
+        let html = r#"
+            <html>
+              <head><title>Mahou Shoujo Madoka Magica: Majuu-hen - MangaBuddy</title></head>
+              <body>
+                <div class="sidebar"><h1>Status</h1></div>
+                <div class="main"><h1>Mahou Shoujo Madoka Magica: Majuu-hen</h1></div>
+              </body>
+            </html>
+        "#;
+        assert_eq!(
+            extrair_titulo_obra(html, "/series/mahou-shoujo-madokamagica-majuu-hen.ZDKd5Q"),
+            "Mahou Shoujo Madoka Magica: Majuu-hen"
+        );
     }
 }
