@@ -214,6 +214,20 @@ export interface DownloadLogItem {
   caminho_relativo?: string | null
 }
 
+export interface EntradaDiretorio {
+  nome: string
+  caminho: string
+  eh_diretorio: boolean
+  tamanho_bytes: number
+}
+
+export interface ListagemDiretorio {
+  caminho_atual: string
+  pai?: string | null
+  atalhos: EntradaDiretorio[]
+  itens: EntradaDiretorio[]
+}
+
 export const mamApi = {
   healthCheck: () => invoke<string>('health_check'),
   libraryRaiz: () => invoke<string>('library_raiz'),
@@ -419,5 +433,9 @@ export const mamApi = {
       caminhoArquivo,
       obraTitulo: obraTitulo ?? null,
       numeroCapitulo: numeroCapitulo ?? null,
+    }),
+  listarDiretorio: (caminho?: string | null) =>
+    invoke<ListagemDiretorio>('system_listar_diretorio', {
+      caminho: caminho ?? null,
     }),
 }

@@ -747,10 +747,24 @@ impl SourceIntegrationManager {
     }
 }
 
-/// Baixa uma imagem externa via HTTP (aplicando `Referer`/headers do conector) e retorna Data URL Base64.
-pub async fn baixar_imagem_data_url(url: &str) -> Result<String, SourceError> {
+fn eh_assinatura_imagem_valida(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0xFF, 0xD8, 0xFF])
+        || bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47])
+        || bytes.starts_with(b"GIF8")
+        || (bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP")
+        || bytes.starts_with(b"BM")
+        || (bytes.len() >= 12 && &bytes[4..8] == b"ftyp")
+}
+
+async fn baixar_bytes_imagem(url: &str) -> Result<(String, Vec<u8>), SourceError> {
+    let eh_mangadex_upload = url.to_lowercase().contains("uploads.mangadex.org");
+    let ua = if eh_mangadex_upload {
+        "MAM-MangaArchiveManager/0.1.0"
+    } else {
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    };
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+        .user_agent(ua)
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
@@ -758,15 +772,10 @@ pub async fn baixar_imagem_data_url(url: &str) -> Result<String, SourceError> {
         reqwest::header::ACCEPT,
         "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     );
-    let mut tem_referer = false;
-    for (k, v) in crate::connectors::GerenciadorConectores::headers_para_url(url, None) {
-        if k.eq_ignore_ascii_case("referer") {
-            tem_referer = true;
+    if !eh_mangadex_upload {
+        for (k, v) in crate::connectors::GerenciadorConectores::headers_para_url(url, None) {
+            req = req.header(&k, &v);
         }
-        req = req.header(&k, &v);
-    }
-    if !tem_referer && url.to_lowercase().contains("uploads.mangadex.org") {
-        req = req.header(reqwest::header::REFERER, "https://mangadex.org/");
     }
 
     let resp = req.send().await?;
@@ -792,7 +801,18 @@ pub async fn baixar_imagem_data_url(url: &str) -> Result<String, SourceError> {
             mime
         )));
     }
-    let bytes = resp.bytes().await?;
+    let bytes = resp.bytes().await?.to_vec();
+    if bytes.is_empty() || !eh_assinatura_imagem_valida(&bytes) {
+        return Err(SourceError::Operacao(
+            "Conteúdo retornado não possui assinatura de imagem válida".to_string(),
+        ));
+    }
+    Ok((mime, bytes))
+}
+
+/// Baixa uma imagem externa via HTTP (aplicando `Referer`/headers do conector) e retorna Data URL Base64.
+pub async fn baixar_imagem_data_url(url: &str) -> Result<String, SourceError> {
+    let (mime, bytes) = baixar_bytes_imagem(url).await?;
     Ok(format!("data:{};base64,{}", mime, codificar_base64(&bytes)))
 }
 
@@ -806,28 +826,11 @@ pub async fn salvar_capa_local(url: &str, pasta_obra: &std::path::Path) -> Resul
             return Err(SourceError::Operacao("Data URL de capa inválida".to_string()));
         }
     } else {
-        let client = reqwest::Client::builder()
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-
-        let mut req = client.get(url);
-        for (k, v) in crate::connectors::GerenciadorConectores::headers_para_url(url, None) {
-            req = req.header(&k, &v);
-        }
-
-        let resp = req.send().await?;
-        if !resp.status().is_success() {
-            return Err(SourceError::Operacao(format!(
-                "Falha ao baixar capa: HTTP {}",
-                resp.status()
-            )));
-        }
-        resp.bytes().await?.to_vec()
+        baixar_bytes_imagem(url).await?.1
     };
 
-    if bytes.is_empty() {
-        return Err(SourceError::Operacao("Imagem de capa vazia".to_string()));
+    if bytes.is_empty() || !eh_assinatura_imagem_valida(&bytes) {
+        return Err(SourceError::Operacao("Imagem de capa vazia ou inválida".to_string()));
     }
     std::fs::create_dir_all(pasta_obra).map_err(|e| SourceError::Operacao(e.to_string()))?;
     let destino = pasta_obra.join("cover.jpg");

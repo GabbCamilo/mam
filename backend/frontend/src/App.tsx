@@ -5,8 +5,10 @@ import {
   DetalhesObra,
   DiferencaBibliotecas,
   DownloadLogItem,
+  EntradaDiretorio,
   ExtratorInfo,
   FonteInfo,
+  ListagemDiretorio,
   ModeloInfo,
   ObraBuscaResultado,
   ObraResumo,
@@ -112,6 +114,7 @@ function App() {
 
   const [modalImportarUrlAberto, setModalImportarUrlAberto] = useState(false)
   const [modalImportarLocalAberto, setModalImportarLocalAberto] = useState(false)
+  const [listagemDir, setListagemDir] = useState<ListagemDiretorio | null>(null)
   const [localArquivoPath, setLocalArquivoPath] = useState('')
   const [localObraTitulo, setLocalObraTitulo] = useState('')
   const [localNumeroCap, setLocalNumeroCap] = useState('')
@@ -988,7 +991,13 @@ function App() {
               <div className="mam-toolbar-row">
                 <button
                   className="mam-btn"
-                  onClick={() => setModalImportarLocalAberto(true)}
+                  onClick={() => {
+                    setModalImportarLocalAberto(true)
+                    mamApi
+                      .listarDiretorio(null)
+                      .then((res) => setListagemDir(res))
+                      .catch(() => {})
+                  }}
                 >
                   📂 Importar .CBZ / .CBR
                 </button>
@@ -2942,7 +2951,7 @@ function App() {
 
       {modalImportarLocalAberto && (
         <div className="mam-modal-backdrop" onClick={() => setModalImportarLocalAberto(false)}>
-          <div className="mam-modal" style={{ maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
+          <div className="mam-modal" style={{ maxWidth: 660 }} onClick={(e) => e.stopPropagation()}>
             <div className="mam-section-header">
               <h3 className="mam-modal-title">📂 Importar Arquivo do PC (.CBZ / .CBR)</h3>
               <button
@@ -2954,8 +2963,110 @@ function App() {
               </button>
             </div>
             <p className="mam-section-desc">
-              Informe o caminho completo do arquivo <code>.cbz</code> ou <code>.cbr</code> no seu computador. Arquivos <code>.cbr</code> são convertidos automaticamente para <code>.cbz</code> dentro da biblioteca.
+              Navegue pelas pastas abaixo e clique no arquivo <code>.cbz</code> ou <code>.cbr</code> (ou cole o caminho diretamente). Arquivos <code>.cbr</code> são convertidos para <code>.cbz</code> automaticamente.
             </p>
+
+            {listagemDir && (
+              <div className="mam-panel" style={{ padding: '0.75rem', display: 'grid', gap: '0.55rem' }}>
+                <div className="mam-toolbar-row" style={{ gap: '0.4rem' }}>
+                  {listagemDir.atalhos.map((a) => (
+                    <button
+                      key={a.caminho}
+                      type="button"
+                      className="mam-btn"
+                      style={{ padding: '0.28rem 0.6rem', fontSize: '0.78rem' }}
+                      onClick={() => {
+                        mamApi
+                          .listarDiretorio(a.caminho)
+                          .then((res) => setListagemDir(res))
+                          .catch((err) => setMensagem(String(err)))
+                      }}
+                    >
+                      📁 {a.nome}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mam-toolbar-row" style={{ justifyContent: 'space-between' }}>
+                  <span
+                    className="mam-brand-sub"
+                    style={{
+                      fontFamily: 'monospace',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      maxWidth: '75%',
+                    }}
+                    title={listagemDir.caminho_atual}
+                  >
+                    {listagemDir.caminho_atual}
+                  </span>
+                  {listagemDir.pai && (
+                    <button
+                      type="button"
+                      className="mam-btn"
+                      style={{ padding: '0.28rem 0.65rem', fontSize: '0.78rem' }}
+                      onClick={() => {
+                        mamApi
+                          .listarDiretorio(listagemDir.pai!)
+                          .then((res) => setListagemDir(res))
+                          .catch((err) => setMensagem(String(err)))
+                      }}
+                    >
+                      ⬆ Subir pasta
+                    </button>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    maxHeight: 210,
+                    overflowY: 'auto',
+                    display: 'grid',
+                    gap: '0.3rem',
+                    paddingRight: '0.2rem',
+                  }}
+                >
+                  {listagemDir.itens.length === 0 ? (
+                    <span className="mam-section-desc">Nenhuma pasta ou arquivo .cbz/.cbr aqui.</span>
+                  ) : (
+                    listagemDir.itens.map((item: EntradaDiretorio) => (
+                      <button
+                        key={item.caminho}
+                        type="button"
+                        className={`mam-btn ${localArquivoPath === item.caminho ? 'mam-btn-active' : ''}`}
+                        style={{
+                          justifyContent: 'space-between',
+                          textAlign: 'left',
+                          padding: '0.4rem 0.65rem',
+                          fontSize: '0.82rem',
+                        }}
+                        onClick={() => {
+                          if (item.eh_diretorio) {
+                            mamApi
+                              .listarDiretorio(item.caminho)
+                              .then((res) => setListagemDir(res))
+                              .catch((err) => setMensagem(String(err)))
+                          } else {
+                            setLocalArquivoPath(item.caminho)
+                          }
+                        }}
+                      >
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {item.eh_diretorio ? '📁' : '📄'} {item.nome}
+                        </span>
+                        {!item.eh_diretorio && (
+                          <span className="mam-brand-sub" style={{ flexShrink: 0 }}>
+                            {(item.tamanho_bytes / (1024 * 1024)).toFixed(1)} MB
+                          </span>
+                        )}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
             <form
               onSubmit={async (e) => {
                 e.preventDefault()

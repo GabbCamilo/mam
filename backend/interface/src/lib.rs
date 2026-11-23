@@ -503,6 +503,115 @@ fn coletar_imagens_recursivo(dir: &Path, saida: &mut Vec<std::path::PathBuf>) {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EntradaDiretorio {
+    pub nome: String,
+    pub caminho: String,
+    pub eh_diretorio: bool,
+    pub tamanho_bytes: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ListagemDiretorio {
+    pub caminho_atual: String,
+    pub pai: Option<String>,
+    pub atalhos: Vec<EntradaDiretorio>,
+    pub itens: Vec<EntradaDiretorio>,
+}
+
+/// Lista pastas e arquivos `.cbz`/`.cbr` de um diretório local para navegação no modal de importação.
+pub async fn system_listar_diretorio(caminho: Option<String>) -> Result<ListagemDiretorio, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut atalhos: Vec<EntradaDiretorio> = Vec::new();
+        if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+            let home_path = std::path::PathBuf::from(home);
+            for (label, sub) in [
+                ("Downloads", "Downloads"),
+                ("Documentos", "Documents"),
+                ("Área de Trabalho", "Desktop"),
+            ] {
+                let p = home_path.join(sub);
+                if p.is_dir() {
+                    atalhos.push(EntradaDiretorio {
+                        nome: label.to_string(),
+                        caminho: p.to_string_lossy().to_string(),
+                        eh_diretorio: true,
+                        tamanho_bytes: 0,
+                    });
+                }
+            }
+        }
+        #[cfg(windows)]
+        {
+            for letra in b'C'..=b'Z' {
+                let drv = format!("{}:\\", letra as char);
+                let p = std::path::Path::new(&drv);
+                if p.is_dir() {
+                    atalhos.push(EntradaDiretorio {
+                        nome: format!("{}:", letra as char),
+                        caminho: drv,
+                        eh_diretorio: true,
+                        tamanho_bytes: 0,
+                    });
+                }
+            }
+        }
+
+        let alvo = caminho
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_dir())
+            .or_else(|| atalhos.first().map(|a| std::path::PathBuf::from(&a.caminho)))
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+
+        let pai = alvo.parent().map(|p| p.to_string_lossy().to_string());
+        let mut pastas: Vec<EntradaDiretorio> = Vec::new();
+        let mut arquivos: Vec<EntradaDiretorio> = Vec::new();
+
+        let entries = std::fs::read_dir(&alvo)
+            .map_err(|e| format!("Não foi possível abrir '{}': {}", alvo.display(), e))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let nome = entry.file_name().to_string_lossy().to_string();
+            if nome.starts_with('.') {
+                continue;
+            }
+            if path.is_dir() {
+                pastas.push(EntradaDiretorio {
+                    nome,
+                    caminho: path.to_string_lossy().to_string(),
+                    eh_diretorio: true,
+                    tamanho_bytes: 0,
+                });
+            } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if ext.eq_ignore_ascii_case("cbz") || ext.eq_ignore_ascii_case("cbr") {
+                    let tam = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                    arquivos.push(EntradaDiretorio {
+                        nome,
+                        caminho: path.to_string_lossy().to_string(),
+                        eh_diretorio: false,
+                        tamanho_bytes: tam,
+                    });
+                }
+            }
+        }
+
+        pastas.sort_by(|a, b| a.nome.to_lowercase().cmp(&b.nome.to_lowercase()));
+        arquivos.sort_by(|a, b| a.nome.to_lowercase().cmp(&b.nome.to_lowercase()));
+        pastas.extend(arquivos);
+
+        Ok(ListagemDiretorio {
+            caminho_atual: alvo.to_string_lossy().to_string(),
+            pai,
+            atalhos,
+            itens: pastas,
+        })
+    })
+    .await
+    .map_err(|e| format!("Falha ao listar diretório: {}", e))?
+}
+
 /// Importa um arquivo `.cbz` ou `.cbr` local do PC para a biblioteca MAM (convertendo `.cbr` para `.cbz`).
 pub async fn library_importar_arquivo_local(
     library_manager: Arc<LibraryManager>,
@@ -687,18 +796,29 @@ pub async fn library_listar_obras_resumo(
     for obra in obras {
         let total_capitulos = contagens.get(&obra.id.to_string()).copied().unwrap_or(0);
         let cover_path = raiz.join(obra.caminho_relativo.as_str()).join("cover.jpg");
-        let capa_data_url = if cover_path.is_file() {
+        let capa_local_valida = if cover_path.is_file() {
             let path_clone = cover_path.clone();
             tokio::task::spawn_blocking(move || std::fs::read(&path_clone).ok())
                 .await
                 .ok()
                 .flatten()
+                .filter(|b| {
+                    b.starts_with(&[0xFF, 0xD8, 0xFF])
+                        || b.starts_with(&[0x89, 0x50, 0x4E, 0x47])
+                        || b.starts_with(b"GIF8")
+                        || (b.len() >= 12 && b.starts_with(b"RIFF") && &b[8..12] == b"WEBP")
+                })
                 .map(|bytes| {
                     format!(
                         "data:image/jpeg;base64,{}",
                         mam_source_integration::codificar_base64(&bytes)
                     )
                 })
+        } else {
+            None
+        };
+        let capa_data_url = if capa_local_valida.is_some() {
+            capa_local_valida
         } else if total_capitulos > 0 {
             let mut fallback_url = None;
             if let Ok(caps) = db.listar_capitulos_obra(obra.id).await {
