@@ -261,13 +261,25 @@ impl RegistroExtratores {
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
+        let origem_capitulo = extrair_origem(url_capitulo);
+        let referer_padrao = if origem_capitulo.is_empty() {
+            url_capitulo.to_string()
+        } else {
+            format!("{}/", origem_capitulo)
+        };
+
         let mut paginas_bytes: Vec<(&'static str, Vec<u8>)> = Vec::with_capacity(urls_paginas.len());
         for url in &urls_paginas {
-            let resp = client
-                .get(url)
-                .header(reqwest::header::REFERER, url_capitulo)
-                .send()
-                .await?;
+            let mut req = client.get(url);
+            let headers_cfg = crate::connectors::GerenciadorConectores::headers_para_url(url, None);
+            if headers_cfg.is_empty() {
+                req = req.header(reqwest::header::REFERER, &referer_padrao);
+            } else {
+                for (k, v) in headers_cfg {
+                    req = req.header(&k, &v);
+                }
+            }
+            let resp = req.send().await?;
             if !resp.status().is_success() {
                 return Err(SourceError::Operacao(format!(
                     "Falha ao baixar imagem {}: HTTP {}",
@@ -300,13 +312,24 @@ pub async fn descobrir_capitulos_por_link_com_opcoes(
     html_opcional: Option<&str>,
     idioma_preferido: Option<&str>,
 ) -> Result<ObraExtraidaPorLink, SourceError> {
+    descobrir_capitulos_por_link_com_biblioteca(url_obra, html_opcional, idioma_preferido, None)
+        .await
+}
+
+/// Descobre capítulos com preferência explícita de idioma e carregamento de conectores aprendidos da biblioteca.
+pub async fn descobrir_capitulos_por_link_com_biblioteca(
+    url_obra: &str,
+    html_opcional: Option<&str>,
+    idioma_preferido: Option<&str>,
+    raiz_biblioteca: Option<&Path>,
+) -> Result<ObraExtraidaPorLink, SourceError> {
     let url_limpa = url_obra.trim();
     if url_limpa.is_empty() {
         return Err(SourceError::Operacao("Informe a URL da obra".to_string()));
     }
 
     if let Some(h) = html_opcional.filter(|s| !s.trim().is_empty()) {
-        let extraida = extrair_capitulos_de_html(url_limpa, h);
+        let extraida = extrair_capitulos_de_html_com_biblioteca(url_limpa, h, raiz_biblioteca);
         if extraida.capitulos.is_empty() {
             return Err(SourceError::Operacao(
                 "Nenhum link de capítulo reconhecido no HTML fornecido.".to_string(),
@@ -338,7 +361,8 @@ pub async fn descobrir_capitulos_por_link_com_opcoes(
                         return Ok(colecao);
                     }
                 }
-                let mut extraida = extrair_capitulos_de_html(url_limpa, &html);
+                let mut extraida =
+                    extrair_capitulos_de_html_com_biblioteca(url_limpa, &html, raiz_biblioteca);
 
                 // Suporte nativo ao WeebCentral (HTMX /series/<id>/full-chapter-list)
                 if let Some(wc_list_url) = weebcentral_full_chapter_list_url(url_limpa) {
@@ -519,7 +543,16 @@ pub async fn renderizar_html_com_navegador(url: &str) -> Result<String, SourceEr
 /// Extrai metadados e capítulos vinculados de um HTML de página principal de obra
 /// usando padrões padrão + padrões dinâmicos dos conectores carregados.
 pub fn extrair_capitulos_de_html(url_obra: &str, html: &str) -> ObraExtraidaPorLink {
-    let padroes = crate::connectors::GerenciadorConectores::padroes_capitulo_ativos(None);
+    extrair_capitulos_de_html_com_biblioteca(url_obra, html, None)
+}
+
+/// Extrai metadados e capítulos vinculados usando conectores aprendidos na biblioteca informada.
+pub fn extrair_capitulos_de_html_com_biblioteca(
+    url_obra: &str,
+    html: &str,
+    raiz_biblioteca: Option<&Path>,
+) -> ObraExtraidaPorLink {
+    let padroes = crate::connectors::GerenciadorConectores::padroes_capitulo_ativos(raiz_biblioteca);
     extrair_capitulos_de_html_com_padroes(url_obra, html, &padroes)
 }
 
@@ -539,8 +572,13 @@ pub fn extrair_capitulos_de_html_com_padroes(
     let lower = html.to_lowercase();
     let mut offset = 0;
 
-    while let Some(pos) = lower[offset..].find("<a ") {
+    while let Some(pos) = lower[offset..].find("<a") {
         let abs_pos = offset + pos;
+        let next_ch = lower[abs_pos + 2..].chars().next();
+        if !matches!(next_ch, Some(c) if c.is_whitespace()) {
+            offset = abs_pos + 2;
+            continue;
+        }
         let Some(tag_end_rel) = lower[abs_pos..].find('>') else {
             break;
         };
@@ -798,7 +836,7 @@ fn weebcentral_full_chapter_list_url(url: &str) -> Option<String> {
 
 fn eh_link_capitulo(url_completa: &str, caminho_obra: &str, padroes_extra: &[String]) -> bool {
     let caminho = extrair_caminho_url(url_completa);
-    if caminho.is_empty() || caminho == caminho_obra {
+    if caminho.is_empty() || (caminho == caminho_obra && !url_completa.contains('?')) {
         return false;
     }
     if [
@@ -831,6 +869,7 @@ fn eh_link_capitulo(url_completa: &str, caminho_obra: &str, padroes_extra: &[Str
         false
     };
 
+    let url_lower = url_completa.to_lowercase();
     let tem_padrao_capitulo = caminho.contains("/chapter/")
         || caminho.contains("/chapters/")
         || caminho.contains("/capitulo-")
@@ -839,8 +878,10 @@ fn eh_link_capitulo(url_completa: &str, caminho_obra: &str, padroes_extra: &[Str
         || caminho.contains("/ch-")
         || caminho.contains("/read/")
         || caminho.contains("/reader/")
-        || caminho.contains("/viewer/")
+        || caminho.contains("/viewer")
         || caminho.contains("/episode/")
+        || caminho.contains("/episode-")
+        || caminho.contains("/ep/")
         || caminho.contains("/ep-")
         || caminho.contains("/volume-")
         || caminho.contains("/vol-")
@@ -848,20 +889,33 @@ fn eh_link_capitulo(url_completa: &str, caminho_obra: &str, padroes_extra: &[Str
         || caminho.contains("-chapter-")
         || caminho.contains("-ch-")
         || caminho.contains("-cap-")
+        || url_lower.contains("episode_no=")
+        || url_lower.contains("chapter_id=")
         || padroes_extra
             .iter()
-            .any(|p| p.len() >= 3 && caminho.contains(p.as_str()));
+            .any(|p| p.len() >= 3 && (caminho.contains(p.as_str()) || url_lower.contains(p.as_str())));
 
     if !caminho_obra.is_empty() && caminho.contains("/title/") {
-        return prefixo_obra && tem_padrao_capitulo;
-    }
-    if !caminho_obra.is_empty() && caminho.contains("/manga/") {
         return prefixo_obra && tem_padrao_capitulo;
     }
     tem_padrao_capitulo
 }
 
 fn extrair_numero_capitulo(url: &str, texto: &str) -> Option<i32> {
+    let url_lower = url.to_lowercase();
+    if let Some(q_idx) = url_lower.find('?') {
+        let query = &url_lower[q_idx + 1..];
+        for key in ["episode_no=", "chapter_no=", "chapter=", "chap=", "ep="] {
+            if let Some(pos) = query.find(key) {
+                let rest = &query[pos + key.len()..];
+                let digitos: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                if let Ok(n) = digitos.parse::<i32>() {
+                    return Some(n);
+                }
+            }
+        }
+    }
+
     let caminho = extrair_caminho_url(url);
     for seg in caminho.split('/').rev() {
         for pref in [
@@ -981,12 +1035,24 @@ fn limpar_tags_html(s: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+fn eh_titulo_de_capitulo(txt: &str) -> bool {
+    let lower = txt.trim().to_lowercase();
+    for pref in ["episode ", "ep. ", "ep ", "chapter ", "capítulo ", "capitulo ", "cap. ", "cap "] {
+        if let Some(rest) = lower.strip_prefix(pref) {
+            if rest.trim_start().chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 fn extrair_titulo_obra(html: &str, caminho_obra: &str) -> String {
     let lower = html.to_lowercase();
     if let (Some(a), Some(b)) = (lower.find("<h1"), lower.find("</h1>")) {
         if let Some(gt) = html[a..b].find('>') {
             let txt = limpar_tags_html(&html[a + gt + 1..b]);
-            if !txt.is_empty() {
+            if !txt.is_empty() && !eh_titulo_de_capitulo(&txt) {
                 return txt;
             }
         }
@@ -1104,12 +1170,103 @@ pub fn empacotar_paginas_em_cbz(paginas: &[(&str, Vec<u8>)]) -> Result<Vec<u8>, 
     Ok(cursor.into_inner())
 }
 
-/// Extrai URLs de imagens (`data-src` ou `src`) de um HTML preservando a ordem de aparição e deduplicando.
+/// Extrai URLs de imagens (`data-url`, `data-original`, `data-lazy-src`, `data-src` ou `src`)
+/// de um HTML preservando a ordem de aparição e deduplicando.
+/// Prioriza contêineres de leitura quando presentes para evitar baixar capas de recomendações/sidebar.
 pub fn extrair_urls_imagens_html(html: &str) -> Vec<String> {
+    let lower = html.to_lowercase();
+    for marker in [
+        "id=\"_imagelist\"",
+        "id='_imagelist'",
+        "class=\"viewer_img\"",
+        "class='viewer_img'",
+        "viewer-img",
+        "comic-images",
+        "class=\"reading-content\"",
+        "class='reading-content'",
+        "chapter-content",
+        "reader-area",
+        "pages-list",
+        "id=\"readerarea\"",
+    ] {
+        if let Some(start) = lower.find(marker) {
+            let max_end = (start + 250_000).min(html.len());
+            let tail_lower = &lower[start..max_end];
+            let stop_rel = [
+                "id=\"recommend",
+                "class=\"recommend",
+                "episode_lst",
+                "class=\"footer",
+                "id=\"footer",
+            ]
+            .iter()
+            .filter_map(|stop| tail_lower.find(stop))
+            .filter(|&pos| pos > 100)
+            .min();
+            let end = stop_rel.map_or(max_end, |rel| start + rel);
+            let recorte = extrair_urls_imagens_trecho(&html[start..end]);
+            if recorte.len() >= 2 {
+                return recorte;
+            }
+        }
+    }
+    extrair_urls_imagens_trecho(html)
+}
+
+fn extrair_attr_tag(tag: &str, tag_lower: &str, attr: &str) -> Option<String> {
+    let mut pos = 0;
+    while let Some(idx) = tag_lower[pos..].find(attr) {
+        let abs = pos + idx;
+        if abs > 0 {
+            let prev = tag_lower.as_bytes()[abs - 1];
+            if prev.is_ascii_alphanumeric() || prev == b'-' || prev == b'_' {
+                pos = abs + attr.len();
+                continue;
+            }
+        }
+        let rest = tag[abs + attr.len()..].trim_start();
+        if let Some(q @ ('"' | '\'')) = rest.chars().next() {
+            if let Some(end) = rest[1..].find(q) {
+                return Some(rest[1..1 + end].trim().to_string());
+            }
+        }
+        pos = abs + attr.len();
+    }
+    None
+}
+
+fn extrair_urls_imagens_trecho(html: &str) -> Vec<String> {
     let mut urls = Vec::new();
     let lower = html.to_lowercase();
+    let attrs_prioridade = ["data-url=", "data-original=", "data-lazy-src=", "data-src=", "src="];
 
-    for attr in ["data-src=", "src="] {
+    // Passo 1: varre <img ...> em ordem exata do DOM, escolhendo o atributo de maior prioridade válido.
+    let mut img_offset = 0;
+    while let Some(pos) = lower[img_offset..].find("<img") {
+        let abs = img_offset + pos;
+        let Some(end_rel) = lower[abs..].find('>') else {
+            break;
+        };
+        let tag = &html[abs..=abs + end_rel];
+        let tag_lower = &lower[abs..=abs + end_rel];
+        img_offset = abs + end_rel + 1;
+
+        for attr in attrs_prioridade {
+            if let Some(candidato) = extrair_attr_tag(tag, tag_lower, attr) {
+                if eh_url_imagem_valida(&candidato) && !urls.contains(&candidato) {
+                    urls.push(candidato);
+                    break;
+                }
+            }
+        }
+    }
+
+    if urls.len() >= 2 {
+        return urls;
+    }
+
+    // Fallback: varredura direta por atributos caso imagens estejam em wrappers não-<img>.
+    for attr in attrs_prioridade {
         let mut offset = 0;
         while let Some(pos) = lower[offset..].find(attr) {
             let start = offset + pos + attr.len();
@@ -1156,6 +1313,19 @@ fn eh_url_imagem_valida(url: &str) -> bool {
         "chapter-badge",
         "spinner",
         "placeholder",
+        "bg_transparency",
+        "blank.gif",
+        "1x1.",
+        "pixel.",
+        "spacer.",
+        "transparent.png",
+        "loading.gif",
+        "/cover",
+        "/covers/",
+        "/thumb",
+        "/thumbnails/",
+        "recommend",
+        "discord",
     ]
     .iter()
     .any(|tok| sem_query.contains(tok))
@@ -1372,5 +1542,52 @@ mod tests {
             .as_deref(),
             Some("https://weebcentral.com/series/01J76XY7E2VCSR0ZCC21KGXS1K/full-chapter-list")
         );
+    }
+
+    #[test]
+    fn extrai_paginas_webtoon_com_data_url_ignorando_recomendacoes() {
+        let html = r#"
+            <html><head><title>The Greatest Estate Developer</title></head><body>
+              <h1>Episode 1</h1>
+              <div id="_imageList" class="viewer_img">
+                <img src="https://webtoon-phinf.pstatic.net/bg_transparency.png" data-url="https://webtoon-phinf.pstatic.net/20210101_1/page_01.jpg" />
+                <img src="https://webtoon-phinf.pstatic.net/bg_transparency.png" data-url="https://webtoon-phinf.pstatic.net/20210101_1/page_02.jpg" />
+              </div>
+              <div id="recommendList" class="recommend">
+                <img src="https://webtoon-phinf.pstatic.net/other/rec_cover_1.jpg" />
+                <img src="https://webtoon-phinf.pstatic.net/other/rec_cover_2.jpg" />
+              </div>
+            </body></html>
+        "#;
+
+        let imgs = extrair_urls_imagens_html(html);
+        assert_eq!(
+            imgs,
+            vec![
+                "https://webtoon-phinf.pstatic.net/20210101_1/page_01.jpg",
+                "https://webtoon-phinf.pstatic.net/20210101_1/page_02.jpg",
+            ]
+        );
+        assert_eq!(
+            extrair_titulo_obra(html, "/en/fantasy/the-greatest-estate-developer/list?title_no=3596"),
+            "The Greatest Estate Developer"
+        );
+    }
+
+    #[test]
+    fn descobre_capitulos_com_query_episode_no() {
+        let html = r#"
+            <html><head><title>The Greatest Estate Developer</title></head><body>
+              <a href="/en/fantasy/the-greatest-estate-developer/episode-1/viewer?title_no=3596&episode_no=1">Episode 1</a>
+              <a href="/en/fantasy/the-greatest-estate-developer/episode-2/viewer?title_no=3596&episode_no=2">Episode 2</a>
+            </body></html>
+        "#;
+        let res = extrair_capitulos_de_html(
+            "https://www.webtoons.com/en/fantasy/the-greatest-estate-developer/list?title_no=3596",
+            html,
+        );
+        assert_eq!(res.capitulos.len(), 2);
+        assert_eq!(res.capitulos[0].numero, Some(1));
+        assert_eq!(res.capitulos[1].numero, Some(2));
     }
 }

@@ -346,13 +346,171 @@ async fn source_obter_capa(url: String) -> Result<String, String> {
     if_source_obter_capa(url).await
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct CapturaJanelaAssistida {
+    url: String,
+    html: String,
+    urls_imagens: Vec<String>,
+}
+
+#[tauri::command]
+async fn browser_abrir_janela_assistida(
+    app: tauri::AppHandle,
+    url: String,
+) -> Result<(), String> {
+    let parsed = tauri::Url::parse(url.trim()).map_err(|e| format!("URL inválida: {}", e))?;
+    if let Some(existing) = app.get_webview_window("mam-assistido") {
+        let _ = existing.navigate(parsed);
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
+    tauri::WebviewWindowBuilder::new(&app, "mam-assistido", tauri::WebviewUrl::External(parsed))
+        .title("MAM — Navegador Assistido (Carregue a página e clique em Capturar no MAM)")
+        .inner_size(1120.0, 820.0)
+        .build()
+        .map_err(|e| format!("Falha ao abrir janela assistida: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn browser_capturar_janela_assistida(
+    app: tauri::AppHandle,
+) -> Result<CapturaJanelaAssistida, String> {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    let win = app
+        .get_webview_window("mam-assistido")
+        .ok_or_else(|| "Abra primeiro a Janela Assistida antes de capturar.".to_string())?;
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("Falha ao iniciar receptor local de captura: {}", e))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| e.to_string())?
+        .port();
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(1)
+        .to_string();
+
+    let script = format!(
+        r#"(function(){{
+            try {{
+                var imgs = Array.from(document.querySelectorAll('img')).map(function(i){{
+                    return i.getAttribute('data-url') || i.getAttribute('data-original') || i.getAttribute('data-lazy-src') || i.getAttribute('data-src') || i.currentSrc || i.src || '';
+                }}).filter(function(u){{ return u && u.indexOf('http') === 0; }});
+                var payload = JSON.stringify({{
+                    url: location.href,
+                    html: document.documentElement ? document.documentElement.outerHTML : '',
+                    urls_imagens: imgs
+                }});
+                fetch('http://127.0.0.1:{}/capture?nonce={}', {{
+                    method: 'POST',
+                    mode: 'no-cors',
+                    body: payload
+                }});
+            }} catch(e) {{}}
+        }})();"#,
+        port, nonce
+    );
+
+    win.eval(&script)
+        .map_err(|e| format!("Falha ao consultar janela assistida: {}", e))?;
+
+    let nonce_esperado = format!("nonce={}", nonce);
+    let captura = tokio::task::spawn_blocking(move || -> Result<CapturaJanelaAssistida, String> {
+        listener
+            .set_nonblocking(false)
+            .map_err(|e| e.to_string())?;
+        let (mut stream, _) = listener
+            .accept()
+            .map_err(|e| format!("Nenhuma resposta recebida da janela: {}", e))?;
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(6)));
+
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 8192];
+        let mut header_end: Option<usize> = None;
+        let mut content_length: usize = 0;
+
+        loop {
+            let n = stream.read(&mut tmp).unwrap_or(0);
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&tmp[..n]);
+            if header_end.is_none() {
+                if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    header_end = Some(pos + 4);
+                    let hdr = String::from_utf8_lossy(&buf[..pos]);
+                    if !hdr.contains(&nonce_esperado) {
+                        return Err("Token de captura inválido".to_string());
+                    }
+                    for line in hdr.lines() {
+                        if let Some((k, v)) = line.split_once(':') {
+                            if k.trim().eq_ignore_ascii_case("content-length") {
+                                content_length = v.trim().parse::<usize>().unwrap_or(0);
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(he) = header_end {
+                if buf.len() >= he + content_length {
+                    break;
+                }
+            }
+        }
+
+        let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
+        let he = header_end.ok_or_else(|| "Resposta HTTP inválida da captura".to_string())?;
+        let body_slice = &buf[he..(he + content_length).min(buf.len())];
+        serde_json::from_slice::<CapturaJanelaAssistida>(body_slice)
+            .map_err(|e| format!("Falha ao decodificar captura: {}", e))
+    });
+
+    match tokio::time::timeout(std::time::Duration::from_secs(8), captura).await {
+        Ok(Ok(res)) => res,
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err("Tempo esgotado na captura automática (site pode bloquear localhost por CSP). Use Ctrl+U / Ctrl+A / Ctrl+C no navegador e cole no campo HTML.".to_string()),
+    }
+}
+
+#[tauri::command]
+async fn browser_ensinar_padrao_capitulo(
+    app: tauri::AppHandle,
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    url_obra: String,
+) -> Result<mam_source_integration::connectors::ConectorSiteConfig, String> {
+    let win = app
+        .get_webview_window("mam-assistido")
+        .ok_or_else(|| "Abra a Janela Assistida e entre em um capítulo antes de ensinar.".to_string())?;
+    let url_atual = win.url().map_err(|e| e.to_string())?;
+    mam_source_integration::connectors::GerenciadorConectores::aprender_padrao_url(
+        library_manager.raiz(),
+        &url_obra,
+        url_atual.as_str(),
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn source_descobrir_por_link(
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
     url_obra: String,
     html: Option<String>,
     idioma_preferido: Option<String>,
 ) -> Result<mam_source_integration::extractors::ObraExtraidaPorLink, String> {
-    mam_interface::source_descobrir_por_link(url_obra, html, idioma_preferido).await
+    mam_interface::source_descobrir_por_link(
+        library_manager.inner().clone(),
+        url_obra,
+        html,
+        idioma_preferido,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -807,6 +965,9 @@ pub fn run() {
       reader_listar_lidos,
       source_obter_capa,
       source_descobrir_por_link,
+      browser_abrir_janela_assistida,
+      browser_capturar_janela_assistida,
+      browser_ensinar_padrao_capitulo,
       source_pausar_operacao,
       source_retomar_operacao,
       source_cancelar_operacao,
@@ -888,24 +1049,29 @@ pub fn run() {
     })
     .on_window_event(|window, event| {
       if let tauri::WindowEvent::CloseRequested { .. } = event {
-        if let Some(source_manager) = window.try_state::<Arc<SourceIntegrationManager>>() {
-          let sm = source_manager.inner().clone();
-          let _ = tauri::async_runtime::block_on(async move {
-            sm.pausar_todas_operacoes_ativas().await;
-          });
+        if window.label() != "main" {
+          return;
         }
-        if let Some(ai_manager) = window.try_state::<Arc<AiEngineManager>>() {
-          let ai = ai_manager.inner().clone();
-          let _ = tauri::async_runtime::block_on(async move {
-            let _ = ai.chamar("shutdown", serde_json::json!({})).await;
-          });
+        if let Some(assistida) = window.app_handle().get_webview_window("mam-assistido") {
+          let _ = assistida.close();
         }
-        if let Some(db) = window.try_state::<Arc<Database>>() {
-          let db_ref = db.inner().clone();
-          let _ = tauri::async_runtime::block_on(async move {
-            let _ = db_ref.checkpoint_truncar().await;
-          });
-        }
+        let sm_opt = window.try_state::<Arc<SourceIntegrationManager>>().map(|s| s.inner().clone());
+        let ai_opt = window.try_state::<Arc<AiEngineManager>>().map(|a| a.inner().clone());
+        let db_opt = window.try_state::<Arc<Database>>().map(|d| d.inner().clone());
+        let _ = tauri::async_runtime::block_on(async move {
+          let _ = tokio::time::timeout(std::time::Duration::from_millis(1500), async {
+            if let Some(sm) = sm_opt {
+              sm.pausar_todas_operacoes_ativas().await;
+            }
+            if let Some(ai) = ai_opt {
+              ai.encerrar_se_ativo().await;
+            }
+            if let Some(db_ref) = db_opt {
+              let _ = db_ref.checkpoint_truncar().await;
+            }
+          })
+          .await;
+        });
         #[cfg(windows)]
         {
           use std::os::windows::process::CommandExt;
@@ -920,6 +1086,7 @@ pub fn run() {
             .creation_flags(0x08000000)
             .spawn();
         }
+        window.app_handle().exit(0);
       }
     })
     .run(tauri::generate_context!())

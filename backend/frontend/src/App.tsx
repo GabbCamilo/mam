@@ -83,6 +83,7 @@ function App() {
   const [capasCache, setCapasCache] = useState<Record<string, string>>({})
   const [obraFonteSelecionada, setObraFonteSelecionada] = useState<ObraBuscaResultado | null>(null)
   const [capitulosFonte, setCapitulosFonte] = useState<CapituloBuscaResultado[]>([])
+  const [carregandoCapitulosFonte, setCarregandoCapitulosFonte] = useState(false)
   const [filtroIdiomaFonte, setFiltroIdiomaFonte] = useState<string>('TODOS')
   const [selecionadosIds, setSelecionadosIds] = useState<string[]>([])
   const [operacoesDownload, setOperacoesDownload] = useState<StatusOperacao[]>([])
@@ -566,6 +567,8 @@ function App() {
       return
     }
     setObraFonteSelecionada(obra)
+    setCapitulosFonte([])
+    setCarregandoCapitulosFonte(true)
     setFiltroIdiomaFonte('TODOS')
     setSelecionadosIds([])
     try {
@@ -573,6 +576,8 @@ function App() {
       setCapitulosFonte(caps)
     } catch (err) {
       setMensagem(`Erro ao listar capítulos da fonte: ${String(err)}`)
+    } finally {
+      setCarregandoCapitulosFonte(false)
     }
   }
 
@@ -718,10 +723,14 @@ function App() {
     if (!obraFonteSelecionada || selecionadosIds.length === 0) return
     const escolhidos = capitulosFonte.filter((c) => selecionadosIds.includes(c.capitulo_id_fonte))
     try {
+      const capaResolvida =
+        obraFonteSelecionada.capa_url && capasCache[obraFonteSelecionada.capa_url]
+          ? capasCache[obraFonteSelecionada.capa_url]
+          : obraFonteSelecionada.capa_url ?? null
       await mamApi.sourceIniciarArquivamento(
         obraFonteSelecionada.titulo,
         escolhidos,
-        obraFonteSelecionada.capa_url ?? null,
+        capaResolvida,
       )
       setPopupDownload({
         obra: obraFonteSelecionada.titulo,
@@ -1653,7 +1662,9 @@ function App() {
                         </button>
                       </div>
                     </div>
-                    {capitulosFonteFiltrados.length === 0 ? (
+                    {carregandoCapitulosFonte ? (
+                      <p className="mam-section-desc">⏳ Carregando capítulos da obra...</p>
+                    ) : capitulosFonteFiltrados.length === 0 ? (
                       <p className="mam-section-desc">
                         Nenhum capítulo hospedado diretamente nesta fonte para os idiomas PT/ENG/JPN (esta obra pode possuir apenas links externos de editoras oficiais como MangaPlus/Viz). Use "+ Importar por Link / HTML" se desejar importar manualmente.
                       </p>
@@ -1995,28 +2006,43 @@ function App() {
                               </p>
                             ) : (
                               grupo.itens.map((item) => (
-                                <div
-                                  key={item.id}
-                                  className="mam-row-card"
-                                  onClick={() => handleAbrirCapituloDoLog(item)}
-                                >
-                                  <div>
-                                    <strong>{item.nome}</strong>
-                                    <div className="mam-brand-sub">Pasta: {item.pasta_destino}</div>
-                                  </div>
-                                  <div className="mam-toolbar-row">
-                                    <span className="mam-pill-badge">{item.data_hora}</span>
-                                    <button
-                                      className="mam-btn mam-btn-primary"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
+                                  <div
+                                    key={item.id}
+                                    className="mam-row-card"
+                                    onClick={() => {
+                                      if (!item.nome.startsWith('❌')) {
                                         handleAbrirCapituloDoLog(item)
-                                      }}
-                                    >
-                                      Ler
-                                    </button>
+                                      }
+                                    }}
+                                  >
+                                    <div className="mam-chapter-row-main">
+                                      <strong style={{ wordBreak: 'break-word', display: 'block' }}>
+                                        {item.nome}
+                                      </strong>
+                                      <div
+                                        className="mam-brand-sub"
+                                        style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                      >
+                                        Pasta: {item.pasta_destino}
+                                      </div>
+                                    </div>
+                                    <div className="mam-chapter-actions">
+                                      <span className="mam-pill-badge" style={{ whiteSpace: 'nowrap' }}>
+                                        {item.data_hora}
+                                      </span>
+                                      {!item.nome.startsWith('❌') && (
+                                        <button
+                                          className="mam-btn mam-btn-primary"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            handleAbrirCapituloDoLog(item)
+                                          }}
+                                        >
+                                          Ler
+                                        </button>
+                                      )}
+                                    </div>
                                   </div>
-                                </div>
                               ))
                             )}
                           </div>
@@ -2490,14 +2516,64 @@ function App() {
                     onChange={(e) => setExtUrl(e.target.value)}
                   />
                   {extUrl.trim().startsWith('http') && (
-                    <button
-                      type="button"
-                      className="mam-btn"
-                      onClick={() => window.open(extUrl.trim(), '_blank', 'noopener,noreferrer')}
-                      title="Abrir página no navegador para copiar o HTML caso o site possua proteção anti-bot"
-                    >
-                      Abrir no Navegador
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="mam-btn"
+                        onClick={async () => {
+                          try {
+                            await mamApi.browserAbrirJanelaAssistida(extUrl.trim())
+                            setMensagem('Janela Assistida aberta. Carregue a página/verificação e clique em "Capturar da Janela".')
+                          } catch (err) {
+                            setMensagem(`Erro ao abrir janela assistida: ${String(err)}`)
+                          }
+                        }}
+                        title="Abrir página na janela assistida do MAM para sites com verificação humana"
+                      >
+                        Janela Assistida
+                      </button>
+                      <button
+                        type="button"
+                        className="mam-btn mam-btn-primary"
+                        onClick={async () => {
+                          try {
+                            const cap = await mamApi.browserCapturarJanelaAssistida()
+                            if (!extUrl.trim()) {
+                              setExtUrl(cap.url)
+                            }
+                            setExtHtml(cap.html)
+                            if (modoImportacao === 'capitulo' && cap.urls_imagens.length > 0) {
+                              setExtUrlsTexto(cap.urls_imagens.join('\n'))
+                            }
+                            setMensagem(`HTML capturado da janela assistida (${cap.urls_imagens.length} imagem(ns)). Clique em "Descobrir Capítulos".`)
+                          } catch (err) {
+                            setMensagem(String(err))
+                          }
+                        }}
+                        title="Capturar HTML já carregado na Janela Assistida"
+                      >
+                        Capturar da Janela
+                      </button>
+                      <button
+                        type="button"
+                        className="mam-btn"
+                        onClick={async () => {
+                          try {
+                            const cfg = await mamApi.browserEnsinarPadraoCapitulo(extUrl.trim())
+                            const atualizados = await mamApi.sourceListarConectores()
+                            setConectoresCatalogo(atualizados)
+                            setMensagem(
+                              `Padrão aprendido para "${cfg.nome}": ${cfg.padroes_url_capitulo[0] ?? ''}. Volte à página da obra (ou use o HTML já capturado) e clique em "Descobrir Capítulos".`,
+                            )
+                          } catch (err) {
+                            setMensagem(String(err))
+                          }
+                        }}
+                        title="Entre em um capítulo na Janela Assistida e clique aqui para ensinar o padrão de URL à IA"
+                      >
+                        🎓 Ensinar Capítulo
+                      </button>
+                    </>
                   )}
                 </div>
                 <input
@@ -2531,6 +2607,20 @@ function App() {
                   rows={4}
                 />
                 <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    className="mam-btn"
+                    onClick={() => {
+                      setExtUrl('')
+                      setExtObraTitulo('')
+                      setExtHtml('')
+                      setExtNumeroCap('1')
+                      setExtUrlsTexto('')
+                      setResultadoImportacao(null)
+                    }}
+                  >
+                    Limpar
+                  </button>
                   <button
                     type="button"
                     className="mam-btn"
@@ -2582,6 +2672,20 @@ function App() {
                   rows={3}
                 />
                 <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    className="mam-btn"
+                    onClick={() => {
+                      setExtUrl('')
+                      setExtObraTitulo('')
+                      setExtHtml('')
+                      setExtNumeroCap('1')
+                      setExtUrlsTexto('')
+                      setResultadoImportacao(null)
+                    }}
+                  >
+                    Limpar
+                  </button>
                   <button
                     type="button"
                     className="mam-btn"

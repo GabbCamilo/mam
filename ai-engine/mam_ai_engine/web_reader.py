@@ -399,11 +399,14 @@ def _collect_paginated_chapters(
             const anchors = Array.from(document.querySelectorAll('a[href]')).map(a => {
               const row = a.closest('.title-detail__row, li, tr, .chapter-item');
               const flag = row ? row.querySelector('.title-detail__row-flag, [class*="flag"]') : null;
+              const container = a.parentElement ? a.parentElement.parentElement || a.parentElement : null;
+              const parentKey = container ? `${container.tagName}.${(container.className || '').toString().trim().split(/\\s+/).slice(0,2).join('.')}` : '';
               return {
                 href: a.href,
                 text: (a.textContent || '').replace(/\\s+/g, ' ').trim(),
                 dataNumber: a.getAttribute('data-number') || a.getAttribute('data-chapter') || '',
-                rowLang: flag ? (flag.getAttribute('title') || flag.textContent || '') : ''
+                rowLang: flag ? (flag.getAttribute('title') || flag.textContent || '') : '',
+                parentKey
               };
             });
             return {
@@ -510,6 +513,65 @@ def _collect_paginated_chapters(
         time.sleep(0.9)
 
     return titulo_obra, capa_url, page_idx, capitulos
+
+
+def classify_structural_chapter_group(
+    anchors: list[dict[str, Any]],
+    base_url: str,
+) -> list[dict[str, Any]]:
+    """Classificador estrutural de grupos repetidos no DOM (resolve URLs sem a palavra 'chapter')."""
+    parsed_base = urllib.parse.urlparse(base_url)
+    base_host = (parsed_base.netloc or "").lower()
+    noise_paths = ("/tag/", "/genre/", "/author/", "/login", "/register", "/contact", "/about", "/privacy", "/terms", "/search", "/user/")
+
+    grupos: dict[str, list[dict[str, Any]]] = {}
+    for item in anchors:
+        href = str(item.get("href") or "").strip()
+        if not href or href.startswith(("#", "javascript:")):
+            continue
+        parsed = urllib.parse.urlparse(href)
+        if base_host and parsed.netloc and parsed.netloc.lower() != base_host:
+            continue
+        lower_path = parsed.path.lower()
+        if not lower_path or lower_path == "/" or any(n in lower_path for n in noise_paths):
+            continue
+        if lower_path.rstrip("/") == parsed_base.path.lower().rstrip("/"):
+            continue
+
+        segs = [s for s in lower_path.split("/") if s]
+        prefix = "/".join(segs[:-1]) if len(segs) > 1 else ""
+        pkey = str(item.get("parentKey") or "")
+        key = f"{pkey}|{prefix}"
+        grupos.setdefault(key, []).append(item)
+
+    melhor_grupo: list[dict[str, Any]] = []
+    melhor_score = 0.0
+    for itens in grupos.values():
+        if len(itens) < 3:
+            continue
+        nums: list[int] = []
+        for it in itens:
+            txt = f"{it.get('text', '')} {it.get('href', '')}"
+            m = re.search(r"(\d+)(?!.*\d)", txt)
+            if m:
+                nums.append(int(m.group(1)))
+        ratio_num = len(nums) / float(len(itens))
+        if ratio_num < 0.6:
+            continue
+        unicidade = len(set(nums)) / float(max(1, len(nums)))
+        score = len(itens) * ratio_num * (0.5 + 0.5 * unicidade)
+        if score > melhor_score:
+            melhor_score = score
+            melhor_grupo = itens
+
+    vistos: set[str] = set()
+    saida: list[dict[str, Any]] = []
+    for it in melhor_grupo:
+        href = str(it.get("href") or "").strip().rstrip("/")
+        if href and href not in vistos:
+            vistos.add(href)
+            saida.append(it)
+    return saida
 
 
 def _collect_json_network_bodies(cdp: _CdpClient) -> list[tuple[str, Any]]:
@@ -687,6 +749,24 @@ def discover_work_chapters(
                         capitulos.append(ex)
 
         if not capitulos:
+            snap_fallback = cdp.eval_js(
+                """
+                return Array.from(document.querySelectorAll('a[href]')).map(a => {
+                  const container = a.parentElement ? a.parentElement.parentElement || a.parentElement : null;
+                  const parentKey = container ? `${container.tagName}.${(container.className || '').toString().trim().split(/\\s+/).slice(0,2).join('.')}` : '';
+                  return {
+                    href: a.href,
+                    text: (a.textContent || '').replace(/\\s+/g, ' ').trim(),
+                    dataNumber: a.getAttribute('data-number') || a.getAttribute('data-chapter') || '',
+                    rowLang: '',
+                    parentKey
+                  };
+                });
+                """
+            ) or []
+            capitulos = classify_structural_chapter_group(snap_fallback, url)
+
+        if not capitulos:
             json_bodies = _collect_json_network_bodies(cdp)
             if json_bodies:
                 capitulos = _extract_chapters_from_json_bodies(json_bodies, url)
@@ -731,6 +811,7 @@ def extract_chapter_pages(url: str) -> dict[str, Any]:
                 const imgs = Array.from(document.querySelectorAll('img')).map(img => ({
                   src: img.getAttribute('data-src') || img.currentSrc || img.src || '',
                   w: img.naturalWidth || 0,
+                  h: img.naturalHeight || 0,
                   inReader: Boolean(img.closest('[class*="reader"], [class*="chapter"], [class*="page"], main'))
                 }));
                 const text = document.body ? document.body.innerText : '';
@@ -746,9 +827,14 @@ def extract_chapter_pages(url: str) -> dict[str, Any]:
             novas = 0
             for im in snap.get("imgs") or []:
                 src = str(im.get("src") or "").strip()
-                if not is_valid_reader_image_url(src):
+                w = int(im.get("w") or 0)
+                h = int(im.get("h") or 0)
+                grande_no_leitor = w >= 400 and h >= 500 and not any(
+                    tok in src.lower() for tok in _UI_NOISE_TOKENS
+                )
+                if not is_valid_reader_image_url(src) and not grande_no_leitor:
                     continue
-                if im.get("w", 0) and int(im["w"]) < 200 and not im.get("inReader"):
+                if w and w < 200 and not im.get("inReader"):
                     continue
                 if src not in vistos:
                     vistos.add(src)
@@ -784,6 +870,17 @@ def extract_chapter_pages(url: str) -> dict[str, Any]:
             json_bodies = _collect_json_network_bodies(cdp)
             if json_bodies:
                 urls_ordenadas = _extract_images_from_json_bodies(json_bodies)
+
+        if not urls_ordenadas:
+            canvas_urls = cdp.eval_js(
+                """
+                return Array.from(document.querySelectorAll('canvas'))
+                  .filter(c => c.width >= 400 && c.height >= 500)
+                  .map(c => { try { return c.toDataURL('image/png'); } catch { return ''; } })
+                  .filter(Boolean);
+                """
+            ) or []
+            urls_ordenadas = [str(u) for u in canvas_urls if u]
 
         return {"url": url, "paginas": urls_ordenadas}
 

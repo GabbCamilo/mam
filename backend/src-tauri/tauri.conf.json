@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Tauri App",
+  "productName": "Manga Archive Manager",
   "version": "0.1.0",
-  "identifier": "com.tauri.dev",
+  "identifier": "com.mam.archive",
   "build": {
     "frontendDist": "../dist",
     "beforeDevCommand": "npm run dev",
@@ -11,9 +11,9 @@
   "app": {
     "windows": [
       {
-        "title": "Tauri",
-        "width": 800,
-        "height": 600,
+        "title": "Manga Archive Manager",
+        "width": 1200,
+        "height": 800,
         "resizable": true,
         "fullscreen": false
       }

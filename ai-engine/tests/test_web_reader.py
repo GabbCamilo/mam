@@ -11,7 +11,7 @@ from mam_ai_engine.pipeline import (
     smart_extract_chapter_pages,
     smart_search_works,
 )
-from mam_ai_engine.web_reader import is_valid_reader_image_url
+from mam_ai_engine.web_reader import classify_structural_chapter_group, is_valid_reader_image_url
 
 
 class TestWebReader(unittest.TestCase):
@@ -94,6 +94,17 @@ class TestWebReader(unittest.TestCase):
             res = smart_search_works({"url_busca": "https://mangafire.to/filter?keyword=medaka", "conector_id": "mangafire"})
         self.assertEqual(len(res["obras"]), 1)
         self.assertEqual(res["obras"][0]["fonte_id"], "mangafire")
+
+    def test_classify_structural_chapter_group_sem_palavra_chapter(self) -> None:
+        anchors = [
+            {"href": "https://site.exemplo/tag/action", "text": "Action", "parentKey": "DIV.tags"},
+            {"href": "https://site.exemplo/v1/101", "text": "Ep 101", "parentKey": "UL.list-eps"},
+            {"href": "https://site.exemplo/v1/102", "text": "Ep 102", "parentKey": "UL.list-eps"},
+            {"href": "https://site.exemplo/v1/103", "text": "Ep 103", "parentKey": "UL.list-eps"},
+        ]
+        res = classify_structural_chapter_group(anchors, "https://site.exemplo/serie/obra")
+        self.assertEqual(len(res), 3)
+        self.assertEqual([r["text"] for r in res], ["Ep 101", "Ep 102", "Ep 103"])
 
 
 if __name__ == "__main__":

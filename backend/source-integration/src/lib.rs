@@ -552,7 +552,25 @@ impl SourceIntegrationManager {
                     .await
                 {
                     Ok(b) => b,
-                    Err(_) => {
+                    Err(err) => {
+                        let detalhes_erro = serde_json::json!({
+                            "nome": format!("❌ Falha: {} — Cap. {} ({})", obra_titulo, numero, err),
+                            "pasta": pasta_destino_rel,
+                            "operacao_id": id_operacao,
+                            "obra_id": obra.id.to_string(),
+                            "obra_titulo": obra_titulo,
+                            "erro": true,
+                        })
+                        .to_string();
+                        let _ = self
+                            .db
+                            .registrar_operacao(
+                                "download".to_string(),
+                                Some(cap.capitulo_id_fonte.clone()),
+                                Some(detalhes_erro),
+                                None,
+                            )
+                            .await;
                         self.arquivar_capitulo(id_operacao, &cap.fonte_id, &cap)
                             .await?;
                         continue;
@@ -762,25 +780,38 @@ pub async fn baixar_imagem_data_url(url: &str) -> Result<String, SourceError> {
 }
 
 /// Baixa e salva `cover.jpg` na pasta da obra para exibição offline na Biblioteca.
+/// Também aceita Data URLs (`data:image/...;base64,...`) já capturadas no frontend.
 pub async fn salvar_capa_local(url: &str, pasta_obra: &std::path::Path) -> Result<(), SourceError> {
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+    let bytes: Vec<u8> = if let Some(b64_pos) = url.find("base64,") {
+        if url.starts_with("data:image/") {
+            decodificar_base64_simples(&url[b64_pos + 7..])
+        } else {
+            return Err(SourceError::Operacao("Data URL de capa inválida".to_string()));
+        }
+    } else {
+        let client = reqwest::Client::builder()
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
 
-    let mut req = client.get(url);
-    for (k, v) in crate::connectors::GerenciadorConectores::headers_para_url(url, None) {
-        req = req.header(&k, &v);
-    }
+        let mut req = client.get(url);
+        for (k, v) in crate::connectors::GerenciadorConectores::headers_para_url(url, None) {
+            req = req.header(&k, &v);
+        }
 
-    let resp = req.send().await?;
-    if !resp.status().is_success() {
-        return Err(SourceError::Operacao(format!(
-            "Falha ao baixar capa: HTTP {}",
-            resp.status()
-        )));
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            return Err(SourceError::Operacao(format!(
+                "Falha ao baixar capa: HTTP {}",
+                resp.status()
+            )));
+        }
+        resp.bytes().await?.to_vec()
+    };
+
+    if bytes.is_empty() {
+        return Err(SourceError::Operacao("Imagem de capa vazia".to_string()));
     }
-    let bytes = resp.bytes().await?;
     std::fs::create_dir_all(pasta_obra).map_err(|e| SourceError::Operacao(e.to_string()))?;
     let destino = pasta_obra.join("cover.jpg");
     let temp = pasta_obra.join(".cover.jpg.mam_tmp");
@@ -790,6 +821,29 @@ pub async fn salvar_capa_local(url: &str, pasta_obra: &std::path::Path) -> Resul
     }
     std::fs::rename(&temp, &destino).map_err(|e| SourceError::Operacao(e.to_string()))?;
     Ok(())
+}
+
+fn decodificar_base64_simples(input: &str) -> Vec<u8> {
+    let mut saida = Vec::with_capacity((input.len() * 3) / 4);
+    let mut buf: u32 = 0;
+    let mut bits: u8 = 0;
+    for b in input.bytes() {
+        let val = match b {
+            b'A'..=b'Z' => b - b'A',
+            b'a'..=b'z' => b - b'a' + 26,
+            b'0'..=b'9' => b - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => continue,
+        };
+        buf = (buf << 6) | (val as u32);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            saida.push(((buf >> bits) & 0xFF) as u8);
+        }
+    }
+    saida
 }
 
 pub fn codificar_base64(bytes: &[u8]) -> String {

@@ -190,6 +190,12 @@ export interface ObraExtraidaPorLink {
   capitulos: CapituloBuscaResultado[]
 }
 
+export interface CapturaJanelaAssistida {
+  url: string
+  html: string
+  urls_imagens: string[]
+}
+
 export interface ObraResumo {
   obra: Obra
   total_capitulos: number
@@ -349,6 +355,12 @@ export const mamApi = {
       html: html ?? null,
       idiomaPreferido: idiomaPreferido ?? null,
     }),
+  browserAbrirJanelaAssistida: (url: string) =>
+    invoke<void>('browser_abrir_janela_assistida', { url }),
+  browserCapturarJanelaAssistida: () =>
+    invoke<CapturaJanelaAssistida>('browser_capturar_janela_assistida'),
+  browserEnsinarPadraoCapitulo: (urlObra: string) =>
+    invoke<ConectorSiteConfig>('browser_ensinar_padrao_capitulo', { urlObra }),
   sourceBuscarObrasPorConector: (conectorId: string, consulta: string) =>
     invoke<ObraBuscaResultado[]>('source_buscar_obras_por_conector', {
       conectorId,

@@ -325,6 +325,123 @@ impl GerenciadorConectores {
         }
         HashMap::new()
     }
+
+    /// Aprende o padrão de URL de capítulo comparando a página da obra com a página de um capítulo
+    /// navegada pelo usuário na Janela Assistida, persistindo em `System/connectors/sites.json`.
+    pub fn aprender_padrao_url(
+        raiz_biblioteca: &Path,
+        url_obra: &str,
+        url_capitulo: &str,
+    ) -> Result<ConectorSiteConfig, SourceError> {
+        let extrair_host = |u: &str| -> String {
+            u.split("://")
+                .nth(1)
+                .unwrap_or(u)
+                .split('/')
+                .next()
+                .unwrap_or("")
+                .trim_start_matches("www.")
+                .to_lowercase()
+        };
+        let extrair_path = |u: &str| -> String {
+            let sem_q = u.split('?').next().unwrap_or(u).split('#').next().unwrap_or(u);
+            if let Some(after) = sem_q.split("://").nth(1) {
+                if let Some(idx) = after.find('/') {
+                    return after[idx..].to_string();
+                }
+            }
+            String::new()
+        };
+
+        let host = extrair_host(url_capitulo);
+        let host = if host.is_empty() { extrair_host(url_obra) } else { host };
+        if host.is_empty() {
+            return Err(SourceError::Operacao("Domínio inválido para aprendizado".to_string()));
+        }
+
+        let path_obra = extrair_path(url_obra);
+        let path_cap = extrair_path(url_capitulo);
+        let query_cap = url_capitulo.split('?').nth(1).unwrap_or("");
+        let padrao_query = ["episode_no=", "chapter_no=", "chapter_id=", "chapter=", "chap=", "ep="]
+            .iter()
+            .find(|k| query_cap.to_lowercase().contains(*k))
+            .map(|k| (*k).to_string());
+
+        let padrao = if path_cap.trim_end_matches('/') != path_obra.trim_end_matches('/') && !path_cap.is_empty() {
+            let segs_obra: Vec<&str> = path_obra.split('/').filter(|s| !s.is_empty()).collect();
+            let segs_cap: Vec<&str> = path_cap.split('/').filter(|s| !s.is_empty()).collect();
+            let mut comum = 0usize;
+            while comum < segs_obra.len() && comum < segs_cap.len() && segs_obra[comum] == segs_cap[comum] {
+                comum += 1;
+            }
+            if comum < segs_cap.len() && segs_cap.len() >= 2 {
+                format!("/{}/", segs_cap[comum])
+            } else if let Some(q) = padrao_query.clone() {
+                q
+            } else if let Some(primeiro) = segs_cap.first() {
+                format!("/{}/", primeiro)
+            } else {
+                return Err(SourceError::Operacao("Não foi possível inferir padrão da URL do capítulo".to_string()));
+            }
+        } else if let Some(q) = padrao_query {
+            q
+        } else {
+            return Err(SourceError::Operacao(
+                "Navegue até um capítulo dentro da Janela Assistida antes de ensinar o padrão.".to_string(),
+            ));
+        };
+
+        let mut catalogo = Self::carregar(Some(raiz_biblioteca));
+        let mut atualizado: Option<ConectorSiteConfig> = None;
+        for site in &mut catalogo.sites {
+            if site.dominios.iter().any(|d| d.trim_start_matches("www.").eq_ignore_ascii_case(&host)) {
+                if !site.padroes_url_capitulo.contains(&padrao) {
+                    site.padroes_url_capitulo.insert(0, padrao.clone());
+                }
+                atualizado = Some(site.clone());
+                break;
+            }
+        }
+
+        let conector_final = match atualizado {
+            Some(c) => c,
+            None => {
+                let id_limpo: String = host
+                    .chars()
+                    .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                    .collect();
+                let novo = ConectorSiteConfig {
+                    id: format!("learned-{}", id_limpo.trim_matches('-')),
+                    nome: format!("{} (Aprendido)", host),
+                    versao: "1.0.0".to_string(),
+                    tipo: "web-cdp".to_string(),
+                    dominios: vec![host.clone()],
+                    url_busca: None,
+                    padroes_url_capitulo: vec![padrao],
+                    seletor_link: None,
+                    seletor_idioma_linha: None,
+                    seletor_paginacao: None,
+                    requer_cdp: "auto".to_string(),
+                    seletores_imagem: vec![
+                        "img[data-url]".to_string(),
+                        "img[data-original]".to_string(),
+                        "img[data-src]".to_string(),
+                        "img[src]".to_string(),
+                    ],
+                    rejeitar_tokens_imagem: vec!["logo".to_string(), "avatar".to_string(), "favicon".to_string()],
+                    headers_imagem: Some(HashMap::from([("Referer".to_string(), format!("https://{}/", host))])),
+                    estrategia_descoberta: Some("auto".to_string()),
+                };
+                catalogo.sites.push(novo.clone());
+                novo
+            }
+        };
+
+        let json = serde_json::to_string_pretty(&catalogo)
+            .map_err(|e| SourceError::Operacao(e.to_string()))?;
+        Self::salvar_catalogo_atomico(raiz_biblioteca, &json, None)?;
+        Ok(conector_final)
+    }
 }
 
 #[cfg(test)]
@@ -426,6 +543,30 @@ mod tests {
         let atual = GerenciadorConectores::carregar(Some(&base));
         assert_eq!(atual.sites[0].id, "site-v1");
         assert_eq!(std::fs::read(&cbz).unwrap(), b"CBZ-ORIGINAL");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn aprender_padrao_url_suporta_path_e_query() {
+        let base = std::env::temp_dir().join(format!("mam_conn_learn_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&base).unwrap();
+
+        let cfg_path = GerenciadorConectores::aprender_padrao_url(
+            &base,
+            "https://exemplo.com/manga/minha-obra",
+            "https://exemplo.com/manga/minha-obra/leitura/12",
+        )
+        .unwrap();
+        assert_eq!(cfg_path.padroes_url_capitulo[0], "/leitura/");
+
+        let cfg_query = GerenciadorConectores::aprender_padrao_url(
+            &base,
+            "https://webtoons.example/series/viewer?title_no=10",
+            "https://webtoons.example/series/viewer?title_no=10&episode_no=5",
+        )
+        .unwrap();
+        assert_eq!(cfg_query.padroes_url_capitulo[0], "episode_no=");
 
         let _ = std::fs::remove_dir_all(&base);
     }

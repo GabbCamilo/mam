@@ -204,6 +204,25 @@ impl AiEngineManager {
         self.chamar("ping", json!({})).await
     }
 
+    /// Encerra o processo Python apenas se ele já estiver em execução (evita spawn ao fechar o app).
+    pub async fn encerrar_se_ativo(&self) {
+        let ativo = {
+            let guard = self.processo.lock().await;
+            guard.is_some()
+        };
+        if ativo {
+            let _ = tokio::time::timeout(
+                Duration::from_millis(1500),
+                self.chamar("shutdown", json!({})),
+            )
+            .await;
+            let mut guard = self.processo.lock().await;
+            if let Some(mut proc) = guard.take() {
+                let _ = proc.child.kill().await;
+            }
+        }
+    }
+
     /// Executa pipeline de OCR local em uma página sem alterar o CBZ original.
     pub async fn processar_ocr(
         &self,

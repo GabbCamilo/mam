@@ -427,14 +427,16 @@ pub async fn source_obter_capa(url: String) -> Result<String, String> {
 
 /// Descobre a obra e seus capítulos a partir do link principal da obra (ex.: MangaFire / MangaLivre).
 pub async fn source_descobrir_por_link(
+    library_manager: Arc<LibraryManager>,
     url_obra: String,
     html: Option<String>,
     idioma_preferido: Option<String>,
 ) -> Result<mam_source_integration::extractors::ObraExtraidaPorLink, String> {
-    mam_source_integration::extractors::descobrir_capitulos_por_link_com_opcoes(
+    mam_source_integration::extractors::descobrir_capitulos_por_link_com_biblioteca(
         &url_obra,
         html.as_deref(),
         idioma_preferido.as_deref(),
+        Some(library_manager.raiz()),
     )
     .await
     .map_err(|e| e.to_string())

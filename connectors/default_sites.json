@@ -83,7 +83,7 @@
       "nome": "MangaBall",
       "versao": "1.0.0",
       "tipo": "web-cdp",
-      "dominios": ["mangaball.com"],
+      "dominios": ["mangaball.com", "bulbasaur.poke-black-and-white.net"],
       "url_busca": "https://mangaball.com/?s={query}",
       "padroes_url_capitulo": ["/chapter-detail/", "/chapter/", "/chapter-", "/read/"],
       "seletor_link": null,
@@ -91,7 +91,8 @@
       "seletor_paginacao": null,
       "requer_cdp": "auto",
       "seletores_imagem": ["img[src]", "img[data-src]"],
-      "rejeitar_tokens_imagem": ["logo", "avatar", "favicon", "banner"]
+      "rejeitar_tokens_imagem": ["logo", "avatar", "favicon", "banner"],
+      "headers_imagem": { "Referer": "https://mangaball.com/" }
     },
     {
       "id": "atsumaru",
@@ -281,7 +282,7 @@
       "nome": "MangaGoku",
       "versao": "1.0.0",
       "tipo": "web-cdp",
-      "dominios": ["mangagoku.com", "www.mangagoku.com"],
+      "dominios": ["mangagoku.com", "www.mangagoku.com", "2xstorage.com"],
       "url_busca": "https://www.mangagoku.com/?s={query}",
       "padroes_url_capitulo": ["/chapter-", "/chapter/", "/read/"],
       "seletor_link": null,
@@ -289,7 +290,8 @@
       "seletor_paginacao": null,
       "requer_cdp": "auto",
       "seletores_imagem": ["img[src]", "img[data-src]"],
-      "rejeitar_tokens_imagem": ["logo", "avatar", "favicon"]
+      "rejeitar_tokens_imagem": ["logo", "avatar", "favicon"],
+      "headers_imagem": { "Referer": "https://www.mangagoku.com/" }
     },
     {
       "id": "asurascans",
