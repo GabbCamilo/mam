@@ -394,24 +394,45 @@ pub async fn descobrir_capitulos_por_link_com_biblioteca(
 
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-        .http1_only()
         .pool_max_idle_per_host(0)
         .timeout(std::time::Duration::from_secs(20))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    let mut melhor_resultado: Option<ObraExtraidaPorLink> = None;
-    if let Ok(resp) = client.get(url_limpa).send().await {
+    let mut html_obtido: Option<String> = None;
+    if let Ok(resp) = client
+        .get(url_limpa)
+        .header(
+            reqwest::header::ACCEPT,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        )
+        .header(reqwest::header::ACCEPT_LANGUAGE, "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
+        .send()
+        .await
+    {
         if resp.status().is_success() {
             if let Ok(html) = resp.text().await {
-                if url_limpa.to_lowercase().contains("nhentai.net/") {
-                    let colecao = nhentai::extrair_colecao_html(url_limpa, &html);
-                    if !colecao.capitulos.is_empty() {
-                        return Ok(colecao);
-                    }
+                if !html.trim().is_empty() {
+                    html_obtido = Some(html);
                 }
-                let mut extraida =
-                    extrair_capitulos_de_html_com_biblioteca(url_limpa, &html, raiz_biblioteca);
+            }
+        }
+    }
+
+    if html_obtido.is_none() {
+        html_obtido = buscar_html_via_curl(url_limpa).await;
+    }
+
+    let mut melhor_resultado: Option<ObraExtraidaPorLink> = None;
+    if let Some(html) = html_obtido {
+        if url_limpa.to_lowercase().contains("nhentai.net/") {
+            let colecao = nhentai::extrair_colecao_html(url_limpa, &html);
+            if !colecao.capitulos.is_empty() {
+                return Ok(colecao);
+            }
+        }
+        let mut extraida =
+            extrair_capitulos_de_html_com_biblioteca(url_limpa, &html, raiz_biblioteca);
 
                 // Suporte nativo ao WeebCentral (HTMX /series/<id>/full-chapter-list)
                 if let Some(wc_list_url) = weebcentral_full_chapter_list_url(url_limpa) {
@@ -461,8 +482,6 @@ pub async fn descobrir_capitulos_por_link_com_biblioteca(
                 if !extraida.capitulos.is_empty() {
                     melhor_resultado = Some(extraida);
                 }
-            }
-        }
     }
 
     // Fallback 1: Leitor Web Inteligente (CDP multi-página + seletor de idioma) via ai-engine
@@ -493,6 +512,41 @@ pub async fn descobrir_capitulos_por_link_com_biblioteca(
     Err(SourceError::Operacao(
         "Nenhum link de capítulo reconhecido na página da obra (nem após Leitor Web CDP). Se necessário, cole o HTML da página.".to_string(),
     ))
+}
+
+async fn buscar_html_via_curl(url: &str) -> Option<String> {
+    let url_owned = url.to_string();
+    tokio::task::spawn_blocking(move || {
+        for bin in ["curl.exe", "curl"] {
+            let mut cmd = std::process::Command::new(bin);
+            cmd.args([
+                "-sL",
+                "--max-time",
+                "15",
+                "-A",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                "-H",
+                "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "-H",
+                "Accept-Language: pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+                &url_owned,
+            ]);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x08000000);
+            }
+            if let Ok(out) = cmd.output() {
+                if out.status.success() && !out.stdout.is_empty() {
+                    return Some(String::from_utf8_lossy(&out.stdout).to_string());
+                }
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 async fn smart_discover_via_ai_engine(
