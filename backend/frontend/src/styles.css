@@ -145,7 +145,7 @@ button {
   transition: background 0.15s, border-color 0.15s, transform 0.08s;
 }
 
-.mam-btn:hover:not(:disabled) {
+.mam-btn:not(.mam-btn-primary):hover:not(:disabled) {
   background: var(--bg-card-hover);
   border-color: var(--accent);
 }
@@ -163,6 +163,8 @@ button {
 }
 
 .mam-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: #ffffff;
   filter: brightness(1.08);
   border-color: transparent;
 }

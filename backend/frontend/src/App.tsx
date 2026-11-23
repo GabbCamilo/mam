@@ -2273,7 +2273,7 @@ function App() {
                             padding: '0.4rem 0.65rem',
                             borderRadius: 6,
                             background: 'rgba(34, 197, 94, 0.14)',
-                            color: '#bbf7d0',
+                            color: 'var(--text-primary)',
                             fontFamily: 'monospace',
                             fontSize: '0.85rem',
                           }}
@@ -2294,14 +2294,14 @@ function App() {
                       background: 'rgba(234, 179, 8, 0.08)',
                     }}
                   >
-                    <strong style={{ color: '#facc15' }}>
+                    <strong style={{ color: 'var(--warning)' }}>
                       🟡 Diferentes ({diferenca.diferentes.length})
                     </strong>
                     <div style={{ display: 'grid', gap: '0.3rem', marginTop: '0.5rem' }}>
                       {diferenca.diferentes.map((caminho) => (
                         <div
                           key={caminho}
-                          style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: '#fef08a' }}
+                          style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--text-primary)' }}
                         >
                           ≠ {caminho}
                         </div>
@@ -2873,9 +2873,11 @@ function App() {
               style={{
                 padding: '0.75rem 0.95rem',
                 borderRadius: 12,
-                background: 'var(--bg-elevated, #111827)',
-                border: '1px solid var(--border-subtle, rgba(148,163,184,0.3))',
-                boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
+                background: 'var(--bg-surface)',
+                backdropFilter: 'blur(14px)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-subtle)',
+                boxShadow: 'var(--shadow-modal)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
@@ -2912,9 +2914,11 @@ function App() {
               style={{
                 padding: '0.85rem 1.05rem',
                 borderRadius: 12,
-                background: 'var(--bg-elevated, #111827)',
-                border: '1px solid var(--accent, #38bdf8)',
-                boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
+                background: 'var(--bg-surface)',
+                backdropFilter: 'blur(14px)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--accent)',
+                boxShadow: 'var(--shadow-modal)',
                 cursor: 'pointer',
               }}
             >
