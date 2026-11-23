@@ -111,6 +111,11 @@ function App() {
   const [volCapitulosIds, setVolCapitulosIds] = useState<string[]>([])
 
   const [modalImportarUrlAberto, setModalImportarUrlAberto] = useState(false)
+  const [modalImportarLocalAberto, setModalImportarLocalAberto] = useState(false)
+  const [localArquivoPath, setLocalArquivoPath] = useState('')
+  const [localObraTitulo, setLocalObraTitulo] = useState('')
+  const [localNumeroCap, setLocalNumeroCap] = useState('')
+  const [importandoLocal, setImportandoLocal] = useState(false)
   const [opcoesAvancadasImportacao, setOpcoesAvancadasImportacao] = useState(false)
   const [importandoLink, setImportandoLink] = useState(false)
   const [modalInfoImportacaoAberto, setModalInfoImportacaoAberto] = useState(false)
@@ -981,6 +986,12 @@ function App() {
                 </p>
               </div>
               <div className="mam-toolbar-row">
+                <button
+                  className="mam-btn"
+                  onClick={() => setModalImportarLocalAberto(true)}
+                >
+                  📂 Importar .CBZ / .CBR
+                </button>
                 <button className="mam-btn" onClick={handleDetectarCapitulos}>
                   Detectar Capítulos CBZ
                 </button>
@@ -2924,6 +2935,88 @@ function App() {
         onChange={setAparencia}
         onFechar={() => setModalTemaAberto(false)}
       />
+
+      {modalImportarLocalAberto && (
+        <div className="mam-modal-backdrop" onClick={() => setModalImportarLocalAberto(false)}>
+          <div className="mam-modal" style={{ maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
+            <div className="mam-section-header">
+              <h3 className="mam-modal-title">📂 Importar Arquivo do PC (.CBZ / .CBR)</h3>
+              <button
+                className="mam-btn"
+                type="button"
+                onClick={() => setModalImportarLocalAberto(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <p className="mam-section-desc">
+              Informe o caminho completo do arquivo <code>.cbz</code> ou <code>.cbr</code> no seu computador. Arquivos <code>.cbr</code> são convertidos automaticamente para <code>.cbz</code> dentro da biblioteca.
+            </p>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                if (!localArquivoPath.trim()) return
+                setImportandoLocal(true)
+                try {
+                  const num = Number.parseInt(localNumeroCap, 10)
+                  const msg = await mamApi.importarArquivoLocal(
+                    localArquivoPath.trim(),
+                    localObraTitulo.trim() || null,
+                    Number.isFinite(num) && num > 0 ? num : null,
+                  )
+                  setMensagem(msg)
+                  setModalImportarLocalAberto(false)
+                  setLocalArquivoPath('')
+                  setLocalObraTitulo('')
+                  setLocalNumeroCap('')
+                  await carregarObras()
+                } catch (err) {
+                  setMensagem(`Erro ao importar arquivo local: ${String(err)}`)
+                } finally {
+                  setImportandoLocal(false)
+                }
+              }}
+              style={{ display: 'grid', gap: '0.7rem' }}
+            >
+              <input
+                className="mam-input"
+                placeholder="Caminho do arquivo (ex: C:\Users\Gabriel\Downloads\Red Sonja.cbr)"
+                value={localArquivoPath}
+                onChange={(e) => setLocalArquivoPath(e.target.value)}
+                required
+              />
+              <div className="mam-toolbar-row">
+                <input
+                  className="mam-input mam-search-input"
+                  placeholder="Título da obra (opcional — detectado pelo nome do arquivo)"
+                  value={localObraTitulo}
+                  onChange={(e) => setLocalObraTitulo(e.target.value)}
+                />
+                <input
+                  className="mam-input"
+                  type="number"
+                  placeholder="Cap. (opcional)"
+                  value={localNumeroCap}
+                  onChange={(e) => setLocalNumeroCap(e.target.value)}
+                  style={{ width: 120 }}
+                />
+              </div>
+              <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="mam-btn"
+                  onClick={() => setModalImportarLocalAberto(false)}
+                >
+                  Cancelar
+                </button>
+                <button className="mam-btn mam-btn-primary" type="submit" disabled={importandoLocal}>
+                  {importandoLocal ? '⏳ Convertendo e importando...' : 'Importar para Biblioteca'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <footer className="mam-statusbar">
         <span>MAM v0.1.0 • Portátil</span>

@@ -8,7 +8,7 @@ use mam_chapter::ChapterManager;
 use mam_archive::{ArchiveManager, PaginaExtraida};
 use mam_interface::{db_health as if_db_health, db_list_obras as if_db_list_obras};
 use mam_interface::{chapter_detectar as if_chapter_detectar, chapter_listar_por_obra as if_chapter_listar_por_obra};
-use mam_interface::{library_raiz as if_library_raiz, library_criar_obra as if_library_criar_obra, library_listar_obras as if_library_listar_obras, library_obter_detalhes_obra as if_library_obter_detalhes_obra, library_criar_volume as if_library_criar_volume, library_atualizar_metadados as if_library_atualizar_metadados};
+use mam_interface::{library_raiz as if_library_raiz, library_criar_obra as if_library_criar_obra, library_listar_obras as if_library_listar_obras, library_obter_detalhes_obra as if_library_obter_detalhes_obra, library_criar_volume as if_library_criar_volume, library_atualizar_metadados as if_library_atualizar_metadados, library_importar_arquivo_local as if_library_importar_arquivo_local};
 use mam_database::models::{Obra, ResultadoIA, Volume};
 use mam_library::{DetalhesObra, LibraryManager};
 use mam_interface::{archive_criar_cbz as if_archive_criar_cbz, archive_ler_cbz as if_archive_ler_cbz, archive_validar_cbz as if_archive_validar_cbz};
@@ -167,6 +167,26 @@ async fn archive_validar_cbz(
     caminho_cbz: String,
 ) -> Result<bool, String> {
     if_archive_validar_cbz(archive_manager.inner().clone(), caminho_cbz).await
+}
+
+#[tauri::command]
+async fn library_importar_arquivo_local(
+    library_manager: tauri::State<'_, Arc<LibraryManager>>,
+    chapter_manager: tauri::State<'_, Arc<ChapterManager>>,
+    archive_manager: tauri::State<'_, Arc<ArchiveManager>>,
+    caminho_arquivo: String,
+    obra_titulo: Option<String>,
+    numero_capitulo: Option<i32>,
+) -> Result<String, String> {
+    if_library_importar_arquivo_local(
+        library_manager.inner().clone(),
+        chapter_manager.inner().clone(),
+        archive_manager.inner().clone(),
+        caminho_arquivo,
+        obra_titulo,
+        numero_capitulo,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -922,6 +942,7 @@ pub fn run() {
       archive_criar_cbz,
       archive_ler_cbz,
       archive_validar_cbz,
+      library_importar_arquivo_local,
       source_listar_fontes,
       source_buscar_obras,
       source_listar_capitulos,

@@ -425,6 +425,227 @@ pub async fn source_obter_capa(url: String) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+fn extrair_titulo_e_capitulo_arquivo(nome_arquivo: &str) -> (String, i32) {
+    let sem_ext = Path::new(nome_arquivo)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Obra Importada");
+
+    // Extrair número após #, Cap, Ch ou último bloco numérico antes de parênteses
+    let mut numero: Option<i32> = None;
+    let mut limpo = String::new();
+    let mut dentro_par = 0i32;
+    let mut dentro_col = 0i32;
+    for ch in sem_ext.chars() {
+        match ch {
+            '(' => dentro_par += 1,
+            ')' => dentro_par = (dentro_par - 1).max(0),
+            '[' => dentro_col += 1,
+            ']' => dentro_col = (dentro_col - 1).max(0),
+            _ if dentro_par == 0 && dentro_col == 0 => limpo.push(ch),
+            _ => {}
+        }
+    }
+
+    if let Some(pos) = limpo.find('#') {
+        let digitos: String = limpo[pos + 1..]
+            .chars()
+            .skip_while(|c| !c.is_ascii_digit())
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        if let Ok(n) = digitos.parse::<i32>() {
+            numero = Some(n);
+        }
+        limpo = limpo[..pos].trim().to_string();
+    }
+
+    if numero.is_none() {
+        let tokens: Vec<&str> = limpo.split_whitespace().collect();
+        if let Some(ultimo) = tokens.last() {
+            let digitos: String = ultimo.chars().filter(|c| c.is_ascii_digit()).collect();
+            if !digitos.is_empty() && digitos.len() == ultimo.len() {
+                if let Ok(n) = digitos.parse::<i32>() {
+                    numero = Some(n);
+                    limpo = tokens[..tokens.len() - 1].join(" ");
+                }
+            }
+        }
+    }
+
+    let titulo = limpo
+        .trim_matches(|c: char| c == '-' || c == '_' || c.is_whitespace())
+        .to_string();
+    let titulo_final = if titulo.is_empty() {
+        "Obra Importada".to_string()
+    } else {
+        titulo
+    };
+    (titulo_final, numero.unwrap_or(1).max(1))
+}
+
+fn coletar_imagens_recursivo(dir: &Path, saida: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut paths: Vec<std::path::PathBuf> = entries.filter_map(|e| e.ok().map(|x| x.path())).collect();
+    paths.sort();
+    for p in paths {
+        if p.is_dir() {
+            coletar_imagens_recursivo(&p, saida);
+        } else if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+            if matches!(
+                ext.to_lowercase().as_str(),
+                "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "avif"
+            ) {
+                saida.push(p);
+            }
+        }
+    }
+}
+
+/// Importa um arquivo `.cbz` ou `.cbr` local do PC para a biblioteca MAM (convertendo `.cbr` para `.cbz`).
+pub async fn library_importar_arquivo_local(
+    library_manager: Arc<LibraryManager>,
+    chapter_manager: Arc<ChapterManager>,
+    archive_manager: Arc<ArchiveManager>,
+    caminho_arquivo: String,
+    obra_titulo: Option<String>,
+    numero_capitulo: Option<i32>,
+) -> Result<String, String> {
+    let origem = Path::new(caminho_arquivo.trim().trim_matches('"'));
+    if !origem.is_file() {
+        return Err(format!("Arquivo não encontrado: {}", origem.display()));
+    }
+
+    let nome_arq = origem
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("capitulo");
+    let (titulo_inferido, num_inferido) = extrair_titulo_e_capitulo_arquivo(nome_arq);
+    let titulo_final = obra_titulo
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(titulo_inferido);
+    let numero_final = numero_capitulo.filter(|&n| n > 0).unwrap_or(num_inferido);
+
+    let sanitizado = mam_source_integration::sanitizar_nome(&titulo_final);
+    let pasta_obra = library_manager.raiz().join("Manga").join(&sanitizado);
+    std::fs::create_dir_all(&pasta_obra).map_err(|e| format!("Erro ao criar pasta da obra: {}", e))?;
+    let destino_cbz = pasta_obra.join(format!("Capitulo_{:04}.cbz", numero_final));
+
+    // Verificar assinatura mágica (ZIP = PK\x03\x04)
+    let mut header = [0u8; 4];
+    {
+        use std::io::Read;
+        let mut f = std::fs::File::open(origem).map_err(|e| format!("Erro ao abrir arquivo: {}", e))?;
+        let _ = f.read(&mut header);
+    }
+    let eh_zip = header.starts_with(&[0x50, 0x4B, 0x03, 0x04]);
+
+    if eh_zip {
+        std::fs::copy(origem, &destino_cbz)
+            .map_err(|e| format!("Erro ao copiar CBZ: {}", e))?;
+        let lido = archive_manager
+            .ler_cbz(&destino_cbz)
+            .await
+            .map_err(|e| e.to_string())?;
+        let _ = chapter_manager.detectar_todos().await;
+        return Ok(format!(
+            "Importado '{}' Cap. {} ({} páginas) -> Manga/{}/Capitulo_{:04}.cbz",
+            titulo_final, numero_final, lido.quantidade_paginas, sanitizado, numero_final
+        ));
+    }
+
+    // Extrair .cbr (RAR) usando tar (bsdtar nativo do Windows 11/Linux), 7z ou unrar
+    let temp_base = std::env::temp_dir().join(format!("mam_cbr_{}", uuid::Uuid::new_v4()));
+    let temp_extract = temp_base.join("extract");
+    let temp_flat = temp_base.join("flat");
+    std::fs::create_dir_all(&temp_extract).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&temp_flat).map_err(|e| e.to_string())?;
+
+    let origem_owned = origem.to_path_buf();
+    let extract_owned = temp_extract.clone();
+    let extraido_ok = tokio::task::spawn_blocking(move || {
+        let tentativas: Vec<(&str, Vec<String>)> = vec![
+            (
+                "tar",
+                vec![
+                    "-xf".to_string(),
+                    origem_owned.to_string_lossy().to_string(),
+                    "-C".to_string(),
+                    extract_owned.to_string_lossy().to_string(),
+                ],
+            ),
+            (
+                "7z",
+                vec![
+                    "x".to_string(),
+                    "-y".to_string(),
+                    format!("-o{}", extract_owned.to_string_lossy()),
+                    origem_owned.to_string_lossy().to_string(),
+                ],
+            ),
+            (
+                "unrar",
+                vec![
+                    "x".to_string(),
+                    "-y".to_string(),
+                    origem_owned.to_string_lossy().to_string(),
+                    extract_owned.to_string_lossy().to_string(),
+                ],
+            ),
+        ];
+
+        for (bin, args) in tentativas {
+            let mut cmd = std::process::Command::new(bin);
+            cmd.args(&args);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x08000000);
+            }
+            if let Ok(status) = cmd.status() {
+                if status.success() {
+                    return Ok(());
+                }
+            }
+        }
+        Err("Não foi possível extrair o arquivo .cbr (verifique se tar/7z/unrar está disponível no sistema).".to_string())
+    })
+    .await
+    .map_err(|e| format!("Falha na tarefa de extração: {}", e))?;
+
+    if let Err(e) = extraido_ok {
+        let _ = std::fs::remove_dir_all(&temp_base);
+        return Err(e);
+    }
+
+    let mut imagens = Vec::new();
+    coletar_imagens_recursivo(&temp_extract, &mut imagens);
+    if imagens.is_empty() {
+        let _ = std::fs::remove_dir_all(&temp_base);
+        return Err("Nenhuma imagem encontrada dentro do arquivo .cbr.".to_string());
+    }
+
+    for (idx, img) in imagens.iter().enumerate() {
+        let ext = img.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
+        let dest_img = temp_flat.join(format!("{:04}.{}", idx + 1, ext));
+        std::fs::copy(img, &dest_img).map_err(|e| e.to_string())?;
+    }
+
+    let criado = archive_manager
+        .criar_cbz_de_imagens(&temp_flat, &destino_cbz)
+        .await
+        .map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_dir_all(&temp_base);
+    let _ = chapter_manager.detectar_todos().await;
+
+    Ok(format!(
+        "CBR convertido e importado: '{}' Cap. {} ({} páginas) -> Manga/{}/Capitulo_{:04}.cbz",
+        titulo_final, numero_final, criado.quantidade_paginas, sanitizado, numero_final
+    ))
+}
+
 /// Descobre a obra e seus capítulos a partir do link principal da obra (ex.: MangaFire / MangaLivre).
 pub async fn source_descobrir_por_link(
     library_manager: Arc<LibraryManager>,

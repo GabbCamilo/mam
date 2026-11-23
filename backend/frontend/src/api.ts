@@ -410,4 +410,14 @@ export const mamApi = {
   marcarLido: (capituloId: string, lido: boolean) =>
     invoke<void>('reader_marcar_lido', { capituloId, lido }),
   listarLidos: () => invoke<string[]>('reader_listar_lidos'),
+  importarArquivoLocal: (
+    caminhoArquivo: string,
+    obraTitulo?: string | null,
+    numeroCapitulo?: number | null,
+  ) =>
+    invoke<string>('library_importar_arquivo_local', {
+      caminhoArquivo,
+      obraTitulo: obraTitulo ?? null,
+      numeroCapitulo: numeroCapitulo ?? null,
+    }),
 }
