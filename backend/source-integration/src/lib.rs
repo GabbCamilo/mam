@@ -754,9 +754,19 @@ pub async fn baixar_imagem_data_url(url: &str) -> Result<String, SourceError> {
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    let mut req = client.get(url);
+    let mut req = client.get(url).header(
+        reqwest::header::ACCEPT,
+        "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    );
+    let mut tem_referer = false;
     for (k, v) in crate::connectors::GerenciadorConectores::headers_para_url(url, None) {
+        if k.eq_ignore_ascii_case("referer") {
+            tem_referer = true;
+        }
         req = req.header(&k, &v);
+    }
+    if !tem_referer && url.to_lowercase().contains("uploads.mangadex.org") {
+        req = req.header(reqwest::header::REFERER, "https://mangadex.org/");
     }
 
     let resp = req.send().await?;
@@ -774,7 +784,14 @@ pub async fn baixar_imagem_data_url(url: &str) -> Result<String, SourceError> {
         .split(';')
         .next()
         .unwrap_or("image/jpeg")
-        .to_string();
+        .trim()
+        .to_lowercase();
+    if !mime.starts_with("image/") {
+        return Err(SourceError::Operacao(format!(
+            "Resposta não é uma imagem válida ({})",
+            mime
+        )));
+    }
     let bytes = resp.bytes().await?;
     Ok(format!("data:{};base64,{}", mime, codificar_base64(&bytes)))
 }

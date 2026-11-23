@@ -1629,6 +1629,15 @@ function App() {
                           <img
                             src={capaSrc}
                             alt={o.titulo}
+                            onError={() => {
+                              if (o.capa_url) {
+                                setCapasCache((prev) => {
+                                  const next = { ...prev }
+                                  delete next[o.capa_url!]
+                                  return next
+                                })
+                              }
+                            }}
                             style={{ width: 40, height: 56, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }}
                           />
                         )}

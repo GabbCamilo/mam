@@ -400,6 +400,7 @@ pub async fn descobrir_capitulos_por_link_com_biblioteca(
         .unwrap_or_else(|_| reqwest::Client::new());
 
     let mut html_obtido: Option<String> = None;
+    let mut bloqueado_cloudflare = false;
     if let Ok(resp) = client
         .get(url_limpa)
         .header(
@@ -410,9 +411,22 @@ pub async fn descobrir_capitulos_por_link_com_biblioteca(
         .send()
         .await
     {
-        if resp.status().is_success() {
+        let status = resp.status();
+        let cf_mitigated = resp
+            .headers()
+            .get("cf-mitigated")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.eq_ignore_ascii_case("challenge"));
+        if status.as_u16() == 403 || cf_mitigated {
+            bloqueado_cloudflare = true;
+        }
+        if status.is_success() {
             if let Ok(html) = resp.text().await {
-                if !html.trim().is_empty() {
+                if html.contains("<title>Just a moment...</title>")
+                    || html.contains("/cdn-cgi/challenge-platform/")
+                {
+                    bloqueado_cloudflare = true;
+                } else if !html.trim().is_empty() {
                     html_obtido = Some(html);
                 }
             }
@@ -507,6 +521,12 @@ pub async fn descobrir_capitulos_por_link_com_biblioteca(
 
     if let Some(res) = melhor_resultado {
         return Ok(res);
+    }
+
+    if bloqueado_cloudflare {
+        return Err(SourceError::Operacao(
+            "Site protegido por verificação humana/Cloudflare (HTTP 403). Abra 'Opções Avançadas' -> 'Janela Assistida', conclua a verificação na janela e clique em 'Capturar da Janela'.".to_string(),
+        ));
     }
 
     Err(SourceError::Operacao(
