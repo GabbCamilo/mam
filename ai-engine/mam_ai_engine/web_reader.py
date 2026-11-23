@@ -391,7 +391,7 @@ def _collect_paginated_chapters(
         page_idx += 1
         snap = cdp.eval_js(
             """
-            const noiseTitles = new Set(['status', 'filter', 'filters', 'menu', 'search', 'genres', 'genre', 'chapters', 'chapter list', 'comments', 'home', 'login', 'register', 'loading', '404', 'error']);
+            const noiseTitles = new Set(['status', 'type', 'author', 'authors', 'artist', 'artists', 'release', 'released', 'year', 'summary', 'description', 'alternative', 'alternative name', 'rating', 'views', 'latest', 'popular', 'trending', 'bookmark', 'bookmarks', 'filter', 'filters', 'menu', 'search', 'genres', 'genre', 'chapters', 'chapter list', 'comments', 'home', 'login', 'register', 'loading', '404', 'error']);
             const h1List = Array.from(document.querySelectorAll('h1'))
               .map(el => (el.textContent || '').replace(/\\s+/g, ' ').trim())
               .filter(t => t.length > 0 && !noiseTitles.has(t.toLowerCase()));

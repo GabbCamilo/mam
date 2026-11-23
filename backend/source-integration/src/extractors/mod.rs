@@ -1187,6 +1187,25 @@ fn eh_titulo_ruido_ui(txt: &str) -> bool {
     matches!(
         lower.as_str(),
         "status"
+            | "type"
+            | "author"
+            | "authors"
+            | "artist"
+            | "artists"
+            | "release"
+            | "released"
+            | "year"
+            | "summary"
+            | "description"
+            | "alternative"
+            | "alternative name"
+            | "rating"
+            | "views"
+            | "latest"
+            | "popular"
+            | "trending"
+            | "bookmark"
+            | "bookmarks"
             | "filter"
             | "filters"
             | "menu"
@@ -1794,7 +1813,7 @@ mod tests {
             <html>
               <head><title>Mahou Shoujo Madoka Magica: Majuu-hen - MangaBuddy</title></head>
               <body>
-                <div class="sidebar"><h1>Status</h1></div>
+                <div class="sidebar"><h1>Status</h1><h1>Type</h1><h1>Genres</h1></div>
                 <div class="main"><h1>Mahou Shoujo Madoka Magica: Majuu-hen</h1></div>
               </body>
             </html>

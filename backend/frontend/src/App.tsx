@@ -23,7 +23,7 @@ import { CbzReader } from './components/CbzReader'
 
 type AbaAtiva = 'biblioteca' | 'fontes' | 'downloads' | 'transferencia' | 'ai'
 type SubAbaObra = 'capitulos' | 'volumes' | 'marcados'
-type OrdemBiblioteca = 'nome-asc' | 'nome-desc' | 'caps-desc' | 'caps-asc'
+type OrdemBiblioteca = 'nome-asc' | 'nome-desc' | 'recente' | 'antigo'
 
 function obterIdiomaCapitulo(cap: Capitulo): string | null {
   if (cap.idioma && cap.idioma.trim().length > 0) {
@@ -98,6 +98,7 @@ function App() {
   const [volCapitulosIds, setVolCapitulosIds] = useState<string[]>([])
 
   const [modalImportarUrlAberto, setModalImportarUrlAberto] = useState(false)
+  const [opcoesAvancadasImportacao, setOpcoesAvancadasImportacao] = useState(false)
   const [importandoLink, setImportandoLink] = useState(false)
   const [modalInfoImportacaoAberto, setModalInfoImportacaoAberto] = useState(false)
   const [modalConfirmacao, setModalConfirmacao] = useState<{
@@ -829,8 +830,10 @@ function App() {
     .sort((a, b) => {
       if (ordemBiblioteca === 'nome-asc') return a.obra.titulo.localeCompare(b.obra.titulo)
       if (ordemBiblioteca === 'nome-desc') return b.obra.titulo.localeCompare(a.obra.titulo)
-      if (ordemBiblioteca === 'caps-desc') return b.total_capitulos - a.total_capitulos
-      return a.total_capitulos - b.total_capitulos
+      if (ordemBiblioteca === 'recente') {
+        return b.obra.data_arquivamento.localeCompare(a.obra.data_arquivamento)
+      }
+      return a.obra.data_arquivamento.localeCompare(b.obra.data_arquivamento)
     })
 
   const resumoObraSelecionada = detalhes
@@ -988,10 +991,10 @@ function App() {
                   value={ordemBiblioteca}
                   onChange={(e) => setOrdemBiblioteca(e.target.value as OrdemBiblioteca)}
                 >
-                  <option value="nome-asc">Ordenar: Nome (A → Z)</option>
-                  <option value="nome-desc">Ordenar: Nome (Z → A)</option>
-                  <option value="caps-desc">Ordenar: Mais capítulos</option>
-                  <option value="caps-asc">Ordenar: Menos capítulos</option>
+                  <option value="nome-asc">Ordenar: A/Z</option>
+                  <option value="nome-desc">Ordenar: Z/A</option>
+                  <option value="recente">Ordenar: Mais recente</option>
+                  <option value="antigo">Ordenar: Mais antigo</option>
                 </select>
 
                 {obrasFiltradas.length === 0 ? (
@@ -2543,74 +2546,12 @@ function App() {
 
             {modoImportacao === 'obra' ? (
               <>
-                <div className="mam-toolbar-row">
-                  <input
-                    className="mam-input mam-search-input"
-                    placeholder="URL central da obra (ex.: weebcentral.com/series/... ou mangafire.to/title/...)"
-                    value={extUrl}
-                    onChange={(e) => setExtUrl(e.target.value)}
-                  />
-                  {extUrl.trim().startsWith('http') && (
-                    <>
-                      <button
-                        type="button"
-                        className="mam-btn"
-                        onClick={async () => {
-                          try {
-                            await mamApi.browserAbrirJanelaAssistida(extUrl.trim())
-                            setMensagem('Janela Assistida aberta. Carregue a página/verificação e clique em "Capturar da Janela".')
-                          } catch (err) {
-                            setMensagem(`Erro ao abrir janela assistida: ${String(err)}`)
-                          }
-                        }}
-                        title="Abrir página na janela assistida do MAM para sites com verificação humana"
-                      >
-                        Janela Assistida
-                      </button>
-                      <button
-                        type="button"
-                        className="mam-btn mam-btn-primary"
-                        onClick={async () => {
-                          try {
-                            const cap = await mamApi.browserCapturarJanelaAssistida()
-                            if (!extUrl.trim()) {
-                              setExtUrl(cap.url)
-                            }
-                            setExtHtml(cap.html)
-                            if (modoImportacao === 'capitulo' && cap.urls_imagens.length > 0) {
-                              setExtUrlsTexto(cap.urls_imagens.join('\n'))
-                            }
-                            setMensagem(`HTML capturado da janela assistida (${cap.urls_imagens.length} imagem(ns)). Clique em "Descobrir Capítulos".`)
-                          } catch (err) {
-                            setMensagem(String(err))
-                          }
-                        }}
-                        title="Capturar HTML já carregado na Janela Assistida"
-                      >
-                        Capturar da Janela
-                      </button>
-                      <button
-                        type="button"
-                        className="mam-btn"
-                        onClick={async () => {
-                          try {
-                            const cfg = await mamApi.browserEnsinarPadraoCapitulo(extUrl.trim())
-                            const atualizados = await mamApi.sourceListarConectores()
-                            setConectoresCatalogo(atualizados)
-                            setMensagem(
-                              `Padrão aprendido para "${cfg.nome}": ${cfg.padroes_url_capitulo[0] ?? ''}. Volte à página da obra (ou use o HTML já capturado) e clique em "Descobrir Capítulos".`,
-                            )
-                          } catch (err) {
-                            setMensagem(String(err))
-                          }
-                        }}
-                        title="Entre em um capítulo na Janela Assistida e clique aqui para ensinar o padrão de URL à IA"
-                      >
-                        🎓 Ensinar Capítulo
-                      </button>
-                    </>
-                  )}
-                </div>
+                <input
+                  className="mam-input"
+                  placeholder="URL central da obra (ex.: weebcentral.com/series/... ou mangafire.to/title/...)"
+                  value={extUrl}
+                  onChange={(e) => setExtUrl(e.target.value)}
+                />
                 <input
                   className="mam-input"
                   placeholder="Título personalizado (opcional — detectado automaticamente)"
@@ -2634,13 +2575,86 @@ function App() {
                     <option value="all">Todos / Padrão do site</option>
                   </select>
                 </div>
-                <textarea
-                  className="mam-textarea"
-                  placeholder="HTML da página principal da obra (opcional — útil se o site carregar capítulos via JS no navegador)"
-                  value={extHtml}
-                  onChange={(e) => setExtHtml(e.target.value)}
-                  rows={4}
-                />
+
+                <div>
+                  <button
+                    type="button"
+                    className="mam-btn"
+                    onClick={() => setOpcoesAvancadasImportacao((v) => !v)}
+                  >
+                    {opcoesAvancadasImportacao ? '▾ Ocultar Opções Avançadas' : '▸ Opções Avançadas'}
+                  </button>
+                </div>
+
+                {opcoesAvancadasImportacao && (
+                  <div style={{ display: 'grid', gap: '0.6rem' }}>
+                    {extUrl.trim().startsWith('http') && (
+                      <div className="mam-toolbar-row">
+                        <button
+                          type="button"
+                          className="mam-btn"
+                          onClick={async () => {
+                            try {
+                              await mamApi.browserAbrirJanelaAssistida(extUrl.trim())
+                              setMensagem('Janela Assistida aberta. Carregue a página/verificação e clique em "Capturar da Janela".')
+                            } catch (err) {
+                              setMensagem(`Erro ao abrir janela assistida: ${String(err)}`)
+                            }
+                          }}
+                          title="Abrir página na janela assistida do MAM para sites com verificação humana"
+                        >
+                          Janela Assistida
+                        </button>
+                        <button
+                          type="button"
+                          className="mam-btn mam-btn-primary"
+                          onClick={async () => {
+                            try {
+                              const cap = await mamApi.browserCapturarJanelaAssistida()
+                              if (!extUrl.trim()) {
+                                setExtUrl(cap.url)
+                              }
+                              setExtHtml(cap.html)
+                              setMensagem(`HTML capturado da janela assistida (${cap.urls_imagens.length} imagem(ns)). Clique em "Descobrir Capítulos".`)
+                            } catch (err) {
+                              setMensagem(String(err))
+                            }
+                          }}
+                          title="Capturar HTML já carregado na Janela Assistida"
+                        >
+                          Capturar da Janela
+                        </button>
+                        <button
+                          type="button"
+                          className="mam-btn"
+                          onClick={async () => {
+                            try {
+                              const cfg = await mamApi.browserEnsinarPadraoCapitulo(extUrl.trim())
+                              const atualizados = await mamApi.sourceListarConectores()
+                              setConectoresCatalogo(atualizados)
+                              setMensagem(
+                                `Padrão aprendido para "${cfg.nome}": ${cfg.padroes_url_capitulo[0] ?? ''}. Volte à página da obra (ou use o HTML já capturado) e clique em "Descobrir Capítulos".`,
+                              )
+                            } catch (err) {
+                              setMensagem(String(err))
+                            }
+                          }}
+                          title="Entre em um capítulo na Janela Assistida e clique aqui para ensinar o padrão de URL à IA"
+                        >
+                          🎓 Ensinar Capítulo
+                        </button>
+                      </div>
+                    )}
+                    <textarea
+                      className="mam-textarea"
+                      placeholder="HTML da página principal da obra (opcional — útil se o site carregar capítulos via JS no navegador)"
+                      value={extHtml}
+                      onChange={(e) => setExtHtml(e.target.value)}
+                      rows={4}
+                    />
+                  </div>
+                )}
+
                 <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end' }}>
                   <button
                     type="button"
@@ -2670,89 +2684,93 @@ function App() {
               </>
             ) : (
               <>
-                <div className="mam-toolbar-row">
-                  <input
-                    className="mam-input mam-search-input"
-                    placeholder="Título da obra (opcional se informar o link do capítulo)"
-                    value={extObraTitulo}
-                    onChange={(e) => setExtObraTitulo(e.target.value)}
-                  />
-                  <input
-                    className="mam-input"
-                    type="number"
-                    placeholder="Cap."
-                    value={extNumeroCap}
-                    onChange={(e) => setExtNumeroCap(e.target.value)}
-                    style={{ width: 90 }}
-                  />
+                <input
+                  className="mam-input"
+                  placeholder="Título da obra (opcional — detectado automaticamente)"
+                  value={extObraTitulo}
+                  onChange={(e) => setExtObraTitulo(e.target.value)}
+                />
+                <input
+                  className="mam-input"
+                  placeholder="Link do capítulo (weebcentral.com/chapters/..., mangadex.org/chapter/..., nhentai.net/g/...)"
+                  value={extUrl}
+                  onChange={(e) => setExtUrl(e.target.value)}
+                />
+
+                <div>
+                  <button
+                    type="button"
+                    className="mam-btn"
+                    onClick={() => setOpcoesAvancadasImportacao((v) => !v)}
+                  >
+                    {opcoesAvancadasImportacao ? '▾ Ocultar Opções Avançadas' : '▸ Opções Avançadas'}
+                  </button>
                 </div>
-                <div className="mam-toolbar-row">
-                  <input
-                    className="mam-input mam-search-input"
-                    placeholder="Link do capítulo (weebcentral.com/chapters/..., mangadex.org/chapter/..., mangafire.to/...)"
-                    value={extUrl}
-                    onChange={(e) => setExtUrl(e.target.value)}
-                  />
-                  {extUrl.trim().startsWith('http') && (
-                    <>
-                      <button
-                        type="button"
-                        className="mam-btn"
-                        onClick={handleDescobrirCapitulosPorLink}
-                        title="Inspecionar capítulo único e exibir suas páginas/metadados na aba Fontes"
-                      >
-                        🔎 Inspecionar
-                      </button>
-                      <button
-                        type="button"
-                        className="mam-btn"
-                        onClick={async () => {
-                          try {
-                            await mamApi.browserAbrirJanelaAssistida(extUrl.trim())
-                            setMensagem('Janela Assistida aberta. Carregue o capítulo e clique em "Capturar".')
-                          } catch (err) {
-                            setMensagem(`Erro ao abrir janela assistida: ${String(err)}`)
-                          }
-                        }}
-                      >
-                        Janela Assistida
-                      </button>
-                      <button
-                        type="button"
-                        className="mam-btn"
-                        onClick={async () => {
-                          try {
-                            const cap = await mamApi.browserCapturarJanelaAssistida()
-                            if (!extUrl.trim()) setExtUrl(cap.url)
-                            setExtHtml(cap.html)
-                            if (cap.urls_imagens.length > 0) {
-                              setExtUrlsTexto(cap.urls_imagens.join('\n'))
+
+                {opcoesAvancadasImportacao && (
+                  <div style={{ display: 'grid', gap: '0.6rem' }}>
+                    {extUrl.trim().startsWith('http') && (
+                      <div className="mam-toolbar-row">
+                        <button
+                          type="button"
+                          className="mam-btn"
+                          onClick={handleDescobrirCapitulosPorLink}
+                          title="Inspecionar capítulo único e exibir suas páginas/metadados na aba Fontes"
+                        >
+                          🔎 Inspecionar
+                        </button>
+                        <button
+                          type="button"
+                          className="mam-btn"
+                          onClick={async () => {
+                            try {
+                              await mamApi.browserAbrirJanelaAssistida(extUrl.trim())
+                              setMensagem('Janela Assistida aberta. Carregue o capítulo e clique em "Capturar".')
+                            } catch (err) {
+                              setMensagem(`Erro ao abrir janela assistida: ${String(err)}`)
                             }
-                            setMensagem(`Capturadas ${cap.urls_imagens.length} página(s) da Janela Assistida.`)
-                          } catch (err) {
-                            setMensagem(String(err))
-                          }
-                        }}
-                      >
-                        Capturar
-                      </button>
-                    </>
-                  )}
-                </div>
-                <textarea
-                  className="mam-textarea"
-                  placeholder="Lista ordenada de URLs de páginas (uma por linha, opcional)"
-                  value={extUrlsTexto}
-                  onChange={(e) => setExtUrlsTexto(e.target.value)}
-                  rows={3}
-                />
-                <textarea
-                  className="mam-textarea"
-                  placeholder="HTML da página do capítulo (opcional)"
-                  value={extHtml}
-                  onChange={(e) => setExtHtml(e.target.value)}
-                  rows={3}
-                />
+                          }}
+                        >
+                          Janela Assistida
+                        </button>
+                        <button
+                          type="button"
+                          className="mam-btn"
+                          onClick={async () => {
+                            try {
+                              const cap = await mamApi.browserCapturarJanelaAssistida()
+                              if (!extUrl.trim()) setExtUrl(cap.url)
+                              setExtHtml(cap.html)
+                              if (cap.urls_imagens.length > 0) {
+                                setExtUrlsTexto(cap.urls_imagens.join('\n'))
+                              }
+                              setMensagem(`Capturadas ${cap.urls_imagens.length} página(s) da Janela Assistida.`)
+                            } catch (err) {
+                              setMensagem(String(err))
+                            }
+                          }}
+                        >
+                          Capturar
+                        </button>
+                      </div>
+                    )}
+                    <textarea
+                      className="mam-textarea"
+                      placeholder="Lista ordenada de URLs de páginas (uma por linha, opcional)"
+                      value={extUrlsTexto}
+                      onChange={(e) => setExtUrlsTexto(e.target.value)}
+                      rows={3}
+                    />
+                    <textarea
+                      className="mam-textarea"
+                      placeholder="HTML da página do capítulo (opcional)"
+                      value={extHtml}
+                      onChange={(e) => setExtHtml(e.target.value)}
+                      rows={3}
+                    />
+                  </div>
+                )}
+
                 <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end' }}>
                   <button
                     type="button"
