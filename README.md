@@ -71,6 +71,20 @@ Para Linux x86-64 (AppImage e TAR.GZ), consulte [packaging/README.md](packaging/
    ```
 4. **Transferindo apenas sua biblioteca (sem o programa)**: todos os caminhos gravados no SQLite são **relativos à raiz**. Basta copiar a pasta da biblioteca (`System/database.db` + arquivos `.cbz`) para outro SSD ou computador e apontar `MAM_LIBRARY_DIR` para ela.
 
+#### Como Atualizar uma Versão Existente (Sem Perder sua Biblioteca)
+- **Via pacote de atualização portátil (recomendado)**:
+  1. Baixe o arquivo **`MAM-windows-x86_64-update.zip`** (Windows) ou **`MAM-linux-x86_64-update.tar.gz`** (Linux) na página de *Releases*.
+  2. Extraia o conteúdo **por cima da pasta onde o MAM está instalado**, substituindo `app.exe` / `app`, `ai-engine/` e `connectors/`.
+  3. Os pacotes `-update` **não incluem a pasta `MAM_LIBRARY/`**, portanto seus mangás (`.cbz`), capas, progresso de leitura e banco `System/database.db` são preservados intactos (eventuais migrações do SQLite são aplicadas automaticamente ao abrir).
+- **Atualizando apenas conectores de sites (sem trocar o executável)**:
+  - Na aba **Fontes & Importação → Guia / Conectores**, clique em verificar/atualizar conectores para baixar novas regras de sites diretamente do repositório (`System/connectors/sites.json`).
+- **Via código-fonte**:
+  ```powershell
+  git pull origin main
+  cd backend/frontend && npm install && npm run build
+  cd ../.. && .\packaging\windows\build-portable-zip.ps1
+  ```
+
 ---
 
 ### 3. Guia das Funcionalidades na Interface
