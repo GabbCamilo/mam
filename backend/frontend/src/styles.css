@@ -46,9 +46,14 @@ body,
   padding: 0;
   min-height: 100vh;
   background: var(--bg-app);
+  background-attachment: fixed;
   color: var(--text-primary);
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-app, 'Segoe UI', system-ui, -apple-system, sans-serif);
   -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
 }
 
 .mam-shell {
@@ -64,6 +69,7 @@ body,
   gap: 1rem;
   padding: 0.75rem 1.25rem;
   background: var(--bg-surface);
+  backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--border-subtle);
   flex-wrap: wrap;
 }
@@ -498,4 +504,85 @@ body,
   border: 1px solid #24324a;
   border-radius: 9px;
   padding: 0.3rem 0.5rem;
+}
+
+.mam-theme-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+  gap: 0.65rem;
+}
+
+.mam-theme-swatch {
+  position: relative;
+  height: 58px;
+  border-radius: 12px;
+  border: 2px solid var(--border-subtle);
+  cursor: pointer;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0.3rem;
+  overflow: hidden;
+  transition: transform 0.12s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.mam-theme-swatch:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+}
+
+.mam-theme-swatch.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.mam-theme-swatch-custom {
+  align-items: center;
+  justify-content: center;
+}
+
+.mam-theme-swatch-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  right: 4px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  background: rgba(0, 0, 0, 0.58);
+  color: #fff;
+  border-radius: 5px;
+  padding: 1px 4px;
+  text-align: center;
+}
+
+.mam-theme-swatch-label {
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.52);
+  padding: 1px 5px;
+  border-radius: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.mam-color-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+.mam-color-field input[type='color'] {
+  width: 44px;
+  height: 30px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
 }

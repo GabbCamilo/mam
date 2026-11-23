@@ -20,6 +20,14 @@ import {
   mamApi,
 } from './api'
 import { CbzReader } from './components/CbzReader'
+import { ThemeModal } from './components/ThemeModal'
+import {
+  ConfigAparencia,
+  TEMAS_PRESET,
+  aplicarAparenciaNoDocumento,
+  carregarAparencia,
+  salvarAparencia,
+} from './themes'
 
 type AbaAtiva = 'biblioteca' | 'fontes' | 'downloads' | 'transferencia' | 'ai'
 type SubAbaObra = 'capitulos' | 'volumes' | 'marcados'
@@ -42,7 +50,12 @@ function obterDiretorioCapitulo(cap: Capitulo): string {
 }
 
 function App() {
-  const [tema, setTema] = useState<'dark' | 'light'>('dark')
+  const [aparencia, setAparencia] = useState<ConfigAparencia>(() => carregarAparencia())
+  const [modalTemaAberto, setModalTemaAberto] = useState(false)
+  const tema =
+    aparencia.presetId === 'custom'
+      ? aparencia.custom.base
+      : (TEMAS_PRESET.find((t) => t.id === aparencia.presetId)?.base ?? 'dark')
   const [abaAtiva, setAbaAtiva] = useState<AbaAtiva>('biblioteca')
   const [subAbaObra, setSubAbaObra] = useState<SubAbaObra>('capitulos')
   const [raizBiblioteca, setRaizBiblioteca] = useState<string>('')
@@ -124,8 +137,9 @@ function App() {
   const [resultadoImportacao, setResultadoImportacao] = useState<ResultadoImportacao | null>(null)
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', tema)
-  }, [tema])
+    aplicarAparenciaNoDocumento(aparencia)
+    salvarAparencia(aparencia)
+  }, [aparencia])
 
   async function carregarObras() {
     try {
@@ -882,12 +896,27 @@ function App() {
           <span className="mam-pill-badge">{obrasResumo.length} obra(s)</span>
         </div>
 
-        <button
-          className="mam-btn"
-          onClick={() => setTema((t) => (t === 'dark' ? 'light' : 'dark'))}
-        >
-          {tema === 'dark' ? '🌙 Dark' : '☀️ Light'}
-        </button>
+        <div className="mam-toolbar-row">
+          <button
+            className="mam-btn"
+            onClick={() => setModalTemaAberto(true)}
+            title="Personalizar temas, degradês, contornos e fonte"
+          >
+            🎨 Temas
+          </button>
+          <button
+            className="mam-btn"
+            onClick={() =>
+              setAparencia((prev) => ({
+                ...prev,
+                presetId: tema === 'dark' ? 'light-padrao' : 'dark-padrao',
+              }))
+            }
+            title="Alternar rapidamente entre Dark e Light"
+          >
+            {tema === 'dark' ? '🌙 Dark' : '☀️ Light'}
+          </button>
+        </div>
       </header>
 
       <nav className="mam-nav-bar">
@@ -2888,6 +2917,13 @@ function App() {
           )}
         </div>
       )}
+
+      <ThemeModal
+        aberto={modalTemaAberto}
+        config={aparencia}
+        onChange={setAparencia}
+        onFechar={() => setModalTemaAberto(false)}
+      />
 
       <footer className="mam-statusbar">
         <span>MAM v0.1.0 • Portátil</span>
