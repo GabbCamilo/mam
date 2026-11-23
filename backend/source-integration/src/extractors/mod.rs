@@ -896,18 +896,17 @@ fn eh_url_capitulo_direto(url: &str, padroes_extra: &[String]) -> bool {
 }
 
 fn limpar_titulo_obra_de_capitulo(raw_title: &str) -> String {
-    let base = raw_title
-        .split(" | ")
-        .next()
-        .unwrap_or(raw_title)
-        .split(" - ")
-        .next()
-        .unwrap_or(raw_title)
-        .trim();
-    if base.is_empty() {
+    let sem_site = raw_title.split(" | ").next().unwrap_or(raw_title).trim();
+    for parte in sem_site.split(" - ") {
+        let p = parte.trim();
+        if !p.is_empty() && !eh_titulo_de_capitulo(p) {
+            return p.to_string();
+        }
+    }
+    if sem_site.is_empty() {
         "Capítulo Importado".to_string()
     } else {
-        base.to_string()
+        sem_site.to_string()
     }
 }
 

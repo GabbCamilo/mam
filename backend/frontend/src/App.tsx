@@ -98,6 +98,7 @@ function App() {
   const [volCapitulosIds, setVolCapitulosIds] = useState<string[]>([])
 
   const [modalImportarUrlAberto, setModalImportarUrlAberto] = useState(false)
+  const [importandoLink, setImportandoLink] = useState(false)
   const [modalInfoImportacaoAberto, setModalInfoImportacaoAberto] = useState(false)
   const [modalConfirmacao, setModalConfirmacao] = useState<{
     titulo: string
@@ -462,6 +463,7 @@ function App() {
       setMensagem('Informe a URL principal da obra para descobrir os capítulos.')
       return
     }
+    setImportandoLink(true)
     try {
       const res = await mamApi.sourceDescobrirPorLink(
         extUrl.trim(),
@@ -494,6 +496,8 @@ function App() {
       setMensagem(`${res.capitulos.length} capítulo(s) encontrado(s) em "${obraResult.titulo}".`)
     } catch (err) {
       setMensagem(`Erro ao descobrir capítulos pelo link: ${String(err)}`)
+    } finally {
+      setImportandoLink(false)
     }
   }
 
@@ -528,14 +532,15 @@ function App() {
       }
     }
 
-    if (!tituloFinal) {
+    if (!tituloFinal && urls_ordenadas.length === 0) {
       setMensagem('Informe o título da obra ou uma URL válida do capítulo.')
       return
     }
 
+    setImportandoLink(true)
     try {
       const res = await mamApi.sourceImportarExtrator({
-        obra_titulo: tituloFinal,
+        obra_titulo: tituloFinal || 'Capítulo Importado',
         numero_capitulo: Number.isFinite(numeroFinal) && numeroFinal > 0 ? numeroFinal : 1,
         url: extUrl.trim() || null,
         html: extHtml.trim() || null,
@@ -548,6 +553,8 @@ function App() {
       await carregarObras()
     } catch (err) {
       setMensagem(`Erro na importação modular: ${String(err)}`)
+    } finally {
+      setImportandoLink(false)
     }
   }
 
@@ -2656,8 +2663,8 @@ function App() {
                   >
                     Fechar
                   </button>
-                  <button className="mam-btn mam-btn-primary" type="submit">
-                    🔎 Descobrir Capítulos
+                  <button className="mam-btn mam-btn-primary" type="submit" disabled={importandoLink}>
+                    {importandoLink ? '⏳ Analisando...' : '🔎 Descobrir Capítulos'}
                   </button>
                 </div>
               </>
@@ -2768,8 +2775,8 @@ function App() {
                   >
                     Fechar
                   </button>
-                  <button className="mam-btn mam-btn-primary" type="submit">
-                    Importar Capítulo Único
+                  <button className="mam-btn mam-btn-primary" type="submit" disabled={importandoLink}>
+                    {importandoLink ? '⏳ Importando...' : 'Importar Capítulo Único'}
                   </button>
                 </div>
               </>
