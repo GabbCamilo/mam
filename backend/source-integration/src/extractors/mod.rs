@@ -328,6 +328,60 @@ pub async fn descobrir_capitulos_por_link_com_biblioteca(
         return Err(SourceError::Operacao("Informe a URL da obra".to_string()));
     }
 
+    // Obras únicas com API direta (ex.: nhentai.net/g/<id>/)
+    if nhentai::extrair_gallery_id(url_limpa).is_some() {
+        return nhentai::obter_obra_galeria(url_limpa).await;
+    }
+
+    let padroes_extra =
+        crate::connectors::GerenciadorConectores::padroes_capitulo_ativos(raiz_biblioteca);
+
+    // URL direta de capítulo unitário: extrai metadados e páginas do próprio capítulo sem varrer Prev/Next como lote.
+    if eh_url_capitulo_direto(url_limpa, &padroes_extra) {
+        let mut html_capitulo = html_opcional
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.to_string());
+
+        if html_capitulo.is_none() {
+            let client_meta = reqwest::Client::builder()
+                .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+                .http1_only()
+                .pool_max_idle_per_host(0)
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new());
+            if let Ok(resp) = client_meta.get(url_limpa).send().await {
+                if resp.status().is_success() {
+                    if let Ok(texto) = resp.text().await {
+                        html_capitulo = Some(texto);
+                    }
+                }
+            }
+        }
+
+        let paginas = match RegistroExtratores::padrao().selecionar(Some(url_limpa)) {
+            Some(extrator) => extrator
+                .extrair_paginas(&EntradaImportacao {
+                    obra_titulo: String::new(),
+                    numero_capitulo: 1,
+                    url: Some(url_limpa.to_string()),
+                    html: html_capitulo.clone(),
+                    urls_ordenadas: Vec::new(),
+                })
+                .await
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
+
+        if !paginas.is_empty() || html_capitulo.is_some() {
+            return Ok(extrair_capitulo_unitario_de_url_e_html(
+                url_limpa,
+                html_capitulo.as_deref(),
+                &paginas,
+            ));
+        }
+    }
+
     if let Some(h) = html_opcional.filter(|s| !s.trim().is_empty()) {
         let extraida = extrair_capitulos_de_html_com_biblioteca(url_limpa, h, raiz_biblioteca);
         if extraida.capitulos.is_empty() {
@@ -336,11 +390,6 @@ pub async fn descobrir_capitulos_por_link_com_biblioteca(
             ));
         }
         return Ok(extraida);
-    }
-
-    // Obras únicas com API direta (ex.: nhentai.net/g/<id>/)
-    if nhentai::extrair_gallery_id(url_limpa).is_some() {
-        return nhentai::obter_obra_galeria(url_limpa).await;
     }
 
     let client = reqwest::Client::builder()
@@ -831,6 +880,93 @@ fn weebcentral_full_chapter_list_url(url: &str) -> Option<String> {
             "https://weebcentral.com/series/{}/full-chapter-list",
             series_id
         ))
+    }
+}
+
+fn eh_url_capitulo_direto(url: &str, padroes_extra: &[String]) -> bool {
+    let caminho = extrair_caminho_url(url);
+    if caminho.is_empty()
+        || caminho.contains("/series/")
+        || caminho.contains("/full-chapter-list")
+        || caminho.ends_with("/list")
+    {
+        return false;
+    }
+    eh_link_capitulo(url, "", padroes_extra)
+}
+
+fn limpar_titulo_obra_de_capitulo(raw_title: &str) -> String {
+    let base = raw_title
+        .split(" | ")
+        .next()
+        .unwrap_or(raw_title)
+        .split(" - ")
+        .next()
+        .unwrap_or(raw_title)
+        .trim();
+    if base.is_empty() {
+        "Capítulo Importado".to_string()
+    } else {
+        base.to_string()
+    }
+}
+
+pub fn extrair_capitulo_unitario_de_url_e_html(
+    url_capitulo: &str,
+    html_opcional: Option<&str>,
+    paginas: &[String],
+) -> ObraExtraidaPorLink {
+    let html = html_opcional.unwrap_or("");
+    let lower = html.to_lowercase();
+    let base_origin = extrair_origem(url_capitulo);
+
+    let raw_title = if let (Some(a), Some(b)) = (lower.find("<title>"), lower.find("</title>")) {
+        limpar_tags_html(&html[a + 7..b])
+    } else {
+        String::new()
+    };
+
+    let h1_text = if let (Some(a), Some(b)) = (lower.find("<h1"), lower.find("</h1>")) {
+        html[a..b]
+            .find('>')
+            .map(|gt| limpar_tags_html(&html[a + gt + 1..b]))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let texto_busca_num = format!("{} {}", raw_title, h1_text);
+    let numero = extrair_numero_capitulo(url_capitulo, &texto_busca_num);
+    let idioma = detectar_idioma_link(url_capitulo, &texto_busca_num);
+
+    let titulo_obra = if !raw_title.is_empty() {
+        limpar_titulo_obra_de_capitulo(&raw_title)
+    } else if !h1_text.is_empty() && !eh_titulo_de_capitulo(&h1_text) {
+        h1_text
+    } else {
+        "Capítulo Importado".to_string()
+    };
+
+    let capa_url = extrair_meta_og_image(html, &base_origin).or_else(|| paginas.first().cloned());
+    let titulo_cap = if paginas.is_empty() {
+        "Capítulo único".to_string()
+    } else {
+        format!("{} páginas", paginas.len())
+    };
+
+    ObraExtraidaPorLink {
+        titulo: titulo_obra,
+        capa_url,
+        url_obra: url_capitulo.to_string(),
+        capitulos: vec![CapituloBuscaResultado {
+            fonte_id: "extrator-link".to_string(),
+            obra_id_fonte: url_capitulo.to_string(),
+            capitulo_id_fonte: url_capitulo.to_string(),
+            numero,
+            titulo: Some(titulo_cap),
+            url: Some(url_capitulo.to_string()),
+            idioma,
+        }],
     }
 }
 
@@ -1589,5 +1725,35 @@ mod tests {
         assert_eq!(res.capitulos.len(), 2);
         assert_eq!(res.capitulos[0].numero, Some(1));
         assert_eq!(res.capitulos[1].numero, Some(2));
+    }
+
+    #[test]
+    fn url_direta_de_capitulo_weebcentral_retorna_capitulo_unico_sem_prev_next() {
+        let url_cap = "https://weebcentral.com/chapters/01M84F1T0178JSKSEK8M3H99JS";
+        let url_serie = "https://weebcentral.com/series/01J76XY7E2VCSR0ZCC21KGXS1K/Kobato";
+        assert!(eh_url_capitulo_direto(url_cap, &[]));
+        assert!(!eh_url_capitulo_direto(url_serie, &[]));
+
+        let html = r#"
+            <html>
+              <head><title>Dan Da Dan - Chapter 175 | Weeb Central</title></head>
+              <body>
+                <a href="/chapters/01PREV">Prev</a>
+                <a href="/chapters/01NEXT">Next</a>
+                <a href="/chapters/01OTHER">List</a>
+              </body>
+            </html>
+        "#;
+        let paginas = vec![
+            "https://cdn.example.com/001.png".to_string(),
+            "https://cdn.example.com/002.png".to_string(),
+        ];
+        let res = extrair_capitulo_unitario_de_url_e_html(url_cap, Some(html), &paginas);
+        assert_eq!(res.titulo, "Dan Da Dan");
+        assert_eq!(res.capitulos.len(), 1);
+        assert_eq!(res.capitulos[0].numero, Some(175));
+        assert_eq!(res.capitulos[0].titulo.as_deref(), Some("2 páginas"));
+        assert_eq!(res.capitulos[0].capitulo_id_fonte, url_cap);
+        assert_eq!(res.capa_url.as_deref(), Some("https://cdn.example.com/001.png"));
     }
 }

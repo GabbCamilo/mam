@@ -499,16 +499,44 @@ function App() {
 
   async function handleImportarExtrator(e: React.FormEvent) {
     e.preventDefault()
-    if (!extObraTitulo.trim()) return
     const urls_ordenadas = extUrlsTexto
       .split(/\r?\n/)
       .map((u) => u.trim())
       .filter((u) => u.length > 0)
 
+    let tituloFinal = extObraTitulo.trim()
+    let numeroFinal = Number.parseInt(extNumeroCap, 10)
+
+    const tituloVazio = !tituloFinal
+    if ((tituloVazio || !Number.isFinite(numeroFinal)) && extUrl.trim()) {
+      try {
+        const info = await mamApi.sourceDescobrirPorLink(
+          extUrl.trim(),
+          extHtml.trim() || null,
+          extIdiomaPreferido,
+        )
+        if (tituloVazio) {
+          tituloFinal = info.titulo
+          setExtObraTitulo(info.titulo)
+        }
+        if ((!Number.isFinite(numeroFinal) || (tituloVazio && extNumeroCap === '1')) && info.capitulos[0]?.numero != null) {
+          numeroFinal = info.capitulos[0].numero
+          setExtNumeroCap(String(numeroFinal))
+        }
+      } catch {
+        // Fallback para valores informados manualmente caso a pré-análise falhe
+      }
+    }
+
+    if (!tituloFinal) {
+      setMensagem('Informe o título da obra ou uma URL válida do capítulo.')
+      return
+    }
+
     try {
       const res = await mamApi.sourceImportarExtrator({
-        obra_titulo: extObraTitulo.trim(),
-        numero_capitulo: Number.parseInt(extNumeroCap, 10) || 1,
+        obra_titulo: tituloFinal,
+        numero_capitulo: Number.isFinite(numeroFinal) && numeroFinal > 0 ? numeroFinal : 1,
         url: extUrl.trim() || null,
         html: extHtml.trim() || null,
         urls_ordenadas,
@@ -2638,7 +2666,7 @@ function App() {
                 <div className="mam-toolbar-row">
                   <input
                     className="mam-input mam-search-input"
-                    placeholder="Título da obra (ex: Medaka Box)"
+                    placeholder="Título da obra (opcional se informar o link do capítulo)"
                     value={extObraTitulo}
                     onChange={(e) => setExtObraTitulo(e.target.value)}
                   />
@@ -2651,12 +2679,59 @@ function App() {
                     style={{ width: 90 }}
                   />
                 </div>
-                <input
-                  className="mam-input"
-                  placeholder="Link do capítulo (mangadex.org/chapter/..., mangafire.to/.../chapter/...)"
-                  value={extUrl}
-                  onChange={(e) => setExtUrl(e.target.value)}
-                />
+                <div className="mam-toolbar-row">
+                  <input
+                    className="mam-input mam-search-input"
+                    placeholder="Link do capítulo (weebcentral.com/chapters/..., mangadex.org/chapter/..., mangafire.to/...)"
+                    value={extUrl}
+                    onChange={(e) => setExtUrl(e.target.value)}
+                  />
+                  {extUrl.trim().startsWith('http') && (
+                    <>
+                      <button
+                        type="button"
+                        className="mam-btn"
+                        onClick={handleDescobrirCapitulosPorLink}
+                        title="Inspecionar capítulo único e exibir suas páginas/metadados na aba Fontes"
+                      >
+                        🔎 Inspecionar
+                      </button>
+                      <button
+                        type="button"
+                        className="mam-btn"
+                        onClick={async () => {
+                          try {
+                            await mamApi.browserAbrirJanelaAssistida(extUrl.trim())
+                            setMensagem('Janela Assistida aberta. Carregue o capítulo e clique em "Capturar".')
+                          } catch (err) {
+                            setMensagem(`Erro ao abrir janela assistida: ${String(err)}`)
+                          }
+                        }}
+                      >
+                        Janela Assistida
+                      </button>
+                      <button
+                        type="button"
+                        className="mam-btn"
+                        onClick={async () => {
+                          try {
+                            const cap = await mamApi.browserCapturarJanelaAssistida()
+                            if (!extUrl.trim()) setExtUrl(cap.url)
+                            setExtHtml(cap.html)
+                            if (cap.urls_imagens.length > 0) {
+                              setExtUrlsTexto(cap.urls_imagens.join('\n'))
+                            }
+                            setMensagem(`Capturadas ${cap.urls_imagens.length} página(s) da Janela Assistida.`)
+                          } catch (err) {
+                            setMensagem(String(err))
+                          }
+                        }}
+                      >
+                        Capturar
+                      </button>
+                    </>
+                  )}
+                </div>
                 <textarea
                   className="mam-textarea"
                   placeholder="Lista ordenada de URLs de páginas (uma por linha, opcional)"
