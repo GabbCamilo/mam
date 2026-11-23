@@ -124,8 +124,8 @@ export function CbzReader({
         if (indiceAtual >= totalPaginasLongStrip - 1) {
           await mamApi.marcarLido(capitulo.id, true)
         }
-        const inicio = Math.max(0, indiceAtual - 2)
-        const fim = Math.min(totalPaginasLongStrip - 1, indiceAtual + 4)
+        const inicio = Math.max(0, indiceAtual - 1)
+        const fim = Math.min(totalPaginasLongStrip - 1, indiceAtual + 2)
         const faltantes: number[] = []
         for (let i = inicio; i <= fim; i++) {
           if (!paginasLongStrip[i]) faltantes.push(i)
@@ -142,7 +142,7 @@ export function CbzReader({
             const next: Record<number, PaginaExtraida> = {}
             for (const [k, v] of Object.entries(prev)) {
               const idx = Number(k)
-              if (Math.abs(idx - indiceAtual) <= 10) {
+              if (Math.abs(idx - indiceAtual) <= 5) {
                 next[idx] = v
               }
             }
@@ -168,8 +168,8 @@ export function CbzReader({
         }
 
         if (modo === 'vertical') {
-          const inicio = Math.max(0, indiceAtual - 2)
-          const fim = Math.min(p1.total_paginas - 1, indiceAtual + 4)
+          const inicio = Math.max(0, indiceAtual - 1)
+          const fim = Math.min(p1.total_paginas - 1, indiceAtual + 2)
           const mapaInicial: Record<number, PaginaExtraida> = { [indiceAtual]: p1 }
           const indicesExtras: number[] = []
           for (let i = inicio; i <= fim; i++) {
@@ -586,6 +586,7 @@ export function CbzReader({
                   <img
                     src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
                     alt={paginaPrincipal.nome}
+                    decoding="async"
                     style={{
                       maxWidth: '100%',
                       maxHeight: `${0.82 * zoom}vh`,
@@ -610,6 +611,7 @@ export function CbzReader({
                   <img
                     src={`data:${paginaSecundaria.mime_type};base64,${paginaSecundaria.dados_base64}`}
                     alt={paginaSecundaria.nome}
+                    decoding="async"
                     style={{
                       maxWidth: '100%',
                       maxHeight: `${0.82 * zoom}vh`,
@@ -650,6 +652,7 @@ export function CbzReader({
                 <img
                   src={`data:${paginaPrincipal.mime_type};base64,${paginaPrincipal.dados_base64}`}
                   alt={paginaPrincipal.nome}
+                  decoding="async"
                   onClick={handleClickNavegacaoImagem}
                   title="Clique na esquerda para voltar ou na direita para avançar"
                   style={{

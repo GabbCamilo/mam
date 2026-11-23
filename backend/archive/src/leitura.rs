@@ -92,14 +92,11 @@ fn detectar_paginas_ausentes_numericas(paginas: &[String]) -> Vec<i32> {
     ausentes
 }
 
-/// Lê os bytes de uma página específica de um CBZ sob demanda em memória.
-pub fn ler_pagina_cbz<P: AsRef<Path>>(
-    caminho_cbz: P,
-    indice: usize,
-) -> Result<PaginaExtraida, ArchiveError> {
+/// Lista os nomes de imagens ordenados dentro de um arquivo CBZ.
+pub fn listar_paginas_ordenadas_cbz<P: AsRef<Path>>(caminho_cbz: P) -> Result<Vec<String>, ArchiveError> {
     let file = File::open(caminho_cbz.as_ref()).map_err(ArchiveError::Io)?;
     let reader = BufReader::new(file);
-    let mut archive = ZipArchive::new(reader)
+    let archive = ZipArchive::new(reader)
         .map_err(|e| ArchiveError::CbzInvalido(format!("CBZ inválido: {}", e)))?;
 
     let mut paginas: Vec<String> = archive
@@ -109,28 +106,52 @@ pub fn ler_pagina_cbz<P: AsRef<Path>>(
         .collect();
 
     paginas.sort();
+    Ok(paginas)
+}
+
+/// Lê os bytes de uma página específica de um CBZ dado o nome já resolvido da entrada.
+pub fn ler_pagina_cbz_por_nome<P: AsRef<Path>>(
+    caminho_cbz: P,
+    nome_alvo: &str,
+    total_paginas: usize,
+) -> Result<PaginaExtraida, ArchiveError> {
+    let file = File::open(caminho_cbz.as_ref()).map_err(ArchiveError::Io)?;
+    let reader = BufReader::new(file);
+    let mut archive = ZipArchive::new(reader)
+        .map_err(|e| ArchiveError::CbzInvalido(format!("CBZ inválido: {}", e)))?;
+
+    let mut entrada = archive
+        .by_name(nome_alvo)
+        .map_err(|e| ArchiveError::ImagemNaoEncontrada(format!("{}: {}", nome_alvo, e)))?;
+
+    let tamanho_estimado = usize::try_from(entrada.size()).unwrap_or(0);
+    let mut buffer = Vec::with_capacity(tamanho_estimado);
+    entrada.read_to_end(&mut buffer).map_err(ArchiveError::Io)?;
+
+    Ok(PaginaExtraida {
+        mime_type: inferir_mime_type(nome_alvo).to_string(),
+        nome: nome_alvo.to_string(),
+        dados_base64: codificar_base64(&buffer),
+        total_paginas,
+    })
+}
+
+/// Lê os bytes de uma página específica de um CBZ sob demanda em memória.
+pub fn ler_pagina_cbz<P: AsRef<Path>>(
+    caminho_cbz: P,
+    indice: usize,
+) -> Result<PaginaExtraida, ArchiveError> {
+    let paginas = listar_paginas_ordenadas_cbz(&caminho_cbz)?;
     let total_paginas = paginas.len();
 
-    let nome_alvo = paginas.get(indice).cloned().ok_or_else(|| {
+    let nome_alvo = paginas.get(indice).ok_or_else(|| {
         ArchiveError::ImagemNaoEncontrada(format!(
             "Índice de página {} fora dos limites (total: {})",
             indice, total_paginas
         ))
     })?;
 
-    let mut entrada = archive
-        .by_name(&nome_alvo)
-        .map_err(|e| ArchiveError::ImagemNaoEncontrada(format!("{}: {}", nome_alvo, e)))?;
-
-    let mut buffer = Vec::new();
-    entrada.read_to_end(&mut buffer).map_err(ArchiveError::Io)?;
-
-    Ok(PaginaExtraida {
-        mime_type: inferir_mime_type(&nome_alvo).to_string(),
-        nome: nome_alvo,
-        dados_base64: codificar_base64(&buffer),
-        total_paginas,
-    })
+    ler_pagina_cbz_por_nome(caminho_cbz, nome_alvo, total_paginas)
 }
 
 fn inferir_mime_type(nome: &str) -> &'static str {
@@ -147,27 +168,27 @@ fn inferir_mime_type(nome: &str) -> &'static str {
 
 fn codificar_base64(bytes: &[u8]) -> String {
     const TABELA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut saida = String::with_capacity(((bytes.len() + 2) / 3) * 4);
+    let mut saida = Vec::with_capacity(((bytes.len() + 2) / 3) * 4);
     for chunk in bytes.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
         let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
         let triplo = (b0 << 16) | (b1 << 8) | b2;
 
-        saida.push(TABELA[((triplo >> 18) & 0x3F) as usize] as char);
-        saida.push(TABELA[((triplo >> 12) & 0x3F) as usize] as char);
+        saida.push(TABELA[((triplo >> 18) & 0x3F) as usize]);
+        saida.push(TABELA[((triplo >> 12) & 0x3F) as usize]);
         if chunk.len() > 1 {
-            saida.push(TABELA[((triplo >> 6) & 0x3F) as usize] as char);
+            saida.push(TABELA[((triplo >> 6) & 0x3F) as usize]);
         } else {
-            saida.push('=');
+            saida.push(b'=');
         }
         if chunk.len() > 2 {
-            saida.push(TABELA[(triplo & 0x3F) as usize] as char);
+            saida.push(TABELA[(triplo & 0x3F) as usize]);
         } else {
-            saida.push('=');
+            saida.push(b'=');
         }
     }
-    saida
+    String::from_utf8(saida).unwrap_or_default()
 }
 
 #[cfg(test)]

@@ -5,13 +5,15 @@
 //! Nunca modifica arquivos CBZ originais (leitura apenas para validação).
 //! Geração utiliza arquivos temporários e operações de escrita seguras.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 
 use mam_database::Database;
+use mam_storage::CacheL1Lru;
 
 use crate::criacao::criar_cbz;
-use crate::leitura::{ler_cbz, ler_pagina_cbz};
+use crate::leitura::{ler_cbz, ler_pagina_cbz_por_nome, listar_paginas_ordenadas_cbz};
 use crate::validacao::validar_cbz;
 
 pub use crate::leitura::PaginaExtraida;
@@ -54,11 +56,15 @@ pub struct CbzLido {
 /// Gerenciador de archive CBZ.
 pub struct ArchiveManager {
     db: Arc<Database>,
+    indice_paginas_cache: Arc<tokio::sync::Mutex<CacheL1Lru<(PathBuf, u64, u128), Vec<String>>>>,
 }
 
 impl ArchiveManager {
     pub fn nova(db: Arc<Database>) -> Self {
-        Self { db }
+        Self {
+            db,
+            indice_paginas_cache: Arc::new(tokio::sync::Mutex::new(CacheL1Lru::nova(64))),
+        }
     }
 
     /// Cria um arquivo CBZ a partir de imagens em um diretório de origem.
@@ -132,16 +138,58 @@ impl ArchiveManager {
         Ok(cbz.paginas_ausentes)
     }
 
-    /// Lê uma página específica de um CBZ sob demanda em memória.
+    /// Lê uma página específica de um CBZ sob demanda em memória, reutilizando o índice ordenado de entradas.
     pub async fn ler_pagina(
         &self,
         caminho_cbz: &Path,
         indice: usize,
     ) -> Result<PaginaExtraida, ArchiveError> {
         let caminho = caminho_cbz.to_path_buf();
-        tokio::task::spawn_blocking(move || ler_pagina_cbz(&caminho, indice))
-            .await
-            .map_err(|e| ArchiveError::CbzInvalido(format!("Falha de tarefa em segundo plano: {}", e)))?
+        let meta = tokio::fs::metadata(&caminho).await.map_err(ArchiveError::Io)?;
+        let modificado_ns = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let chave_indice = (caminho.clone(), meta.len(), modificado_ns);
+
+        let paginas = {
+            let mut guard = self.indice_paginas_cache.lock().await;
+            guard.obter(&chave_indice).cloned()
+        };
+
+        let paginas = match paginas {
+            Some(lista) => lista,
+            None => {
+                let caminho_idx = caminho.clone();
+                let lista = tokio::task::spawn_blocking(move || listar_paginas_ordenadas_cbz(&caminho_idx))
+                    .await
+                    .map_err(|e| {
+                        ArchiveError::CbzInvalido(format!("Falha de tarefa em segundo plano: {}", e))
+                    })??;
+                let mut guard = self.indice_paginas_cache.lock().await;
+                guard.inserir(chave_indice, lista.clone());
+                lista
+            }
+        };
+
+        let total_paginas = paginas.len();
+        let nome_alvo = paginas
+            .get(indice)
+            .cloned()
+            .ok_or_else(|| {
+                ArchiveError::ImagemNaoEncontrada(format!(
+                    "Índice de página {} fora dos limites (total: {})",
+                    indice, total_paginas
+                ))
+            })?;
+
+        tokio::task::spawn_blocking(move || {
+            ler_pagina_cbz_por_nome(&caminho, &nome_alvo, total_paginas)
+        })
+        .await
+        .map_err(|e| ArchiveError::CbzInvalido(format!("Falha de tarefa em segundo plano: {}", e)))?
     }
 }
 
