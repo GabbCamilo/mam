@@ -106,6 +106,51 @@ class TestWebReader(unittest.TestCase):
         self.assertEqual(len(res), 3)
         self.assertEqual([r["text"] for r in res], ["Ep 101", "Ep 102", "Ep 103"])
 
+    def test_extract_chapters_from_json_bodies_com_inferencia_template(self) -> None:
+        from mam_ai_engine.web_reader import (
+            _extract_chapters_from_json_bodies,
+            _extract_images_from_json_bodies,
+        )
+
+        bodies = [
+            (
+                "https://api.exemplo/graphql",
+                {
+                    "data": {
+                        "chapters": [
+                            {"id": "abc101", "number": 1, "title": "Início", "lang": "pt-br"},
+                            {"id": "abc102", "number": 2, "title": "Despertar", "lang": "pt-br"},
+                            {"id": "abc102", "number": 2, "title": "Despertar", "lang": "pt-br"},
+                        ]
+                    }
+                },
+            )
+        ]
+        dom_anchors = [{"href": "https://site.exemplo/series/obra/ep-abc101"}]
+        caps = _extract_chapters_from_json_bodies(
+            bodies, "https://site.exemplo/series/obra", dom_anchors=dom_anchors
+        )
+        self.assertEqual(len(caps), 2)
+        self.assertEqual(caps[0]["href"], "https://site.exemplo/series/obra/ep-abc101")
+        self.assertEqual(caps[1]["href"], "https://site.exemplo/series/obra/ep-abc102")
+        self.assertEqual(caps[1]["numero"], 2)
+
+        imgs = _extract_images_from_json_bodies(
+            [
+                (
+                    "inline",
+                    {
+                        "pages": [
+                            "https://cdn.exemplo/001.jpg",
+                            "https://cdn.exemplo/logo.png",
+                            "https://cdn.exemplo/002.webp",
+                        ]
+                    },
+                )
+            ]
+        )
+        self.assertEqual(imgs, ["https://cdn.exemplo/001.jpg", "https://cdn.exemplo/002.webp"])
+
 
 if __name__ == "__main__":
     unittest.main()

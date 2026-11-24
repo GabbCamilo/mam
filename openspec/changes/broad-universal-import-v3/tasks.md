@@ -15,7 +15,7 @@
   - **Critério de aceitação:** Filtrar ícones/banners por dimensões (`naturalWidth >= 400`, `naturalHeight >= 500`), aceitar URLs de imagem sem extensão explícita quando dentro do leitor e suportar extração de `<canvas>` quando aplicável.
   - **Gate:** `python -m unittest discover -s ai-engine/tests -v`
 
-- [ ] **MAM-AMP-003 — Inferência de template de URL em respostas JSON/GraphQL**
+- [x] **MAM-AMP-003 — Inferência de template de URL em respostas JSON/GraphQL**
   - **Arquivos:** `ai-engine/mam_ai_engine/web_reader.py`, `ai-engine/tests/test_web_reader.py`
   - **Critério de aceitação:** Extrair capítulos e páginas de payloads JSON aninhados (GraphQL/REST) sem duplicatas.
   - **Gate:** `python -m unittest discover -s ai-engine/tests -v`

@@ -293,10 +293,21 @@ class _BrowserSession:
 def _wait_spa_settle(cdp: _CdpClient, check_js: str, max_wait_s: float = 8.0) -> None:
     deadline = time.monotonic() + max_wait_s
     while time.monotonic() < deadline:
-        ready = cdp.eval_js(
-            f"const r = document.readyState === 'complete'; const ok = Boolean({check_js}); return r && ok;"
+        state = cdp.eval_js(
+            f"""
+            const cf = /just a moment|attention required/i.test(document.title || '')
+              || Boolean(document.querySelector('#challenge-running, #cf-challenge-running, [name="cf-turnstile-response"]'));
+            if (cf) return 'cf';
+            const r = document.readyState === 'complete';
+            const ok = Boolean({check_js});
+            return (r && ok) ? 'ready' : 'wait';
+            """
         )
-        if ready:
+        if state == "cf":
+            raise RuntimeError(
+                "CLOUDFLARE_CHALLENGE: Site protegido por verificação humana (use Janela Assistida)."
+            )
+        if state == "ready":
             time.sleep(0.35)
             return
         time.sleep(0.25)
@@ -605,13 +616,73 @@ def _collect_json_network_bodies(cdp: _CdpClient) -> list[tuple[str, Any]]:
     return bodies
 
 
+def _collect_inline_script_json_bodies(cdp: _CdpClient) -> list[tuple[str, Any]]:
+    """Extrai payloads JSON embutidos no DOM (ex.: __NEXT_DATA__ ou scripts application/json)."""
+    raw_scripts = cdp.eval_js(
+        """
+        const out = [];
+        const nextEl = document.getElementById('__NEXT_DATA__');
+        if (nextEl && nextEl.textContent) out.push({ src: '__NEXT_DATA__', text: nextEl.textContent });
+        for (const s of document.querySelectorAll('script[type="application/json"]')) {
+          if (s.id === '__NEXT_DATA__') continue;
+          if (s.textContent && s.textContent.length > 20) out.push({ src: s.id || 'inline-json', text: s.textContent });
+        }
+        return out;
+        """
+    ) or []
+    bodies: list[tuple[str, Any]] = []
+    for item in raw_scripts:
+        try:
+            parsed = json.loads(str(item.get("text") or ""))
+            bodies.append((str(item.get("src") or "inline"), parsed))
+        except Exception:  # noqa: BLE001
+            continue
+    return bodies
+
+
+def _infer_url_template_from_anchors(
+    dom_anchors: list[dict[str, Any]] | None,
+    candidate_tokens: list[str],
+) -> str | None:
+    """Cruza âncoras do DOM com IDs/slugs do JSON para inferir o template real de URL."""
+    if not dom_anchors or not candidate_tokens:
+        return None
+    for a in dom_anchors:
+        href = str(a.get("href") or "").strip()
+        if not href:
+            continue
+        for tok in candidate_tokens:
+            if tok and len(tok) >= 3 and tok in href:
+                return href.replace(tok, "{token}", 1)
+    return None
+
+
 def _extract_chapters_from_json_bodies(
     bodies: list[tuple[str, Any]],
     base_url: str,
+    dom_anchors: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Extrai capítulos candidatos de respostas JSON de APIs SPA (ex.: atsu.moe, mangaball, comick)."""
+    """Extrai capítulos candidatos de respostas JSON de APIs SPA (ex.: atsu.moe, mangaball, comick, GraphQL)."""
     parsed_base = urllib.parse.urlparse(base_url)
     origin = f"{parsed_base.scheme}://{parsed_base.netloc}" if parsed_base.scheme and parsed_base.netloc else ""
+    tokens_vistos: list[str] = []
+
+    def collect_tokens(node: Any) -> None:
+        if isinstance(node, list):
+            for it in node:
+                collect_tokens(it)
+        elif isinstance(node, dict):
+            tok = node.get("slug") or node.get("hid") or node.get("id")
+            if tok is not None and (node.get("number") is not None or node.get("chapter") is not None or node.get("chap") is not None):
+                tokens_vistos.append(str(tok))
+            for val in node.values():
+                if isinstance(val, (dict, list)):
+                    collect_tokens(val)
+
+    for _, payload in bodies:
+        collect_tokens(payload)
+    inferred_template = _infer_url_template_from_anchors(dom_anchors, tokens_vistos[:30])
+
     capitulos: list[dict[str, Any]] = []
     vistos: set[str] = set()
 
@@ -624,9 +695,11 @@ def _extract_chapters_from_json_bodies(
             return
 
         href_cand = node.get("url") or node.get("href") or node.get("path")
-        num_cand = node.get("number") or node.get("chapter") or node.get("chap")
+        num_cand = node.get("number") if node.get("number") is not None else (
+            node.get("chapter") if node.get("chapter") is not None else node.get("chap")
+        )
         title_cand = node.get("title") or node.get("name")
-        id_cand = node.get("id") or node.get("hid") or node.get("slug")
+        id_cand = node.get("slug") or node.get("hid") or node.get("id")
 
         if isinstance(href_cand, str) and href_cand.strip():
             full = urllib.parse.urljoin(origin or base_url, href_cand.strip())
@@ -650,9 +723,12 @@ def _extract_chapters_from_json_bodies(
                         }
                     )
         elif id_cand is not None and num_cand is not None and origin:
-            # Síntese de URL para SPAs que retornam apenas ID + número do capítulo
-            base_clean = base_url.rstrip("/")
-            synth = f"{base_clean}/{id_cand}" if "/manga/" in base_clean else f"{origin}/read/{id_cand}"
+            # Síntese de URL usando template inferido do DOM ou fallback estrutural
+            if inferred_template:
+                synth = inferred_template.replace("{token}", str(id_cand))
+            else:
+                base_clean = base_url.rstrip("/")
+                synth = f"{base_clean}/{id_cand}" if "/manga/" in base_clean else f"{origin}/read/{id_cand}"
             if synth not in vistos:
                 vistos.add(synth)
                 num_int = int(float(num_cand)) if str(num_cand).replace(".", "", 1).isdigit() else None
@@ -752,7 +828,7 @@ def discover_work_chapters(
                         vistos_urls.add(h)
                         capitulos.append(ex)
 
-        if not capitulos:
+        if len(capitulos) <= 2:
             snap_fallback = cdp.eval_js(
                 """
                 return Array.from(document.querySelectorAll('a[href]')).map(a => {
@@ -768,12 +844,16 @@ def discover_work_chapters(
                 });
                 """
             ) or []
-            capitulos = classify_structural_chapter_group(snap_fallback, url)
+            estruturais = classify_structural_chapter_group(snap_fallback, url)
+            if len(estruturais) > len(capitulos):
+                capitulos = estruturais
 
-        if not capitulos:
-            json_bodies = _collect_json_network_bodies(cdp)
-            if json_bodies:
-                capitulos = _extract_chapters_from_json_bodies(json_bodies, url)
+            if len(capitulos) <= 2:
+                json_bodies = _collect_json_network_bodies(cdp) + _collect_inline_script_json_bodies(cdp)
+                if json_bodies:
+                    via_json = _extract_chapters_from_json_bodies(json_bodies, url, dom_anchors=snap_fallback)
+                    if len(via_json) > len(capitulos):
+                        capitulos = via_json
 
         return {
             "titulo": titulo_obra or "Obra Importada",
@@ -871,7 +951,7 @@ def extract_chapter_pages(url: str) -> dict[str, Any]:
             time.sleep(0.45)
 
         if not urls_ordenadas:
-            json_bodies = _collect_json_network_bodies(cdp)
+            json_bodies = _collect_json_network_bodies(cdp) + _collect_inline_script_json_bodies(cdp)
             if json_bodies:
                 urls_ordenadas = _extract_images_from_json_bodies(json_bodies)
 
