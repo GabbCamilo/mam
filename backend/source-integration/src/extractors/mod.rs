@@ -8,9 +8,49 @@ pub mod mangadex;
 pub mod mangafire;
 pub mod nhentai;
 
+use std::future::Future;
 use std::io::{Cursor, Write};
 use std::path::Path;
-use std::sync::Arc;
+use std::pin::Pin;
+use std::sync::{Arc, OnceLock};
+
+/// Callback opcional registrado pelo app desktop para capturar páginas via Janela Assistida (`mam-assistido`).
+pub type FallbackJanelaAssistidaFn = Arc<
+    dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<Vec<String>, SourceError>> + Send>>
+        + Send
+        + Sync,
+>;
+
+static FALLBACK_JANELA_ASSISTIDA: OnceLock<FallbackJanelaAssistidaFn> = OnceLock::new();
+
+/// Registra o fallback de captura via Janela Assistida do WebView (chamado pelo `src-tauri` no startup).
+pub fn registrar_fallback_janela_assistida(cb: FallbackJanelaAssistidaFn) {
+    let _ = FALLBACK_JANELA_ASSISTIDA.set(cb);
+}
+
+async fn extrair_paginas_com_fallback(
+    extrator: &Arc<dyn ExtratorSite>,
+    entrada: &EntradaImportacao,
+) -> Result<Vec<String>, SourceError> {
+    let resultado = extrator.extrair_paginas(entrada).await;
+    if let Ok(ref urls) = resultado {
+        if !urls.is_empty() {
+            return Ok(urls.clone());
+        }
+    }
+
+    if let Some(url) = entrada.url.as_deref().filter(|u| !u.trim().is_empty()) {
+        if let Some(cb) = FALLBACK_JANELA_ASSISTIDA.get() {
+            if let Ok(urls_assistidas) = cb(url.to_string()).await {
+                if !urls_assistidas.is_empty() {
+                    return Ok(urls_assistidas);
+                }
+            }
+        }
+    }
+
+    resultado
+}
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -129,7 +169,7 @@ impl RegistroExtratores {
             .selecionar(entrada.url.as_deref())
             .ok_or_else(|| SourceError::Operacao("Nenhum extrator registrado".to_string()))?;
 
-        let urls = extrator.extrair_paginas(entrada).await?;
+        let urls = extrair_paginas_com_fallback(&extrator, entrada).await?;
         if urls.is_empty() {
             return Err(SourceError::Operacao(
                 "Nenhuma URL de página obtida para o capítulo".to_string(),
@@ -137,13 +177,26 @@ impl RegistroExtratores {
         }
 
         let client = reqwest::Client::builder()
-            .user_agent("MAM-MangaArchiveManager/0.1.0")
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+            .http1_only()
+            .pool_max_idle_per_host(0)
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
+        let origem_ref = entrada
+            .url
+            .as_deref()
+            .map(extrair_origem)
+            .filter(|o| !o.is_empty())
+            .map(|o| format!("{}/", o));
+
         let mut paginas_bytes = Vec::with_capacity(urls.len());
         for url_img in &urls {
-            let resp = client.get(url_img).send().await?;
+            let mut req = client.get(url_img);
+            if let Some(ref ref_url) = origem_ref {
+                req = req.header(reqwest::header::REFERER, ref_url);
+            }
+            let resp = req.send().await?;
             if !resp.status().is_success() {
                 return Err(SourceError::Operacao(format!(
                     "Falha ao baixar imagem '{}': HTTP {}",
@@ -247,7 +300,7 @@ impl RegistroExtratores {
             urls_ordenadas: Vec::new(),
         };
 
-        let urls_paginas = extrator.extrair_paginas(&entrada).await?;
+        let urls_paginas = extrair_paginas_com_fallback(&extrator, &entrada).await?;
         if urls_paginas.is_empty() {
             return Err(SourceError::Operacao(
                 "Nenhuma página encontrada para o capítulo informado".to_string(),

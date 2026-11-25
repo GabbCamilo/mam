@@ -403,17 +403,12 @@ async fn browser_abrir_janela_assistida(
     Ok(())
 }
 
-#[tauri::command]
-async fn browser_capturar_janela_assistida(
-    app: tauri::AppHandle,
+async fn capturar_janela_assistida_do_webview(
+    win: &tauri::WebviewWindow,
 ) -> Result<CapturaJanelaAssistida, String> {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-    let win = app
-        .get_webview_window("mam-assistido")
-        .ok_or_else(|| "Abra primeiro a Janela Assistida antes de capturar.".to_string())?;
 
     let listener = TcpListener::bind("127.0.0.1:0")
         .map_err(|e| format!("Falha ao iniciar receptor local de captura: {}", e))?;
@@ -507,6 +502,16 @@ async fn browser_capturar_janela_assistida(
         Ok(Err(e)) => Err(e.to_string()),
         Err(_) => Err("Tempo esgotado na captura automática (site pode bloquear localhost por CSP). Use Ctrl+U / Ctrl+A / Ctrl+C no navegador e cole no campo HTML.".to_string()),
     }
+}
+
+#[tauri::command]
+async fn browser_capturar_janela_assistida(
+    app: tauri::AppHandle,
+) -> Result<CapturaJanelaAssistida, String> {
+    let win = app
+        .get_webview_window("mam-assistido")
+        .ok_or_else(|| "Abra primeiro a Janela Assistida antes de capturar.".to_string())?;
+    capturar_janela_assistida_do_webview(&win).await
 }
 
 #[tauri::command]
@@ -1066,6 +1071,41 @@ pub fn run() {
           .await
       });
       app.manage(Arc::new(source_manager));
+
+      // Registra fallback automático via Janela Assistida (`mam-assistido`) para capítulos protegidos por Cloudflare
+      let app_assistido = app.handle().clone();
+      let trava_assistido = Arc::new(tokio::sync::Mutex::new(()));
+      mam_source_integration::extractors::registrar_fallback_janela_assistida(Arc::new(move |url_cap| {
+        let app_ref = app_assistido.clone();
+        let trava = trava_assistido.clone();
+        Box::pin(async move {
+          let _guard = trava.lock().await;
+          let win = app_ref
+            .get_webview_window("mam-assistido")
+            .ok_or_else(|| mam_source_integration::SourceError::Operacao("Janela Assistida fechada".to_string()))?;
+          let parsed = tauri::Url::parse(url_cap.trim())
+            .map_err(|e| mam_source_integration::SourceError::Operacao(e.to_string()))?;
+          win.navigate(parsed)
+            .map_err(|e| mam_source_integration::SourceError::Operacao(e.to_string()))?;
+          tokio::time::sleep(std::time::Duration::from_millis(1800)).await;
+
+          for _ in 0..10 {
+            if let Ok(cap) = capturar_janela_assistida_do_webview(&win).await {
+              let via_html = mam_source_integration::extractors::extrair_urls_imagens_html(&cap.html);
+              if via_html.len() >= 2 {
+                return Ok(via_html);
+              }
+              if cap.urls_imagens.len() >= 2 {
+                return Ok(cap.urls_imagens);
+              }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+          }
+          Err(mam_source_integration::SourceError::Operacao(
+            "Janela Assistida não encontrou páginas carregadas para este capítulo".to_string(),
+          ))
+        })
+      }));
 
       // Inicializa o TransferManager como estado
       let transfer_manager = TransferManager::nova();
