@@ -409,9 +409,8 @@ pub async fn descobrir_capitulos_por_link_com_biblioteca(
         return nhentai::obter_obra_galeria(url_limpa).await;
     }
 
-    let padroes_extra =
-        crate::universal::ConectorUniversal::correlacionar_link(url_limpa, raiz_biblioteca)
-            .padroes_url;
+    let rota = crate::universal::ConectorUniversal::correlacionar_link(url_limpa, raiz_biblioteca);
+    let padroes_extra = rota.padroes_url.clone();
 
     // URL direta de capítulo unitário: extrai metadados e páginas do próprio capítulo sem varrer Prev/Next como lote.
     if eh_url_capitulo_direto(url_limpa, &padroes_extra) {

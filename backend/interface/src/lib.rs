@@ -76,15 +76,47 @@ pub async fn library_raiz(library_manager: Arc<LibraryManager>) -> Result<String
     Ok(library_manager.raiz().to_string_lossy().to_string())
 }
 
-/// Cadastra uma nova obra na biblioteca.
+fn sanitizar_nome_pasta_obra(titulo: &str) -> String {
+    let limpo: String = titulo
+        .trim()
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            c if c.is_control() => '_',
+            _ => c,
+        })
+        .collect();
+    let trimmed = limpo.trim().trim_matches('.').trim();
+    if trimmed.is_empty() {
+        "Obra_Sem_Titulo".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Cadastra uma nova obra na biblioteca, criando automaticamente sua pasta na raiz caso não informada.
 pub async fn library_criar_obra(
     library_manager: Arc<LibraryManager>,
     titulo: String,
     caminho_relativo: String,
     origem: Option<String>,
 ) -> Result<Obra, String> {
+    let titulo_limpo = titulo.trim().to_string();
+    if titulo_limpo.is_empty() {
+        return Err("Informe o título da obra.".to_string());
+    }
+    let caminho_final = if caminho_relativo.trim().is_empty() {
+        format!("Manga/{}", sanitizar_nome_pasta_obra(&titulo_limpo))
+    } else {
+        caminho_relativo.trim().replace('\\', "/")
+    };
+
+    let pasta_abs = library_manager.raiz().join(&caminho_final);
+    std::fs::create_dir_all(&pasta_abs)
+        .map_err(|e| format!("Falha ao criar pasta da obra em '{}': {}", pasta_abs.display(), e))?;
+
     library_manager
-        .criar_obra(titulo, caminho_relativo, origem)
+        .criar_obra(titulo_limpo, caminho_final, origem.or_else(|| Some("manual".to_string())))
         .await
         .map_err(|e| e.to_string())
 }
@@ -269,13 +301,18 @@ pub async fn source_listar_capitulos_por_conector(
     if fonte_id == "mangadex" {
         return source_listar_capitulos(source_manager, fonte_id, obra_id_fonte).await;
     }
-    let res = mam_source_integration::extractors::descobrir_capitulos_por_link_com_opcoes(
+    let mut res = mam_source_integration::extractors::descobrir_capitulos_por_link_com_opcoes(
         &obra_id_fonte,
         None,
         Some("pt-br"),
     )
     .await
     .map_err(|e| e.to_string())?;
+    for cap in &mut res.capitulos {
+        if cap.fonte_id == "extrator-link" && !fonte_id.trim().is_empty() {
+            cap.fonte_id = fonte_id.clone();
+        }
+    }
     Ok(res.capitulos)
 }
 

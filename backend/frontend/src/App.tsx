@@ -52,6 +52,20 @@ function obterDiretorioCapitulo(cap: Capitulo): string {
   return idx > 0 ? cap.caminho_relativo.slice(0, idx) : cap.caminho_relativo
 }
 
+function formatarOrigemFonte(origem?: string | null): string {
+  const raw = (origem ?? '').trim().toLowerCase()
+  if (!raw || raw === 'local') return 'Biblioteca Local'
+  if (raw === 'manual') return 'Cadastro Manual'
+  if (raw === 'mangadex') return 'MangaDex'
+  if (raw === 'mangafire') return 'MangaFire'
+  if (raw === 'weebcentral') return 'WeebCentral'
+  if (raw === 'mangaball') return 'MangaBall'
+  if (raw === 'mangalivre') return 'MangaLivre'
+  if (raw === 'nhentai') return 'Manga Alternativo'
+  if (raw === 'extrator-link' || raw === 'generico') return 'Extrator Web (IA)'
+  return origem!.trim()
+}
+
 function App() {
   const [aparencia, setAparencia] = useState<ConfigAparencia>(() => carregarAparencia())
   const [modalTemaAberto, setModalTemaAberto] = useState(false)
@@ -332,12 +346,12 @@ function App() {
 
   async function handleCriarObra(e: React.FormEvent) {
     e.preventDefault()
-    if (!tituloNovaObra.trim() || !caminhoNovaObra.trim()) return
+    if (!tituloNovaObra.trim()) return
     try {
-      await mamApi.criarObra(tituloNovaObra.trim(), caminhoNovaObra.trim())
+      const criada = await mamApi.criarObra(tituloNovaObra.trim(), '', 'manual')
       setTituloNovaObra('')
       setCaminhoNovaObra('')
-      setMensagem('Obra cadastrada com sucesso.')
+      setMensagem(`Obra "${criada.titulo}" cadastrada em ${criada.caminho_relativo}.`)
       await carregarObras()
     } catch (err) {
       setMensagem(`Erro ao cadastrar obra: ${String(err)}`)
@@ -1166,15 +1180,9 @@ function App() {
               <div className="mam-toolbar-row">
                 <input
                   className="mam-input mam-search-input"
-                  placeholder="Título da nova obra..."
+                  placeholder="Título da nova obra (cria pasta automaticamente na biblioteca)..."
                   value={tituloNovaObra}
                   onChange={(e) => setTituloNovaObra(e.target.value)}
-                />
-                <input
-                  className="mam-input mam-search-input"
-                  placeholder="Caminho relativo (ex: Manga/Medaka Box)"
-                  value={caminhoNovaObra}
-                  onChange={(e) => setCaminhoNovaObra(e.target.value)}
                 />
                 <button className="mam-btn mam-btn-primary" type="submit">
                   + Cadastrar Obra
@@ -1223,8 +1231,11 @@ function App() {
                           <div style={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {item.obra.titulo}
                           </div>
-                          <div className="mam-brand-sub" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {item.obra.caminho_relativo}
+                          <div
+                            className="mam-brand-sub"
+                            style={{ fontSize: '0.74rem', opacity: 0.78, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          >
+                            Fonte: {formatarOrigemFonte(item.obra.origem)}
                           </div>
                         </div>
                       </div>
@@ -1266,7 +1277,9 @@ function App() {
                         )}
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <h2 className="mam-section-title">{detalhes.obra.titulo}</h2>
-                          <p className="mam-section-desc">{detalhes.obra.caminho_relativo}</p>
+                          <p className="mam-section-desc" style={{ marginBottom: 0 }}>
+                            Fonte: {formatarOrigemFonte(detalhes.obra.origem)} • {detalhes.obra.caminho_relativo}
+                          </p>
                         </div>
                       </div>
 
