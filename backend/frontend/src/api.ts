@@ -172,6 +172,7 @@ export interface EntradaImportacao {
   url?: string | null
   html?: string | null
   urls_ordenadas: string[]
+  obra_id_destino?: string | null
 }
 
 export interface ResultadoImportacao {

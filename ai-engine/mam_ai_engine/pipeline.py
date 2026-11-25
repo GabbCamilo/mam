@@ -219,11 +219,13 @@ def smart_discover_chapters(params: dict[str, Any]) -> dict[str, Any]:
     url_obra = str(params.get("url_obra", "")).strip()
     idioma_preferido = str(params.get("idioma_preferido") or "pt-br").strip()
     max_paginas = params.get("max_paginas")
+    memory_hints = params.get("memory_hints")
 
     bruto = discover_work_chapters(
         url=url_obra,
         preferred_lang=idioma_preferido,
         max_pages=int(max_paginas) if max_paginas is not None else None,
+        memory_hints=memory_hints if isinstance(memory_hints, dict) else None,
     )
 
     capitulos_out: list[dict[str, Any]] = []
@@ -274,7 +276,11 @@ def smart_extract_chapter_pages(params: dict[str, Any]) -> dict[str, Any]:
     from .web_reader import extract_chapter_pages
 
     url_capitulo = str(params.get("url_capitulo", "")).strip()
-    return extract_chapter_pages(url_capitulo)
+    memory_hints = params.get("memory_hints")
+    return extract_chapter_pages(
+        url_capitulo,
+        memory_hints=memory_hints if isinstance(memory_hints, dict) else None,
+    )
 
 
 def smart_search_works(params: dict[str, Any]) -> dict[str, Any]:

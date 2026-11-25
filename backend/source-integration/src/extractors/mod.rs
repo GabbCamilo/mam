@@ -73,6 +73,8 @@ pub struct EntradaImportacao {
     pub html: Option<String>,
     #[serde(default)]
     pub urls_ordenadas: Vec<String>,
+    #[serde(default)]
+    pub obra_id_destino: Option<String>,
 }
 
 /// Metadados de um extrator registrado.
@@ -212,8 +214,25 @@ impl RegistroExtratores {
         let cbz_bytes = empacotar_paginas_em_cbz(&paginas_bytes)?;
         let hash = format!("{:x}", Sha256::digest(&cbz_bytes));
 
-        let pasta_obra = sanitizar_nome(&entrada.obra_titulo);
-        let caminho_rel_obra = format!("Manga/{}", pasta_obra);
+        let obra_existente = if let Some(ref id_dest) = entrada.obra_id_destino {
+            let id_trim = id_dest.trim();
+            if !id_trim.is_empty() {
+                db.buscar_obra_por_id(ObraId::from_string(id_trim.to_string())).await?
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let (titulo_efetivo, caminho_rel_obra, obra_para_vincular) = match obra_existente {
+            Some(o) => (o.titulo.clone(), o.caminho_relativo.as_str().to_string(), Some(o)),
+            None => {
+                let pasta_obra = sanitizar_nome(&entrada.obra_titulo);
+                (entrada.obra_titulo.clone(), format!("Manga/{}", pasta_obra), None)
+            }
+        };
+
         let caminho_rel_cap = format!(
             "{}/Capitulo_{:04}.cbz",
             caminho_rel_obra, entrada.numero_capitulo
@@ -230,17 +249,20 @@ impl RegistroExtratores {
         }
         std::fs::rename(&temp, &caminho_abs).map_err(|e| SourceError::Operacao(e.to_string()))?;
 
-        let obra = match db.buscar_obra_por_titulo(&entrada.obra_titulo).await? {
+        let obra = match obra_para_vincular {
             Some(o) => o,
-            None => {
-                db.criar_obra(
-                    ObraId::new(),
-                    entrada.obra_titulo.clone(),
-                    CaminhoRelativo::from_str(caminho_rel_obra),
-                    Some(extrator.id().to_string()),
-                )
-                .await?
-            }
+            None => match db.buscar_obra_por_titulo(&titulo_efetivo).await? {
+                Some(o) => o,
+                None => {
+                    db.criar_obra(
+                        ObraId::new(),
+                        titulo_efetivo.clone(),
+                        CaminhoRelativo::from_str(caminho_rel_obra.clone()),
+                        Some(extrator.id().to_string()),
+                    )
+                    .await?
+                }
+            },
         };
 
         db.registrar_integridade(&caminho_rel_cap, &hash, "valido")
@@ -258,8 +280,8 @@ impl RegistroExtratores {
         .await?;
 
         let detalhes = serde_json::json!({
-            "nome": format!("{} — Cap. {}", entrada.obra_titulo, entrada.numero_capitulo),
-            "pasta": format!("Manga/{}", pasta_obra),
+            "nome": format!("{} — Cap. {}", titulo_efetivo, entrada.numero_capitulo),
+            "pasta": caminho_rel_obra,
             "arquivo": format!("Capitulo_{:04}.cbz", entrada.numero_capitulo),
             "paginas": paginas_bytes.len(),
         })
@@ -275,7 +297,7 @@ impl RegistroExtratores {
 
         Ok(ResultadoImportacao {
             extrator_usado: extrator.id().to_string(),
-            obra_titulo: entrada.obra_titulo.clone(),
+            obra_titulo: titulo_efetivo,
             numero_capitulo: entrada.numero_capitulo,
             caminho_relativo: caminho_rel_cap,
             quantidade_paginas: paginas_bytes.len(),
@@ -298,6 +320,7 @@ impl RegistroExtratores {
             url: Some(url_capitulo.to_string()),
             html: None,
             urls_ordenadas: Vec::new(),
+            obra_id_destino: None,
         };
 
         let urls_paginas = extrair_paginas_com_fallback(&extrator, &entrada).await?;
@@ -387,7 +410,8 @@ pub async fn descobrir_capitulos_por_link_com_biblioteca(
     }
 
     let padroes_extra =
-        crate::connectors::GerenciadorConectores::padroes_capitulo_ativos(raiz_biblioteca);
+        crate::universal::ConectorUniversal::correlacionar_link(url_limpa, raiz_biblioteca)
+            .padroes_url;
 
     // URL direta de capítulo unitário: extrai metadados e páginas do próprio capítulo sem varrer Prev/Next como lote.
     if eh_url_capitulo_direto(url_limpa, &padroes_extra) {
@@ -420,6 +444,7 @@ pub async fn descobrir_capitulos_por_link_com_biblioteca(
                     url: Some(url_limpa.to_string()),
                     html: html_capitulo.clone(),
                     urls_ordenadas: Vec::new(),
+                    obra_id_destino: None,
                 })
                 .await
                 .unwrap_or_default(),
@@ -728,7 +753,8 @@ pub fn extrair_capitulos_de_html_com_biblioteca(
     html: &str,
     raiz_biblioteca: Option<&Path>,
 ) -> ObraExtraidaPorLink {
-    let padroes = crate::connectors::GerenciadorConectores::padroes_capitulo_ativos(raiz_biblioteca);
+    let padroes = crate::universal::ConectorUniversal::correlacionar_link(url_obra, raiz_biblioteca)
+        .padroes_url;
     extrair_capitulos_de_html_com_padroes(url_obra, html, &padroes)
 }
 
@@ -1153,9 +1179,20 @@ fn eh_link_capitulo(url_completa: &str, caminho_obra: &str, padroes_extra: &[Str
         || caminho.contains("-cap-")
         || url_lower.contains("episode_no=")
         || url_lower.contains("chapter_id=")
-        || padroes_extra
-            .iter()
-            .any(|p| p.len() >= 3 && (caminho.contains(p.as_str()) || url_lower.contains(p.as_str())));
+        || padroes_extra.iter().any(|p| {
+            if p.len() < 3 {
+                return false;
+            }
+            if let Some(prefixo) = p.strip_suffix("{num}") {
+                if let Some(pos) = caminho.find(prefixo) {
+                    let resto = &caminho[pos + prefixo.len()..];
+                    let seg = resto.split('/').next().unwrap_or("");
+                    return !seg.is_empty() && seg.chars().any(|c| c.is_ascii_digit());
+                }
+                return false;
+            }
+            caminho.contains(p.as_str()) || url_lower.contains(p.as_str())
+        });
 
     if !caminho_obra.is_empty() && caminho.contains("/title/") {
         return prefixo_obra && tem_padrao_capitulo;
@@ -1690,6 +1727,7 @@ mod tests {
             url: Some("https://mangafire.to/read/jw2-medaka-boxx/en/chapter-1".to_string()),
             html: Some(html.to_string()),
             urls_ordenadas: vec![],
+            obra_id_destino: None,
         };
 
         let paginas = ext.extrair_paginas(&entrada).await.unwrap();
@@ -1715,6 +1753,7 @@ mod tests {
                 "https://cdn.exemplo.com/01.jpg".to_string(),
                 "https://cdn.exemplo.com/02.jpg".to_string(),
             ],
+            obra_id_destino: None,
         };
         let paginas = ext.extrair_paginas(&entrada).await.unwrap();
         assert_eq!(paginas.len(), 2);

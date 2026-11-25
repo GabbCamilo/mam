@@ -1,7 +1,7 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::path::PathBuf;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use mam_database::Database;
 use mam_chapter::ChapterManager;
@@ -383,21 +383,120 @@ struct CapturaJanelaAssistida {
     urls_imagens: Vec<String>,
 }
 
+#[derive(Default)]
+struct SessaoJanelaAssistidaState {
+    url_obra: Option<String>,
+    html_obra: Option<String>,
+}
+
+fn sessao_janela_assistida() -> &'static tokio::sync::Mutex<SessaoJanelaAssistidaState> {
+    static SESSAO: OnceLock<tokio::sync::Mutex<SessaoJanelaAssistidaState>> = OnceLock::new();
+    SESSAO.get_or_init(|| tokio::sync::Mutex::new(SessaoJanelaAssistidaState::default()))
+}
+
+fn eh_pagina_desafio_humano(html: &str) -> bool {
+    let lower = html.to_lowercase();
+    lower.contains("just a moment...")
+        || lower.contains("cf-challenge")
+        || lower.contains("cf-turnstile")
+        || lower.contains("verify you are human")
+        || lower.contains("g-recaptcha")
+        || lower.contains("hcaptcha.com/1/api.js")
+}
+
+fn mesmo_host(a: &str, b: &str) -> bool {
+    let host = |u: &str| {
+        u.split("://")
+            .nth(1)
+            .unwrap_or(u)
+            .split('/')
+            .next()
+            .unwrap_or("")
+            .trim_start_matches("www.")
+            .to_lowercase()
+    };
+    let ha = host(a);
+    let hb = host(b);
+    !ha.is_empty() && ha == hb
+}
+
 #[tauri::command]
 async fn browser_abrir_janela_assistida(
     app: tauri::AppHandle,
     url: String,
 ) -> Result<(), String> {
     let parsed = tauri::Url::parse(url.trim()).map_err(|e| format!("URL inválida: {}", e))?;
+    {
+        let mut s = sessao_janela_assistida().lock().await;
+        s.url_obra = Some(url.trim().to_string());
+        s.html_obra = None;
+    }
+
     if let Some(existing) = app.get_webview_window("mam-assistido") {
         let _ = existing.navigate(parsed);
         let _ = existing.set_focus();
         return Ok(());
     }
 
+    let app_handle = app.clone();
     tauri::WebviewWindowBuilder::new(&app, "mam-assistido", tauri::WebviewUrl::External(parsed))
-        .title("MAM — Navegador Assistido (Carregue a página e clique em Capturar no MAM)")
+        .title("MAM — Navegador Assistido (Auto-captura ativa)")
         .inner_size(1120.0, 820.0)
+        .on_page_load(move |win, payload| {
+            if payload.event() != tauri::webview::PageLoadEvent::Finished {
+                return;
+            }
+            let app_inner = app_handle.clone();
+            let win_clone = win.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+                let Ok(cap) = capturar_janela_assistida_do_webview(&win_clone).await else {
+                    return;
+                };
+                if eh_pagina_desafio_humano(&cap.html) {
+                    return;
+                }
+
+                // Atualiza estado da sessão e executa aprendizado passivo se houve transição obra -> capítulo
+                let mut aprendizado_emit: Option<mam_source_integration::connectors::ConectorSiteConfig> = None;
+                {
+                    let mut s = sessao_janela_assistida().lock().await;
+                    let cap_norm = cap.url.trim_end_matches('/').to_string();
+                    match s.url_obra.clone() {
+                        Some(ref u_obra) if u_obra.trim_end_matches('/') == cap_norm => {
+                            s.html_obra = Some(cap.html.clone());
+                        }
+                        Some(ref u_obra)
+                            if mesmo_host(u_obra, &cap.url) && cap.urls_imagens.len() >= 3 =>
+                        {
+                            if let Some(lib_mgr) = app_inner.try_state::<Arc<LibraryManager>>() {
+                                if let Ok(cfg) = mam_source_integration::connectors::GerenciadorConectores::aprender_de_sessao(
+                                    lib_mgr.raiz(),
+                                    mam_source_integration::connectors::EntradaAprendizadoSessao {
+                                        url_obra: u_obra,
+                                        html_obra: s.html_obra.as_deref(),
+                                        url_capitulo: &cap.url,
+                                        html_capitulo: Some(&cap.html),
+                                    },
+                                ) {
+                                    aprendizado_emit = Some(cfg);
+                                }
+                            }
+                        }
+                        None => {
+                            s.url_obra = Some(cap.url.clone());
+                            s.html_obra = Some(cap.html.clone());
+                        }
+                        _ => {}
+                    }
+                }
+
+                let _ = app_inner.emit("assisted-window://captured", &cap);
+                if let Some(cfg) = aprendizado_emit {
+                    let _ = app_inner.emit("assisted-window://learned", &cfg);
+                }
+            });
+        })
         .build()
         .map_err(|e| format!("Falha ao abrir janela assistida: {}", e))?;
     Ok(())
@@ -524,10 +623,22 @@ async fn browser_ensinar_padrao_capitulo(
         .get_webview_window("mam-assistido")
         .ok_or_else(|| "Abra a Janela Assistida e entre em um capítulo antes de ensinar.".to_string())?;
     let url_atual = win.url().map_err(|e| e.to_string())?;
-    mam_source_integration::connectors::GerenciadorConectores::aprender_padrao_url(
+    let html_cap = capturar_janela_assistida_do_webview(&win)
+        .await
+        .ok()
+        .map(|c| c.html);
+    let html_obra = {
+        let s = sessao_janela_assistida().lock().await;
+        s.html_obra.clone()
+    };
+    mam_source_integration::connectors::GerenciadorConectores::aprender_de_sessao(
         library_manager.raiz(),
-        &url_obra,
-        url_atual.as_str(),
+        mam_source_integration::connectors::EntradaAprendizadoSessao {
+            url_obra: &url_obra,
+            html_obra: html_obra.as_deref(),
+            url_capitulo: url_atual.as_str(),
+            html_capitulo: html_cap.as_deref(),
+        },
     )
     .map_err(|e| e.to_string())
 }

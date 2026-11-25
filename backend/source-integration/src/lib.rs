@@ -15,8 +15,10 @@ use mam_database::Database;
 
 use serde::{Deserialize, Serialize};
 
+pub mod ai_memory;
 pub mod connectors;
 pub mod extractors;
+pub mod universal;
 pub mod fonte;
 pub mod mangadex;
 mod busca;

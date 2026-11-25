@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import {
+  CapturaJanelaAssistida,
+  ConectorSiteConfig,
   Capitulo,
   CapituloBuscaResultado,
   DetalhesObra,
@@ -133,7 +136,7 @@ function App() {
     onConfirm: () => Promise<void> | void
   } | null>(null)
   const [conectoresCatalogo, setConectoresCatalogo] = useState<CatalogoConectores | null>(null)
-  const [conectorBuscaAtivo, setConectorBuscaAtivo] = useState('mangadex')
+  const [conectorBuscaAtivo, setConectorBuscaAtivo] = useState('universal')
   const [statusAtualizacaoConectores, setStatusAtualizacaoConectores] =
     useState<StatusAtualizacaoConectores | null>(null)
   const [conectorJsonManual, setConectorJsonManual] = useState('')
@@ -145,12 +148,154 @@ function App() {
   const [extHtml, setExtHtml] = useState('')
   const [extUrlsTexto, setExtUrlsTexto] = useState('')
   const [extIdiomaPreferido, setExtIdiomaPreferido] = useState<'pt-br' | 'en' | 'ja' | 'all'>('pt-br')
+  const [autoImportarAssistida, setAutoImportarAssistida] = useState(true)
+  const [extDestinoModo, setExtDestinoModo] = useState<'auto' | 'existente' | 'novo'>('auto')
+  const [extObraDestinoId, setExtObraDestinoId] = useState('')
   const [resultadoImportacao, setResultadoImportacao] = useState<ResultadoImportacao | null>(null)
+  const assistidaCtxRef = useRef({
+    autoImportarAssistida: true,
+    modalImportarUrlAberto: false,
+    modoImportacao: 'obra' as 'obra' | 'capitulo',
+    extIdiomaPreferido: 'pt-br' as 'pt-br' | 'en' | 'ja' | 'all',
+    extDestinoModo: 'auto' as 'auto' | 'existente' | 'novo',
+    extObraDestinoId: '',
+    extObraTitulo: '',
+    extNumeroCap: '1',
+    obrasResumo: [] as ObraResumo[],
+  })
+  assistidaCtxRef.current = {
+    autoImportarAssistida,
+    modalImportarUrlAberto,
+    modoImportacao,
+    extIdiomaPreferido,
+    extDestinoModo,
+    extObraDestinoId,
+    extObraTitulo,
+    extNumeroCap,
+    obrasResumo,
+  }
 
   useEffect(() => {
     aplicarAparenciaNoDocumento(aparencia)
     salvarAparencia(aparencia)
   }, [aparencia])
+
+  useEffect(() => {
+    let unlistenCap: (() => void) | null = null
+    let unlistenLearned: (() => void) | null = null
+
+    listen<CapturaJanelaAssistida>('assisted-window://captured', async (event) => {
+      const cap = event.payload
+      const ctx = assistidaCtxRef.current
+      setExtUrl(cap.url)
+      setExtHtml(cap.html)
+      if (cap.urls_imagens.length > 0) {
+        setExtUrlsTexto(cap.urls_imagens.join('\n'))
+      }
+
+      if (!ctx.autoImportarAssistida || !ctx.modalImportarUrlAberto) {
+        setMensagem(
+          `Janela Assistida capturada (${cap.urls_imagens.length} imagem(ns)).`,
+        )
+        return
+      }
+
+      if (ctx.modoImportacao === 'obra') {
+        try {
+          setImportandoLink(true)
+          const res = await mamApi.sourceDescobrirPorLink(
+            cap.url,
+            cap.html || null,
+            ctx.extIdiomaPreferido,
+          )
+          const obraResult: ObraBuscaResultado = {
+            fonte_id: 'extrator-link',
+            obra_id_fonte: res.url_obra,
+            titulo: ctx.extObraTitulo.trim() || res.titulo,
+            autor: null,
+            descricao: null,
+            capa_url: res.capa_url ?? null,
+          }
+          setObrasFonte([obraResult])
+          setObraFonteSelecionada(obraResult)
+          setCapitulosFonte(res.capitulos)
+          setFiltroIdiomaFonte('TODOS')
+          setSelecionadosIds([])
+          setModalImportarUrlAberto(false)
+          setAbaAtiva('fontes')
+          setMensagem(
+            `Auto-captura: ${res.capitulos.length} capítulo(s) encontrado(s) em "${obraResult.titulo}".`,
+          )
+        } catch (err) {
+          setMensagem(`Auto-captura carregada (${cap.urls_imagens.length} img). ${String(err)}`)
+        } finally {
+          setImportandoLink(false)
+        }
+      } else if (ctx.modoImportacao === 'capitulo' && cap.urls_imagens.length >= 3) {
+        try {
+          setImportandoLink(true)
+          const obraSel =
+            ctx.extDestinoModo === 'existente'
+              ? ctx.obrasResumo.find((o) => o.obra.id === ctx.extObraDestinoId)
+              : undefined
+          let tituloFinal = obraSel ? obraSel.obra.titulo : ctx.extObraTitulo.trim()
+          let numeroFinal = Number.parseInt(ctx.extNumeroCap, 10)
+          if (!tituloFinal || !Number.isFinite(numeroFinal)) {
+            try {
+              const info = await mamApi.sourceDescobrirPorLink(
+                cap.url,
+                cap.html || null,
+                ctx.extIdiomaPreferido,
+              )
+              if (!tituloFinal) tituloFinal = info.titulo
+              if (info.capitulos[0]?.numero != null) numeroFinal = info.capitulos[0].numero
+            } catch {
+              // fallback
+            }
+          }
+          const res = await mamApi.sourceImportarExtrator({
+            obra_titulo: tituloFinal || 'Capítulos Unitários',
+            numero_capitulo: Number.isFinite(numeroFinal) && numeroFinal > 0 ? numeroFinal : 1,
+            url: cap.url,
+            html: cap.html || null,
+            urls_ordenadas: cap.urls_imagens,
+            obra_id_destino: obraSel ? obraSel.obra.id : null,
+          })
+          setResultadoImportacao(res)
+          setMensagem(
+            `Auto-importado via Janela Assistida: ${res.caminho_relativo} (${res.quantidade_paginas} págs).`,
+          )
+          await carregarObras()
+        } catch (err) {
+          setMensagem(`Erro na auto-importação: ${String(err)}`)
+        } finally {
+          setImportandoLink(false)
+        }
+      }
+    }).then((fn) => {
+      unlistenCap = fn
+    })
+
+    listen<ConectorSiteConfig>('assisted-window://learned', async (event) => {
+      const cfg = event.payload
+      try {
+        const atualizados = await mamApi.sourceListarConectores()
+        setConectoresCatalogo(atualizados)
+      } catch {
+        // ignora falha de refresh
+      }
+      setMensagem(
+        `IA aprendeu automaticamente o padrão de "${cfg.nome}" e salvou na memória progressiva.`,
+      )
+    }).then((fn) => {
+      unlistenLearned = fn
+    })
+
+    return () => {
+      if (unlistenCap) unlistenCap()
+      if (unlistenLearned) unlistenLearned()
+    }
+  }, [])
 
   async function carregarObras() {
     try {
@@ -534,7 +679,19 @@ function App() {
       .map((u) => u.trim())
       .filter((u) => u.length > 0)
 
-    let tituloFinal = extObraTitulo.trim()
+    const obraSelecionadaDestino =
+      extDestinoModo === 'existente'
+        ? obrasResumo.find((o) => o.obra.id === extObraDestinoId)
+        : undefined
+
+    if (extDestinoModo === 'existente' && !obraSelecionadaDestino) {
+      setMensagem('Selecione um mangá existente na biblioteca para receber o capítulo.')
+      return
+    }
+
+    let tituloFinal = obraSelecionadaDestino
+      ? obraSelecionadaDestino.obra.titulo
+      : extObraTitulo.trim()
     let numeroFinal = Number.parseInt(extNumeroCap, 10)
 
     const tituloVazio = !tituloFinal
@@ -566,11 +723,12 @@ function App() {
     setImportandoLink(true)
     try {
       const res = await mamApi.sourceImportarExtrator({
-        obra_titulo: tituloFinal || 'Capítulo Importado',
+        obra_titulo: tituloFinal || 'Capítulos Unitários',
         numero_capitulo: Number.isFinite(numeroFinal) && numeroFinal > 0 ? numeroFinal : 1,
         url: extUrl.trim() || null,
         html: extHtml.trim() || null,
         urls_ordenadas,
+        obra_id_destino: obraSelecionadaDestino ? obraSelecionadaDestino.obra.id : null,
       })
       setResultadoImportacao(res)
       setMensagem(
@@ -1621,6 +1779,7 @@ function App() {
                   value={conectorBuscaAtivo}
                   onChange={(e) => setConectorBuscaAtivo(e.target.value)}
                 >
+                  <option value="universal">🌐 Universal (IA Portátil)</option>
                   {(conectoresCatalogo?.sites ?? [])
                     .filter((s) => s.id === 'mangadex' || Boolean(s.url_busca))
                     .map((s) => (
@@ -1638,8 +1797,10 @@ function App() {
                 <input
                   className="mam-input mam-search-input"
                   placeholder={`🔍 Pesquisar obra por título em ${
-                    conectoresCatalogo?.sites.find((s) => s.id === conectorBuscaAtivo)?.nome ??
-                    conectorBuscaAtivo
+                    conectorBuscaAtivo === 'universal'
+                      ? 'Universal (IA Portátil)'
+                      : conectoresCatalogo?.sites.find((s) => s.id === conectorBuscaAtivo)?.nome ??
+                        conectorBuscaAtivo
                   }...`}
                   value={consultaFonte}
                   onChange={(e) => {
@@ -1687,7 +1848,14 @@ function App() {
                             style={{ width: 40, height: 56, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }}
                           />
                         )}
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.titulo}</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, gap: '0.2rem' }}>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.titulo}</span>
+                          {conectorBuscaAtivo === 'universal' && (
+                            <span style={{ fontSize: '0.72rem', opacity: 0.72 }}>
+                              Fonte: {o.fonte_id}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   )
@@ -2642,6 +2810,14 @@ function App() {
                 </div>
 
                 <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.88rem', cursor: 'pointer', marginBottom: '0.45rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={autoImportarAssistida}
+                      onChange={(e) => setAutoImportarAssistida(e.target.checked)}
+                    />
+                    <span>⚡ Auto-capturar e importar ao carregar na Janela Assistida</span>
+                  </label>
                   <button
                     type="button"
                     className="mam-btn"
@@ -2749,12 +2925,76 @@ function App() {
               </>
             ) : (
               <>
-                <input
-                  className="mam-input"
-                  placeholder="Título da obra (opcional — detectado automaticamente)"
-                  value={extObraTitulo}
-                  onChange={(e) => setExtObraTitulo(e.target.value)}
-                />
+                <div style={{ display: 'grid', gap: '0.45rem' }}>
+                  <span className="mam-section-desc" style={{ margin: 0 }}>
+                    Destino do capítulo único:
+                  </span>
+                  <div className="mam-segmented" style={{ alignSelf: 'flex-start' }}>
+                    <button
+                      type="button"
+                      className={`mam-segmented-btn ${extDestinoModo === 'auto' ? 'active' : ''}`}
+                      onClick={() => setExtDestinoModo('auto')}
+                    >
+                      Detectar automático
+                    </button>
+                    <button
+                      type="button"
+                      className={`mam-segmented-btn ${extDestinoModo === 'existente' ? 'active' : ''}`}
+                      onClick={() => setExtDestinoModo('existente')}
+                    >
+                      Mangá existente
+                    </button>
+                    <button
+                      type="button"
+                      className={`mam-segmented-btn ${extDestinoModo === 'novo' ? 'active' : ''}`}
+                      onClick={() => setExtDestinoModo('novo')}
+                    >
+                      Novo mangá / Unitários
+                    </button>
+                  </div>
+
+                  {extDestinoModo === 'existente' ? (
+                    <select
+                      className="mam-select"
+                      value={extObraDestinoId}
+                      onChange={(e) => setExtObraDestinoId(e.target.value)}
+                    >
+                      <option value="">-- Selecione um mangá da biblioteca --</option>
+                      {[...obrasResumo]
+                        .sort((a, b) => a.obra.titulo.localeCompare(b.obra.titulo))
+                        .map((item) => (
+                          <option key={item.obra.id} value={item.obra.id}>
+                            {item.obra.titulo} ({item.total_capitulos} cap.)
+                          </option>
+                        ))}
+                    </select>
+                  ) : extDestinoModo === 'novo' ? (
+                    <div className="mam-toolbar-row" style={{ gap: '0.45rem' }}>
+                      <input
+                        className="mam-input"
+                        style={{ flex: 1 }}
+                        placeholder="Nome do novo mangá ou biblioteca (ex.: Capítulos Unitários)"
+                        value={extObraTitulo}
+                        onChange={(e) => setExtObraTitulo(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="mam-btn"
+                        onClick={() => setExtObraTitulo('Capítulos Unitários')}
+                        title="Usar biblioteca padrão para capítulos avulsos"
+                      >
+                        📚 Capítulos Unitários
+                      </button>
+                    </div>
+                  ) : (
+                    <input
+                      className="mam-input"
+                      placeholder="Título da obra (opcional — detectado automaticamente)"
+                      value={extObraTitulo}
+                      onChange={(e) => setExtObraTitulo(e.target.value)}
+                    />
+                  )}
+                </div>
                 <input
                   className="mam-input"
                   placeholder="Link do capítulo (weebcentral.com/chapters/..., mangadex.org/chapter/..., manga alternativo)"
@@ -2763,6 +3003,14 @@ function App() {
                 />
 
                 <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.88rem', cursor: 'pointer', marginBottom: '0.45rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={autoImportarAssistida}
+                      onChange={(e) => setAutoImportarAssistida(e.target.checked)}
+                    />
+                    <span>⚡ Auto-capturar e importar ao carregar na Janela Assistida</span>
+                  </label>
                   <button
                     type="button"
                     className="mam-btn"

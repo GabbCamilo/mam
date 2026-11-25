@@ -197,7 +197,7 @@ pub async fn source_listar_fontes(
     Ok(source_manager.listar_fontes().await)
 }
 
-/// Busca obras por título usando um conector específico (`mangadex`, `mangafire` ou conector web com `url_busca`).
+/// Busca obras por título usando um conector específico (`universal`, `mangadex`, `mangafire` ou conector web com `url_busca`).
 pub async fn source_buscar_obras_por_conector(
     source_manager: Arc<SourceIntegrationManager>,
     library_manager: Arc<LibraryManager>,
@@ -210,6 +210,44 @@ pub async fn source_buscar_obras_por_conector(
     let cat = mam_source_integration::connectors::GerenciadorConectores::carregar(Some(
         library_manager.raiz(),
     ));
+    if conector_id == "universal" {
+        let mut set = tokio::task::JoinSet::new();
+        let sm_md = source_manager.clone();
+        let q_md = consulta.clone();
+        set.spawn(async move {
+            source_buscar_obras(sm_md, q_md).await.unwrap_or_default()
+        });
+
+        for site in cat
+            .sites
+            .into_iter()
+            .filter(|s| s.id != "mangadex" && s.url_busca.is_some())
+            .take(4)
+        {
+            let q = consulta.clone();
+            set.spawn(async move {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(20),
+                    mam_source_integration::connectors::GerenciadorConectores::buscar_obras_via_cdp(
+                        &site, &q,
+                    ),
+                )
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .unwrap_or_default()
+            });
+        }
+
+        let mut consolidado = Vec::new();
+        while let Some(res) = set.join_next().await {
+            if let Ok(lista) = res {
+                consolidado.extend(lista);
+            }
+        }
+        return Ok(consolidado);
+    }
+
     let conector = cat
         .sites
         .into_iter()

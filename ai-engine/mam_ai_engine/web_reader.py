@@ -789,6 +789,7 @@ def discover_work_chapters(
     url: str,
     preferred_lang: str = "pt-br",
     max_pages: int | None = None,
+    memory_hints: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Navega na página central da obra via CDP, seleciona idioma e percorre toda a paginação.
 
@@ -845,6 +846,19 @@ def discover_work_chapters(
                 """
             ) or []
             estruturais = classify_structural_chapter_group(snap_fallback, url)
+            hints_url = [
+                str(p).lower().rstrip("{num}")
+                for p in ((memory_hints or {}).get("padroes_url") or [])
+                if isinstance(p, str) and len(p) >= 3
+            ]
+            if hints_url and len(estruturais) <= 2:
+                vistos_h = {str(x.get("href") or "") for x in estruturais}
+                for item in snap_fallback:
+                    href_raw = str(item.get("href") or "")
+                    href_l = href_raw.lower()
+                    if href_raw and href_raw not in vistos_h and any(p in href_l for p in hints_url):
+                        vistos_h.add(href_raw)
+                        estruturais.append(item)
             if len(estruturais) > len(capitulos):
                 capitulos = estruturais
 
@@ -864,7 +878,10 @@ def discover_work_chapters(
         }
 
 
-def extract_chapter_pages(url: str) -> dict[str, Any]:
+def extract_chapter_pages(
+    url: str,
+    memory_hints: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Extrai todas as URLs de imagens reais de um capítulo via CDP (scroll + avanço single-page)."""
     with _BrowserSession() as cdp:
         cdp.call("Page.navigate", {"url": url})
@@ -970,31 +987,51 @@ def extract_chapter_pages(url: str) -> dict[str, Any]:
 
 
 def search_works_cdp(url_busca: str, conector_id: str = "mangafire") -> list[dict[str, Any]]:
-    """Pesquisa obras por título em um conector web (ex.: MangaFire) via CDP."""
+    """Pesquisa obras por título em um conector web (ex.: MangaFire, WeebCentral) via CDP."""
     with _BrowserSession() as cdp:
         cdp.call("Page.navigate", {"url": url_busca})
         _wait_spa_settle(
             cdp,
-            "document.querySelectorAll('a[href*=\"/title/\"], a[href*=\"/manga/\"]').length > 0",
+            "document.querySelectorAll('a[href*=\"/title/\"], a[href*=\"/manga/\"], a[href*=\"/series/\"], a[href*=\"/comic/\"], a[href*=\"/book/\"]').length > 0",
             max_wait_s=8.0,
         )
         items = cdp.eval_js(
             """
             const seen = new Set();
             const out = [];
-            for (const a of document.querySelectorAll('a[href*="/title/"], a[href*="/manga/"]')) {
+            const badges = new Set(['manga', 'manhua', 'manhwa', 'one-shot', 'oneshot', 'novel', 'doujinshi', 'webtoon']);
+            const scope = document.querySelector('.original.card-lg, .manga-list, .search-results, main, #main') || document;
+            const links = scope.querySelectorAll('a[href*="/title/"], a[href*="/manga/"], a[href*="/series/"], a[href*="/comic/"], a[href*="/book/"]');
+            for (const a of links) {
               const href = (a.href || '').split('?')[0].split('#')[0];
-              if (!href || href.includes('/chapter') || seen.has(href)) continue;
-              const card = a.closest('article, .card, .unit, .manga-card, li, div') || a;
+              if (!href || href.includes('/chapter') || href.includes('/read/') || seen.has(href)) continue;
+              const card = a.closest('article, .unit, .card, .manga-card, li') || a.parentElement || a;
               const img = card.querySelector('img');
-              const titleEl = card.querySelector('h3, h2, .title, .name, span') || a;
-              const titulo = (titleEl.textContent || a.getAttribute('title') || '').replace(/\\s+/g, ' ').trim();
+              const candidatos = [
+                card.querySelector('.info > a, .manga-title a, .title a, h3, h2, .title, .name'),
+                a
+              ];
+              let titulo = '';
+              for (const el of candidatos) {
+                if (!el) continue;
+                const txt = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+                if (txt.length >= 2 && !badges.has(txt.toLowerCase())) {
+                  titulo = txt;
+                  break;
+                }
+              }
+              if (!titulo) {
+                const attrTitle = (a.getAttribute('title') || (img && img.getAttribute('alt')) || '').replace(/\\s+/g, ' ').trim();
+                if (attrTitle.length >= 2 && !badges.has(attrTitle.toLowerCase())) {
+                  titulo = attrTitle;
+                }
+              }
               if (!titulo || titulo.length < 2) continue;
               seen.add(href);
               out.push({
                 obra_id_fonte: href,
                 titulo,
-                capa_url: img ? (img.currentSrc || img.src || null) : null
+                capa_url: img ? (img.currentSrc || img.getAttribute('data-src') || img.src || null) : null
               });
               if (out.length >= 20) break;
             }

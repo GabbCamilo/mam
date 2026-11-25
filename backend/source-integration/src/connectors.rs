@@ -88,6 +88,82 @@ pub struct StatusAtualizacaoConectores {
 
 pub struct GerenciadorConectores;
 
+/// Entrada completa para aprendizado profundo a partir de uma sessão na Janela Assistida.
+pub struct EntradaAprendizadoSessao<'a> {
+    pub url_obra: &'a str,
+    pub html_obra: Option<&'a str>,
+    pub url_capitulo: &'a str,
+    pub html_capitulo: Option<&'a str>,
+}
+
+fn eh_segmento_numerico(seg: &str) -> bool {
+    let s = seg.trim();
+    !s.is_empty()
+        && s.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-')
+        && s.chars().any(|c| c.is_ascii_digit())
+}
+
+fn extrair_seletor_link_do_html(html_obra: &str, path_cap: &str) -> Option<String> {
+    if path_cap.trim().is_empty() {
+        return None;
+    }
+    let lower = html_obra.to_lowercase();
+    let path_lower = path_cap.trim_end_matches('/').to_lowercase();
+    let mut offset = 0usize;
+    while let Some(pos) = lower[offset..].find("<a") {
+        let abs = offset + pos;
+        let Some(end_rel) = lower[abs..].find('>') else {
+            break;
+        };
+        let tag = &html_obra[abs..=abs + end_rel];
+        offset = abs + end_rel + 1;
+
+        let tag_lower = tag.to_lowercase();
+        if !tag_lower.contains(&path_lower) {
+            continue;
+        }
+        if let Some(idx_cls) = tag_lower.find("class=") {
+            let resto = &tag[idx_cls + 6..];
+            let quote = resto.chars().next()?;
+            if quote == '"' || quote == '\'' {
+                if let Some(fim) = resto[1..].find(quote) {
+                    let classes = resto[1..1 + fim]
+                        .split_whitespace()
+                        .filter(|c| !matches!(*c, "btn" | "button" | "active" | "visited" | "link"))
+                        .collect::<Vec<_>>();
+                    if let Some(primeira) = classes.first() {
+                        return Some(format!("a.{}", primeira));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extrair_seletores_imagem_do_html(html_cap: &str) -> Vec<String> {
+    let lower = html_cap.to_lowercase();
+    let candidatos = [
+        ("data-url", "img[data-url]"),
+        ("data-original", "img[data-original]"),
+        ("data-lazy-src", "img[data-lazy-src]"),
+        ("data-src", "img[data-src]"),
+        ("src", "img[src]"),
+    ];
+    let mut contagens: Vec<(usize, &str)> = candidatos
+        .iter()
+        .map(|(attr, sel)| {
+            let needle = format!("{}=\"http", attr);
+            let needle2 = format!("{}='http", attr);
+            let count = lower.matches(&needle).count() + lower.matches(&needle2).count();
+            (count, *sel)
+        })
+        .filter(|(c, _)| *c > 0)
+        .collect();
+    contagens.sort_by(|a, b| b.0.cmp(&a.0));
+    contagens.into_iter().map(|(_, s)| s.to_string()).collect()
+}
+
 impl GerenciadorConectores {
     /// Caminho do arquivo de conectores atualizado pelo usuário dentro da biblioteca (`System/connectors/sites.json`).
     pub fn caminho_usuario(raiz_biblioteca: &Path) -> PathBuf {
@@ -341,6 +417,25 @@ impl GerenciadorConectores {
         url_obra: &str,
         url_capitulo: &str,
     ) -> Result<ConectorSiteConfig, SourceError> {
+        Self::aprender_de_sessao(
+            raiz_biblioteca,
+            EntradaAprendizadoSessao {
+                url_obra,
+                html_obra: None,
+                url_capitulo,
+                html_capitulo: None,
+            },
+        )
+    }
+
+    /// Aprendizado profundo a partir de URLs e DOMs da obra e do capítulo na Janela Assistida.
+    /// Atualiza `System/connectors/sites.json` e alimenta a memória progressiva (`ai_memory.json`).
+    pub fn aprender_de_sessao(
+        raiz_biblioteca: &Path,
+        entrada: EntradaAprendizadoSessao<'_>,
+    ) -> Result<ConectorSiteConfig, SourceError> {
+        let url_obra = entrada.url_obra;
+        let url_capitulo = entrada.url_capitulo;
         let extrair_host = |u: &str| -> String {
             u.split("://")
                 .nth(1)
@@ -383,7 +478,12 @@ impl GerenciadorConectores {
                 comum += 1;
             }
             if comum < segs_cap.len() && segs_cap.len() >= 2 {
-                format!("/{}/", segs_cap[comum])
+                let seg_diff = segs_cap[comum];
+                if eh_segmento_numerico(seg_diff) && comum > 0 {
+                    format!("/{}/{{num}}", segs_cap[comum - 1])
+                } else {
+                    format!("/{}/", seg_diff)
+                }
             } else if let Some(q) = padrao_query.clone() {
                 q
             } else if let Some(primeiro) = segs_cap.first() {
@@ -399,12 +499,28 @@ impl GerenciadorConectores {
             ));
         };
 
+        let seletor_link_aprendido = entrada
+            .html_obra
+            .and_then(|h| extrair_seletor_link_do_html(h, &path_cap));
+        let seletores_img_aprendidos = entrada
+            .html_capitulo
+            .map(extrair_seletores_imagem_do_html)
+            .unwrap_or_default();
+
         let mut catalogo = Self::carregar(Some(raiz_biblioteca));
         let mut atualizado: Option<ConectorSiteConfig> = None;
         for site in &mut catalogo.sites {
             if site.dominios.iter().any(|d| d.trim_start_matches("www.").eq_ignore_ascii_case(&host)) {
                 if !site.padroes_url_capitulo.contains(&padrao) {
                     site.padroes_url_capitulo.insert(0, padrao.clone());
+                }
+                if site.seletor_link.is_none() {
+                    site.seletor_link = seletor_link_aprendido.clone();
+                }
+                for sel in seletores_img_aprendidos.iter().rev() {
+                    if !site.seletores_imagem.contains(sel) {
+                        site.seletores_imagem.insert(0, sel.clone());
+                    }
                 }
                 atualizado = Some(site.clone());
                 break;
@@ -418,6 +534,12 @@ impl GerenciadorConectores {
                     .chars()
                     .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
                     .collect();
+                let mut seletores_img = seletores_img_aprendidos.clone();
+                for pad in ["img[data-url]", "img[data-original]", "img[data-src]", "img[src]"] {
+                    if !seletores_img.iter().any(|s| s == pad) {
+                        seletores_img.push(pad.to_string());
+                    }
+                }
                 let novo = ConectorSiteConfig {
                     id: format!("learned-{}", id_limpo.trim_matches('-')),
                     nome: format!("{} (Aprendido)", host),
@@ -425,17 +547,12 @@ impl GerenciadorConectores {
                     tipo: "web-cdp".to_string(),
                     dominios: vec![host.clone()],
                     url_busca: None,
-                    padroes_url_capitulo: vec![padrao],
-                    seletor_link: None,
+                    padroes_url_capitulo: vec![padrao.clone()],
+                    seletor_link: seletor_link_aprendido.clone(),
                     seletor_idioma_linha: None,
                     seletor_paginacao: None,
                     requer_cdp: "auto".to_string(),
-                    seletores_imagem: vec![
-                        "img[data-url]".to_string(),
-                        "img[data-original]".to_string(),
-                        "img[data-src]".to_string(),
-                        "img[src]".to_string(),
-                    ],
+                    seletores_imagem: seletores_img,
                     rejeitar_tokens_imagem: vec!["logo".to_string(), "avatar".to_string(), "favicon".to_string()],
                     headers_imagem: Some(HashMap::from([("Referer".to_string(), format!("https://{}/", host))])),
                     estrategia_descoberta: Some("auto".to_string()),
@@ -448,6 +565,31 @@ impl GerenciadorConectores {
         let json = serde_json::to_string_pretty(&catalogo)
             .map_err(|e| SourceError::Operacao(e.to_string()))?;
         Self::salvar_catalogo_atomico(raiz_biblioteca, &json, None)?;
+
+        // Reforça memória progressiva cross-site
+        let _ = crate::ai_memory::GerenciadorMemoriaIA::registrar_sucesso(
+            raiz_biblioteca,
+            crate::ai_memory::TipoPadraoMemoria::UrlCapitulo,
+            &padrao,
+            Some(&host),
+        );
+        if let Some(ref sel) = seletor_link_aprendido {
+            let _ = crate::ai_memory::GerenciadorMemoriaIA::registrar_sucesso(
+                raiz_biblioteca,
+                crate::ai_memory::TipoPadraoMemoria::SeletorLink,
+                sel,
+                Some(&host),
+            );
+        }
+        for sel in &seletores_img_aprendidos {
+            let _ = crate::ai_memory::GerenciadorMemoriaIA::registrar_sucesso(
+                raiz_biblioteca,
+                crate::ai_memory::TipoPadraoMemoria::SeletorImagem,
+                sel,
+                Some(&host),
+            );
+        }
+
         Ok(conector_final)
     }
 }
