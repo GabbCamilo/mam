@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "2026.11.22.1",
+  "version": "2026.11.24.1",
   "sites": [
     {
       "id": "mangadex",
@@ -282,7 +282,7 @@
       "nome": "MangaGoku",
       "versao": "1.0.0",
       "tipo": "web-cdp",
-      "dominios": ["mangagoku.com", "www.mangagoku.com", "2xstorage.com"],
+      "dominios": ["mangagoku.com", "2xstorage.com"],
       "url_busca": "https://www.mangagoku.com/?s={query}",
       "padroes_url_capitulo": ["/chapter-", "/chapter/", "/read/"],
       "seletor_link": null,

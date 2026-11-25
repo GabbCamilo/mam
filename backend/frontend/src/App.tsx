@@ -2439,7 +2439,7 @@ function App() {
         >
           <div
             className="mam-modal"
-            style={{ maxWidth: 620 }}
+            style={{ maxWidth: 'min(580px, 100%)' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mam-modal-header">

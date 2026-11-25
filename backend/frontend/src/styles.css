@@ -448,7 +448,8 @@ button {
   display: grid;
   place-items: center;
   z-index: 100;
-  padding: 1rem;
+  padding: clamp(0.6rem, 2.5vw, 1.25rem);
+  overflow-y: auto;
 }
 
 [data-theme='light'] .mam-modal-backdrop {
@@ -457,7 +458,11 @@ button {
 
 .mam-modal {
   width: 100%;
-  max-width: 440px;
+  max-width: min(540px, 100%);
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--bg-surface);
   backdrop-filter: blur(18px);
   border: 1px solid var(--border-subtle);

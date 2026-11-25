@@ -138,11 +138,19 @@ impl GerenciadorConectores {
                 "Catálogo de conectores não pode estar vazio".to_string(),
             ));
         }
+        let mut ids_vistos = std::collections::HashSet::new();
         for s in &cat.sites {
             if s.id.trim().is_empty() || s.nome.trim().is_empty() {
                 return Err(SourceError::Operacao(
                     "Cada conector precisa de `id` e `nome` válidos".to_string(),
                 ));
+            }
+            let id_norm = s.id.trim().to_ascii_lowercase();
+            if !ids_vistos.insert(id_norm) {
+                return Err(SourceError::Operacao(format!(
+                    "Conector duplicado no catálogo: `{}`",
+                    s.id
+                )));
             }
         }
         Ok(cat)
