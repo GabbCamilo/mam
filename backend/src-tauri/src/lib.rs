@@ -381,6 +381,8 @@ struct CapturaJanelaAssistida {
     url: String,
     html: String,
     urls_imagens: Vec<String>,
+    #[serde(default)]
+    xhr_endpoints: Vec<String>,
 }
 
 #[derive(Default)]
@@ -527,10 +529,19 @@ async fn capturar_janela_assistida_do_webview(
                 var imgs = Array.from(document.querySelectorAll('img')).map(function(i){{
                     return i.getAttribute('data-url') || i.getAttribute('data-original') || i.getAttribute('data-lazy-src') || i.getAttribute('data-src') || i.currentSrc || i.src || '';
                 }}).filter(function(u){{ return u && u.indexOf('http') === 0; }});
+                var xhrs = [];
+                try {{
+                    xhrs = performance.getEntriesByType('resource')
+                        .filter(function(r){{ return r.initiatorType === 'fetch' || r.initiatorType === 'xmlhttprequest'; }})
+                        .map(function(r){{ return r.name; }})
+                        .filter(function(u){{ return u && u.indexOf('http') === 0; }})
+                        .slice(-20);
+                }} catch(e) {{}}
                 var payload = JSON.stringify({{
                     url: location.href,
                     html: document.documentElement ? document.documentElement.outerHTML : '',
-                    urls_imagens: imgs
+                    urls_imagens: imgs,
+                    xhr_endpoints: xhrs
                 }});
                 fetch('http://127.0.0.1:{}/capture?nonce={}', {{
                     method: 'POST',

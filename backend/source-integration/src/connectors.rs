@@ -19,6 +19,34 @@ pub const URL_MANIFESTO_OFICIAL: &str =
 const DEFAULT_SITES_EMBEDDED: &str = include_str!("../../../connectors/default_sites.json");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiBuscaConfig {
+    pub endpoint: String,
+    #[serde(default = "metodo_get_padrao")]
+    pub metodo: String,
+    #[serde(default = "formato_json_padrao")]
+    pub formato: String,
+    #[serde(default)]
+    pub caminho_itens: Option<String>,
+    pub campo_id_ou_url: String,
+    #[serde(default)]
+    pub template_url_obra: Option<String>,
+    pub campo_titulo: String,
+    #[serde(default)]
+    pub campo_capa: Option<String>,
+    #[serde(default)]
+    pub template_url_capa: Option<String>,
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
+}
+
+fn metodo_get_padrao() -> String {
+    "GET".to_string()
+}
+fn formato_json_padrao() -> String {
+    "json".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConectorSiteConfig {
     pub id: String,
     pub nome: String,
@@ -30,6 +58,8 @@ pub struct ConectorSiteConfig {
     pub dominios: Vec<String>,
     #[serde(default)]
     pub url_busca: Option<String>,
+    #[serde(default)]
+    pub api_busca: Option<ApiBuscaConfig>,
     #[serde(default)]
     pub padroes_url_capitulo: Vec<String>,
     #[serde(default)]
@@ -547,6 +577,7 @@ impl GerenciadorConectores {
                     tipo: "web-cdp".to_string(),
                     dominios: vec![host.clone()],
                     url_busca: None,
+                    api_busca: None,
                     padroes_url_capitulo: vec![padrao.clone()],
                     seletor_link: seletor_link_aprendido.clone(),
                     seletor_idioma_linha: None,
@@ -591,6 +622,76 @@ impl GerenciadorConectores {
         }
 
         Ok(conector_final)
+    }
+
+    /// Persiste uma configuração `api_busca` sintetizada em um conector já existente em `sites.json`.
+    pub fn salvar_api_busca_conector(
+        raiz_biblioteca: &Path,
+        conector_id: &str,
+        api_busca: ApiBuscaConfig,
+    ) -> Result<ConectorSiteConfig, SourceError> {
+        let mut catalogo = Self::carregar(Some(raiz_biblioteca));
+        let mut atualizado: Option<ConectorSiteConfig> = None;
+        for site in &mut catalogo.sites {
+            if site.id.eq_ignore_ascii_case(conector_id) {
+                site.api_busca = Some(api_busca.clone());
+                if site.url_busca.is_none() {
+                    site.url_busca = Some(api_busca.endpoint.clone());
+                }
+                atualizado = Some(site.clone());
+                break;
+            }
+        }
+        let conector_final = atualizado.ok_or_else(|| {
+            SourceError::Operacao(format!("Conector '{}' não encontrado para salvar API", conector_id))
+        })?;
+        let json = serde_json::to_string_pretty(&catalogo)
+            .map_err(|e| SourceError::Operacao(e.to_string()))?;
+        Self::salvar_catalogo_atomico(raiz_biblioteca, &json, None)?;
+        Ok(conector_final)
+    }
+
+    /// Solicita ao `ai-engine` a síntese automática de `ApiBuscaConfig` para um conector.
+    pub async fn sintetizar_api_busca_via_ai(
+        raiz_biblioteca: &Path,
+        conector: &ConectorSiteConfig,
+        consulta: &str,
+    ) -> Result<Option<ApiBuscaConfig>, SourceError> {
+        let dominio = conector
+            .dominios
+            .first()
+            .map(|d| d.trim())
+            .filter(|d| !d.is_empty())
+            .ok_or_else(|| SourceError::Operacao("Conector sem domínio para síntese".to_string()))?;
+        let base_url = if dominio.starts_with("http") {
+            dominio.to_string()
+        } else {
+            format!("https://{}/", dominio)
+        };
+
+        let py = mam_ai_engine::AiEngineManager::detectar_executavel_python();
+        let dir = mam_ai_engine::AiEngineManager::detectar_diretorio_padrao();
+        let manager = mam_ai_engine::AiEngineManager::nova(py, dir)
+            .com_timeout(std::time::Duration::from_secs(40));
+        let val = manager
+            .chamar(
+                "synthesize_search_api",
+                serde_json::json!({
+                    "base_url": base_url,
+                    "query": consulta,
+                }),
+            )
+            .await
+            .map_err(|e| SourceError::Operacao(e.to_string()))?;
+
+        let api_opt = val
+            .get("api_busca")
+            .and_then(|v| if v.is_null() { None } else { serde_json::from_value::<ApiBuscaConfig>(v.clone()).ok() });
+
+        if let Some(ref api) = api_opt {
+            let _ = Self::salvar_api_busca_conector(raiz_biblioteca, &conector.id, api.clone());
+        }
+        Ok(api_opt)
     }
 }
 

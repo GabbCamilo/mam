@@ -53,7 +53,7 @@
       "versao": "1.0.0",
       "tipo": "api",
       "dominios": ["nhentai.net"],
-      "url_busca": null,
+      "url_busca": "https://nhentai.net/api/v2/search?query={query}",
       "padroes_url_capitulo": ["/g/"],
       "seletor_link": null,
       "seletor_idioma_linha": null,

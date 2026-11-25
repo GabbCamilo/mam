@@ -151,6 +151,9 @@ function App() {
   } | null>(null)
   const [conectoresCatalogo, setConectoresCatalogo] = useState<CatalogoConectores | null>(null)
   const [conectorBuscaAtivo, setConectorBuscaAtivo] = useState('universal')
+  const [buscandoFonte, setBuscandoFonte] = useState(false)
+  const [filtroFontesAtivas, setFiltroFontesAtivas] = useState<string[] | null>(null)
+  const [menuFiltroFontesAberto, setMenuFiltroFontesAberto] = useState(false)
   const [statusAtualizacaoConectores, setStatusAtualizacaoConectores] =
     useState<StatusAtualizacaoConectores | null>(null)
   const [conectorJsonManual, setConectorJsonManual] = useState('')
@@ -763,14 +766,18 @@ function App() {
       setObraFonteSelecionada(null)
       setCapitulosFonte([])
       setSelecionadosIds([])
+      setFiltroFontesAtivas(null)
       return
     }
+    setBuscandoFonte(true)
+    setMenuFiltroFontesAberto(false)
     try {
       const res = await mamApi.sourceBuscarObrasPorConector(
         conectorBuscaAtivo,
         consultaFonte.trim(),
       )
       setObrasFonte(res)
+      setFiltroFontesAtivas(null)
       setObraFonteSelecionada(null)
       setCapitulosFonte([])
       setSelecionadosIds([])
@@ -788,6 +795,8 @@ function App() {
       }
     } catch (err) {
       setMensagem(`Erro na busca de fontes: ${String(err)}`)
+    } finally {
+      setBuscandoFonte(false)
     }
   }
 
@@ -1137,7 +1146,7 @@ function App() {
             carregarObras()
           }}
         >
-          Log de Downloads ({downloadsLog.length})
+          Log de Downloads ({downloadsLog.length + operacoes.filter((o) => !o.concluida && !o.cancelada).length})
         </button>
         <button
           className={`mam-btn ${abaAtiva === 'transferencia' ? 'mam-btn-active' : ''}`}
@@ -1834,9 +1843,79 @@ function App() {
             </form>
 
             <div className="mam-grid-2">
-              <div className="mam-panel">
-                <strong>Resultados ({obrasFonte.length})</strong>
-                {obrasFonte.map((o) => {
+              <div className="mam-panel" style={{ position: 'relative' }}>
+                {(() => {
+                  const fontesDisponiveis = Array.from(new Set(obrasFonte.map((o) => o.fonte_id)))
+                  const resultadosVisiveis = filtroFontesAtivas
+                    ? obrasFonte.filter((o) => filtroFontesAtivas.includes(o.fonte_id))
+                    : obrasFonte
+                  return (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                        <strong>Resultados ({resultadosVisiveis.length})</strong>
+                        {fontesDisponiveis.length > 0 && (
+                          <button
+                            type="button"
+                            className="mam-btn"
+                            style={{ padding: '0.25rem 0.5rem', lineHeight: 1 }}
+                            title="Filtrar resultados por fonte"
+                            aria-label="Filtrar resultados por fonte"
+                            onClick={() => setMenuFiltroFontesAberto((v) => !v)}
+                          >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                      {buscandoFonte && (
+                        <div className="mam-search-progress-track" aria-label="Buscando resultados">
+                          <div className="mam-search-progress-bar" />
+                        </div>
+                      )}
+                      {menuFiltroFontesAberto && fontesDisponiveis.length > 0 && (
+                        <div
+                          className="mam-panel"
+                          style={{
+                            padding: '0.55rem 0.7rem',
+                            display: 'grid',
+                            gap: '0.35rem',
+                            border: '1px solid var(--border-accent)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem' }}>
+                            <strong>Fontes retornadas</strong>
+                            <button
+                              type="button"
+                              className="mam-btn"
+                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                              onClick={() => setFiltroFontesAtivas(null)}
+                            >
+                              Todas
+                            </button>
+                          </div>
+                          {fontesDisponiveis.map((f) => {
+                            const marcado = !filtroFontesAtivas || filtroFontesAtivas.includes(f)
+                            return (
+                              <label key={f} style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.82rem', cursor: 'pointer' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={marcado}
+                                  onChange={() => {
+                                    const base = filtroFontesAtivas ?? fontesDisponiveis
+                                    const prox = base.includes(f)
+                                      ? base.filter((x) => x !== f)
+                                      : [...base, f]
+                                    setFiltroFontesAtivas(prox.length === fontesDisponiveis.length ? null : prox)
+                                  }}
+                                />
+                                <span>{formatarOrigemFonte(f)}</span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      )}
+                      {resultadosVisiveis.map((o) => {
                   const capaSrc = o.capa_url ? capasCache[o.capa_url] : undefined
                   return (
                     <div
@@ -1873,6 +1952,9 @@ function App() {
                     </div>
                   )
                 })}
+                    </>
+                  )
+                })()}
               </div>
 
               <div className="mam-panel">
@@ -1995,7 +2077,7 @@ function App() {
                     className={`mam-segmented-btn ${subAbaLogs === 'downloads' ? 'active' : ''}`}
                     onClick={() => setSubAbaLogs('downloads')}
                   >
-                    Downloads ({downloadsLog.length})
+                    Downloads ({downloadsLog.length + operacoes.filter((o) => !o.concluida && !o.cancelada).length})
                   </button>
                   <button
                     className={`mam-segmented-btn ${subAbaLogs === 'exclusoes' ? 'active' : ''}`}
@@ -2600,7 +2682,7 @@ function App() {
                 className="mam-btn"
                 onClick={() => setModalConfirmacao(null)}
               >
-                Cancelar
+                Voltar
               </button>
               <button
                 type="button"

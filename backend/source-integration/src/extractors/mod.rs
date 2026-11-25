@@ -118,6 +118,43 @@ pub struct RegistroExtratores {
     extratores: Vec<Arc<dyn ExtratorSite>>,
 }
 
+/// Valida os magic bytes de uma imagem baixada para impedir gravação de executáveis/HTML maliciosos no CBZ.
+pub fn validar_bytes_imagem(bytes: &[u8]) -> Result<&'static str, SourceError> {
+    const MAX_IMAGEM_BYTES: usize = 50 * 1024 * 1024;
+    if bytes.len() < 8 {
+        return Err(SourceError::Operacao(
+            "Arquivo de imagem inválido ou vazio".to_string(),
+        ));
+    }
+    if bytes.len() > MAX_IMAGEM_BYTES {
+        return Err(SourceError::Operacao(
+            "Arquivo de imagem excede o limite de segurança (50 MB)".to_string(),
+        ));
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Ok("jpg");
+    }
+    if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return Ok("png");
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Ok("gif");
+    }
+    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return Ok("webp");
+    }
+    if bytes.starts_with(b"BM") {
+        return Ok("bmp");
+    }
+    if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" {
+        return Ok("avif");
+    }
+    Err(SourceError::Operacao(
+        "Conteúdo baixado bloqueado: assinatura não corresponde a uma imagem válida".to_string(),
+    ))
+}
+
+/// Baixa todas as páginas de um capítulo a partir da sua URL e retorna os bytes do `.cbz` em memória.
 impl RegistroExtratores {
     pub fn novo() -> Self {
         Self {
@@ -310,6 +347,19 @@ impl RegistroExtratores {
         &self,
         url_capitulo: &str,
     ) -> Result<Vec<u8>, SourceError> {
+        self.baixar_capitulo_cbz_por_url_com_progresso(url_capitulo, |_, _| {})
+            .await
+    }
+
+    /// Baixa todas as páginas de um capítulo notificando `(paginas_baixadas, total_paginas)`.
+    pub async fn baixar_capitulo_cbz_por_url_com_progresso<F>(
+        &self,
+        url_capitulo: &str,
+        mut on_progress: F,
+    ) -> Result<Vec<u8>, SourceError>
+    where
+        F: FnMut(usize, usize) + Send,
+    {
         let extrator = self
             .selecionar(Some(url_capitulo))
             .ok_or_else(|| SourceError::Operacao("Nenhum extrator registrado".to_string()))?;
@@ -344,8 +394,9 @@ impl RegistroExtratores {
             format!("{}/", origem_capitulo)
         };
 
-        let mut paginas_bytes: Vec<(&'static str, Vec<u8>)> = Vec::with_capacity(urls_paginas.len());
-        for url in &urls_paginas {
+        let total = urls_paginas.len();
+        let mut paginas_bytes: Vec<(&'static str, Vec<u8>)> = Vec::with_capacity(total);
+        for (idx, url) in urls_paginas.iter().enumerate() {
             let mut req = client.get(url);
             let headers_cfg = crate::connectors::GerenciadorConectores::headers_para_url(url, None);
             if headers_cfg.is_empty() {
@@ -363,9 +414,11 @@ impl RegistroExtratores {
                     resp.status()
                 )));
             }
-            let ext = extrair_extensao_url(url);
             let bytes = resp.bytes().await?.to_vec();
+            let ext = validar_bytes_imagem(&bytes).unwrap_or_else(|_| extrair_extensao_url(url));
+            validar_bytes_imagem(&bytes)?;
             paginas_bytes.push((ext, bytes));
+            on_progress(idx + 1, total);
         }
 
         empacotar_paginas_em_cbz(&paginas_bytes)
@@ -1970,6 +2023,20 @@ mod tests {
         assert_eq!(res.capitulos[0].titulo.as_deref(), Some("2 páginas"));
         assert_eq!(res.capitulos[0].capitulo_id_fonte, url_cap);
         assert_eq!(res.capa_url.as_deref(), Some("https://cdn.example.com/001.png"));
+    }
+
+    #[test]
+    fn validar_bytes_imagem_aceita_imagens_e_bloqueia_executavel_e_html() {
+        assert_eq!(
+            validar_bytes_imagem(&[0xFF, 0xD8, 0xFF, 0xE0, 0, 1, 2, 3]).unwrap(),
+            "jpg"
+        );
+        assert_eq!(
+            validar_bytes_imagem(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).unwrap(),
+            "png"
+        );
+        assert!(validar_bytes_imagem(b"MZ\x90\x00\x03\x00\x00\x00").is_err());
+        assert!(validar_bytes_imagem(b"<!DOCTYPE html><html></html>").is_err());
     }
 
     #[test]

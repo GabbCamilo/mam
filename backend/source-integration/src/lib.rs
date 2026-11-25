@@ -16,6 +16,7 @@ use mam_database::Database;
 use serde::{Deserialize, Serialize};
 
 pub mod ai_memory;
+pub mod api_executor;
 pub mod connectors;
 pub mod extractors;
 pub mod universal;
@@ -548,11 +549,32 @@ impl SourceIntegrationManager {
                 None => caminho_rel_obra.clone(),
             };
 
-            let cbz_bytes = if cap.fonte_id == "extrator-link" {
-                match extractors::RegistroExtratores::padrao()
-                    .baixar_capitulo_cbz_por_url(&cap.capitulo_id_fonte)
-                    .await
-                {
+            let cbz_bytes = if cap.fonte_id == "extrator-link"
+                || (cap.fonte_id != "mangadex" && cap.capitulo_id_fonte.starts_with("http"))
+            {
+                let ops_ref = self.operacoes.clone();
+                let op_id_owned = id_operacao.to_string();
+                let (tx_prog, mut rx_prog) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
+                let prog_task = tokio::spawn(async move {
+                    while let Some((done, tot)) = rx_prog.recv().await {
+                        let frac = if tot > 0 {
+                            (done as f32 / tot as f32).min(0.99)
+                        } else {
+                            0.0
+                        };
+                        let mut ops = ops_ref.write().await;
+                        if let Some(op) = ops.get_mut(&op_id_owned) {
+                            op.progresso_capitulo_atual = frac;
+                        }
+                    }
+                });
+                let res_dl = extractors::RegistroExtratores::padrao()
+                    .baixar_capitulo_cbz_por_url_com_progresso(&cap.capitulo_id_fonte, move |d, t| {
+                        let _ = tx_prog.send((d, t));
+                    })
+                    .await;
+                let _ = prog_task.await;
+                match res_dl {
                     Ok(b) => b,
                     Err(err) => {
                         let detalhes_erro = serde_json::json!({

@@ -229,6 +229,36 @@ pub async fn source_listar_fontes(
     Ok(source_manager.listar_fontes().await)
 }
 
+fn filtrar_e_ordenar_por_relevancia(
+    obras: Vec<ObraBuscaResultado>,
+    consulta: &str,
+) -> Vec<ObraBuscaResultado> {
+    let q_lower = consulta.trim().to_lowercase();
+    let tokens: Vec<&str> = q_lower
+        .split_whitespace()
+        .filter(|t| t.chars().count() >= 2)
+        .collect();
+    if tokens.is_empty() {
+        return obras;
+    }
+
+    let mut pontuados: Vec<(usize, ObraBuscaResultado)> = obras
+        .into_iter()
+        .filter_map(|o| {
+            let t_lower = o.titulo.to_lowercase();
+            let hits = tokens.iter().filter(|tok| t_lower.contains(*tok)).count();
+            if hits == 0 {
+                return None;
+            }
+            let bonus_exato = if t_lower.contains(&q_lower) { 10 } else { 0 };
+            Some((hits * 10 + bonus_exato, o))
+        })
+        .collect();
+
+    pontuados.sort_by(|a, b| b.0.cmp(&a.0));
+    pontuados.into_iter().map(|(_, o)| o).collect()
+}
+
 /// Busca obras por título usando um conector específico (`universal`, `mangadex`, `mangafire` ou conector web com `url_busca`).
 pub async fn source_buscar_obras_por_conector(
     source_manager: Arc<SourceIntegrationManager>,
@@ -238,6 +268,11 @@ pub async fn source_buscar_obras_por_conector(
 ) -> Result<Vec<ObraBuscaResultado>, String> {
     if conector_id == "mangadex" {
         return source_buscar_obras(source_manager, consulta).await;
+    }
+    if conector_id == "nhentai" {
+        return mam_source_integration::extractors::nhentai::buscar_obras_nhentai(&consulta)
+            .await
+            .map_err(|e| e.to_string());
     }
     let cat = mam_source_integration::connectors::GerenciadorConectores::carregar(Some(
         library_manager.raiz(),
@@ -250,16 +285,38 @@ pub async fn source_buscar_obras_por_conector(
             source_buscar_obras(sm_md, q_md).await.unwrap_or_default()
         });
 
+        let q_nh = consulta.clone();
+        set.spawn(async move {
+            mam_source_integration::extractors::nhentai::buscar_obras_nhentai(&q_nh)
+                .await
+                .unwrap_or_default()
+        });
+
         for site in cat
             .sites
             .into_iter()
-            .filter(|s| s.id != "mangadex" && s.url_busca.is_some())
-            .take(4)
+            .filter(|s| s.id != "mangadex" && s.id != "nhentai" && (s.api_busca.is_some() || s.url_busca.is_some()))
+            .take(5)
         {
             let q = consulta.clone();
             set.spawn(async move {
+                if let Some(ref api_cfg) = site.api_busca {
+                    if let Ok(obras) =
+                        mam_source_integration::api_executor::ExecutorApiConector::buscar(
+                            &site.id, api_cfg, &q,
+                        )
+                        .await
+                    {
+                        if !obras.is_empty() {
+                            return obras;
+                        }
+                    }
+                }
+                if site.url_busca.is_none() {
+                    return Vec::new();
+                }
                 tokio::time::timeout(
-                    std::time::Duration::from_secs(20),
+                    std::time::Duration::from_secs(35),
                     mam_source_integration::connectors::GerenciadorConectores::buscar_obras_via_cdp(
                         &site, &q,
                     ),
@@ -277,7 +334,7 @@ pub async fn source_buscar_obras_por_conector(
                 consolidado.extend(lista);
             }
         }
-        return Ok(consolidado);
+        return Ok(filtrar_e_ordenar_por_relevancia(consolidado, &consulta));
     }
 
     let conector = cat
@@ -285,10 +342,42 @@ pub async fn source_buscar_obras_por_conector(
         .into_iter()
         .find(|s| s.id == conector_id)
         .ok_or_else(|| format!("Conector '{}' não encontrado", conector_id))?;
+
+    if let Some(ref api_cfg) = conector.api_busca {
+        if let Ok(obras) =
+            mam_source_integration::api_executor::ExecutorApiConector::buscar(&conector.id, api_cfg, &consulta)
+                .await
+        {
+            if !obras.is_empty() {
+                return Ok(obras);
+            }
+        }
+    }
+
+    if conector.url_busca.is_none() {
+        if let Ok(Some(api_sint)) =
+            mam_source_integration::connectors::GerenciadorConectores::sintetizar_api_busca_via_ai(
+                library_manager.raiz(),
+                &conector,
+                &consulta,
+            )
+            .await
+        {
+            return mam_source_integration::api_executor::ExecutorApiConector::buscar(
+                &conector.id,
+                &api_sint,
+                &consulta,
+            )
+            .await
+            .map_err(|e| e.to_string());
+        }
+    }
+
     mam_source_integration::connectors::GerenciadorConectores::buscar_obras_via_cdp(
         &conector, &consulta,
     )
     .await
+    .map(|lista| filtrar_e_ordenar_por_relevancia(lista, &consulta))
     .map_err(|e| e.to_string())
 }
 

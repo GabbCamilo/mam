@@ -30,6 +30,9 @@ pub struct OperacaoArquivamento {
     /// Lista de `(capitulo_id, caminho_relativo)` gravados nesta operação (para rollback estilo Docker).
     #[serde(default)]
     pub capitulos_gravados: Vec<(String, String)>,
+    /// Progresso fracionário (0.0..0.99) das páginas do capítulo atualmente em download.
+    #[serde(default)]
+    pub progresso_capitulo_atual: f32,
 }
 
 fn estado_padrao() -> String {
@@ -103,6 +106,7 @@ impl OperacaoArquivamento {
             obra_id_criada: None,
             obra_nova: false,
             capitulos_gravados: Vec::new(),
+            progresso_capitulo_atual: 0.0,
         }
     }
 
@@ -122,7 +126,14 @@ impl OperacaoArquivamento {
         let processados = self.capitulos_processados.values().filter(|v| **v).count();
         let total = self.capitulos.len();
         let percentual = if total > 0 {
-            (processados as f32 / total as f32) * 100.0
+            if processados >= total {
+                100.0
+            } else {
+                (((processados as f32 + self.progresso_capitulo_atual.clamp(0.0, 0.99))
+                    / total as f32)
+                    * 100.0)
+                    .min(99.9)
+            }
         } else {
             100.0
         };
@@ -168,6 +179,7 @@ impl Default for OperacaoArquivamento {
             obra_id_criada: None,
             obra_nova: false,
             capitulos_gravados: Vec::new(),
+            progresso_capitulo_atual: 0.0,
         }
     }
 }

@@ -35,8 +35,33 @@
   --shadow-modal: 0 20px 50px rgba(15, 23, 42, 0.18);
 }
 
-* {
-  box-sizing: border-box;
+@keyframes mam-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(120%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+.mam-search-progress-track {
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  overflow: hidden;
+  position: relative;
+}
+
+.mam-search-progress-bar {
+  width: 42%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  animation: mam-indeterminate 1.25s ease-in-out infinite;
 }
 
 html,
@@ -60,6 +85,8 @@ button {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .mam-topbar {
@@ -228,6 +255,8 @@ button {
   font-size: 0.85rem;
   outline: none;
   font-family: inherit;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .mam-input:focus,
@@ -237,20 +266,22 @@ button {
 }
 
 .mam-search-input {
-  flex: 1;
-  min-width: 220px;
+  flex: 1 1 200px;
+  min-width: 0;
 }
 
 .mam-grid-2 {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
+  width: 100%;
+  max-width: 100%;
 }
 
 @media (max-width: 860px) {
   .mam-grid-2 {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -262,6 +293,8 @@ button {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .mam-row-card {
@@ -275,6 +308,9 @@ button {
   border: 1px solid var(--border-subtle);
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .mam-row-card:hover {

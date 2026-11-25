@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 
 use crate::extractors::{EntradaImportacao, ExtratorSite, ObraExtraidaPorLink};
-use crate::{CapituloBuscaResultado, SourceError};
+use crate::{CapituloBuscaResultado, ObraBuscaResultado, SourceError};
 
 #[derive(Debug, Deserialize)]
 struct NHentaiTitle {
@@ -65,6 +65,78 @@ fn detectar_idioma_tags(tags: &[NHentaiTag]) -> Option<String> {
         }
     }
     None
+}
+
+#[derive(Debug, Deserialize)]
+struct NHentaiSearchItem {
+    id: u64,
+    english_title: Option<String>,
+    japanese_title: Option<String>,
+    thumbnail: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NHentaiSearchResp {
+    #[serde(default)]
+    result: Vec<NHentaiSearchItem>,
+}
+
+/// Pesquisa galerias no nHentai via API pública v2 (`/api/v2/search?query=...`).
+pub async fn buscar_obras_nhentai(consulta: &str) -> Result<Vec<ObraBuscaResultado>, SourceError> {
+    let q = consulta.trim();
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+    let query_enc: String = q
+        .bytes()
+        .flat_map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => vec![b as char],
+            b' ' => vec!['+'],
+            _ => format!("%{:02X}", b).chars().collect(),
+        })
+        .collect();
+    let api_url = format!("https://nhentai.net/api/v2/search?query={}", query_enc);
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let resp = client.get(&api_url).send().await?;
+    if !resp.status().is_success() {
+        return Err(SourceError::Operacao(format!(
+            "Falha ao pesquisar no Manga Alternativo: HTTP {}",
+            resp.status()
+        )));
+    }
+    let parsed: NHentaiSearchResp = resp.json().await?;
+    Ok(parsed
+        .result
+        .into_iter()
+        .take(20)
+        .map(|item| {
+            let titulo = item
+                .english_title
+                .filter(|s| !s.trim().is_empty())
+                .or(item.japanese_title.filter(|s| !s.trim().is_empty()))
+                .unwrap_or_else(|| format!("Galeria {}", item.id));
+            let capa_url = item.thumbnail.map(|p| {
+                if p.starts_with("http") {
+                    p
+                } else {
+                    format!("https://t3.nhentai.net/{}", p.trim_start_matches('/'))
+                }
+            });
+            ObraBuscaResultado {
+                fonte_id: "nhentai".to_string(),
+                obra_id_fonte: format!("https://nhentai.net/g/{}/", item.id),
+                titulo,
+                autor: None,
+                descricao: None,
+                capa_url,
+            }
+        })
+        .collect())
 }
 
 /// Consulta a API v2 do nHentai e retorna os metadados da obra única + capítulo único.

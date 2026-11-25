@@ -905,6 +905,10 @@ def extract_chapter_pages(
         vistos: set[str] = set()
         urls_ordenadas: list[str] = []
         idle_steps = 0
+        url_inicial = str(
+            cdp.eval_js("return location.href.split('?')[0].split('#')[0].replace(/\\/+$/, '');")
+            or url.split("?")[0].split("#")[0].rstrip("/")
+        )
 
         for _ in range(120):
             snap = cdp.eval_js(
@@ -918,12 +922,17 @@ def extract_chapter_pages(
                 const text = document.body ? document.body.innerText : '';
                 const m = text.match(/\\b(\\d+)\\s*\\/\\s*(\\d+)\\b/);
                 return {
+                  curUrl: location.href.split('?')[0].split('#')[0].replace(/\\/+$/, ''),
                   imgs,
                   curPage: m ? parseInt(m[1], 10) : null,
                   totalPages: m ? parseInt(m[2], 10) : null
                 };
                 """
             ) or {}
+
+            cur_url = str(snap.get("curUrl") or "")
+            if cur_url and url_inicial and cur_url != url_inicial:
+                break
 
             novas = 0
             for im in snap.get("imgs") or []:
@@ -953,14 +962,14 @@ def extract_chapter_pages(
             if idle_steps >= 3:
                 break
 
-            # Faz scroll e tenta avançar página (modo single-page)
+            # Faz scroll; só aciona botão Next se NÃO for um link <a> para outro capítulo
             cdp.eval_js(
                 """
                 window.scrollBy(0, window.innerHeight * 0.9);
                 const nextBtn = document.querySelector('[aria-label*="Next" i], [title*="Next" i], .reader-next, .next-page');
-                if (nextBtn) {
+                if (nextBtn && nextBtn.tagName !== 'A') {
                   nextBtn.click();
-                } else {
+                } else if (!nextBtn && document.querySelectorAll('img').length <= 3) {
                   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', bubbles: true }));
                 }
                 """
@@ -995,13 +1004,41 @@ def search_works_cdp(url_busca: str, conector_id: str = "mangafire") -> list[dic
             "document.querySelectorAll('a[href*=\"/title/\"], a[href*=\"/manga/\"], a[href*=\"/series/\"], a[href*=\"/comic/\"], a[href*=\"/book/\"]').length > 0",
             max_wait_s=8.0,
         )
+        if conector_id == "mangafire" and "keyword=" in url_busca:
+            from urllib.parse import parse_qs, urlparse
+            qs = parse_qs(urlparse(url_busca).query)
+            kw = (qs.get("keyword") or [""])[0].strip()
+            if kw:
+                kw_js = kw.replace("\\", "\\\\").replace("'", "\\'")
+                cdp.eval_js(
+                    f"""
+                    const inp = document.querySelector('header input[name="keyword"], form input[name="keyword"], input[name="keyword"]');
+                    if (inp) {{
+                      inp.focus();
+                      inp.value = '{kw_js}';
+                      inp.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                      inp.dispatchEvent(new Event('keyup', {{ bubbles: true }}));
+                    }}
+                    """
+                )
+                time.sleep(1.8)
+
         items = cdp.eval_js(
             """
             const seen = new Set();
             const out = [];
             const badges = new Set(['manga', 'manhua', 'manhwa', 'one-shot', 'oneshot', 'novel', 'doujinshi', 'webtoon']);
+            const cleanText = (el) => {
+              if (!el) return '';
+              const clone = el.cloneNode(true);
+              clone.querySelectorAll('span, small, time, .type, .badge, .chap, .volume, i, svg').forEach(n => n.remove());
+              return (clone.textContent || '').replace(/\\s+/g, ' ').trim();
+            };
+            const sugLinks = Array.from(document.querySelectorAll('.suggestions a[href*="/manga/"], .search-suggestions a[href*="/manga/"]'));
             const scope = document.querySelector('.original.card-lg, .manga-list, .search-results, main, #main') || document;
-            const links = scope.querySelectorAll('a[href*="/title/"], a[href*="/manga/"], a[href*="/series/"], a[href*="/comic/"], a[href*="/book/"]');
+            const links = sugLinks.length > 0
+              ? sugLinks
+              : Array.from(scope.querySelectorAll('a[href*="/title/"], a[href*="/manga/"], a[href*="/series/"], a[href*="/comic/"], a[href*="/book/"]'));
             for (const a of links) {
               const href = (a.href || '').split('?')[0].split('#')[0];
               if (!href || href.includes('/chapter') || href.includes('/read/') || seen.has(href)) continue;
@@ -1013,8 +1050,7 @@ def search_works_cdp(url_busca: str, conector_id: str = "mangafire") -> list[dic
               ];
               let titulo = '';
               for (const el of candidatos) {
-                if (!el) continue;
-                const txt = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+                const txt = cleanText(el);
                 if (txt.length >= 2 && !badges.has(txt.toLowerCase())) {
                   titulo = txt;
                   break;

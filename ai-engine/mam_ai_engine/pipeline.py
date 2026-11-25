@@ -290,3 +290,12 @@ def smart_search_works(params: dict[str, Any]) -> dict[str, Any]:
     url_busca = str(params.get("url_busca", "")).strip()
     conector_id = str(params.get("conector_id") or "mangafire").strip()
     return {"obras": search_works_cdp(url_busca, conector_id)}
+
+
+def synthesize_search_api(params: dict[str, Any]) -> dict[str, Any]:
+    """Sintetiza `api_busca` observando respostas XHR/JSON de busca no site via CDP."""
+    from .api_synthesizer import synthesize_search_api_cdp
+
+    base_url = str(params.get("base_url", "")).strip()
+    query = str(params.get("query") or "manga").strip()
+    return synthesize_search_api_cdp(base_url, query)
