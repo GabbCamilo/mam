@@ -462,7 +462,7 @@ mod tests {
         std::fs::create_dir_all(&base).unwrap();
 
         let padrao = GerenciadorConectores::carregar(Some(&base));
-        assert_eq!(padrao.version, "2026.11.22.1");
+        assert_eq!(padrao.version, "2026.11.24.1");
 
         let custom_json = r#"{
             "schema_version": 1,
