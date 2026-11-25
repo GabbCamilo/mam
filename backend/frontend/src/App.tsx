@@ -2741,7 +2741,7 @@ function App() {
                 />
                 <input
                   className="mam-input"
-                  placeholder="Link do capítulo (weebcentral.com/chapters/..., mangadex.org/chapter/..., nhentai.net/g/...)"
+                  placeholder="Link do capítulo (weebcentral.com/chapters/..., mangadex.org/chapter/..., manga alternativo)"
                   value={extUrl}
                   onChange={(e) => setExtUrl(e.target.value)}
                 />

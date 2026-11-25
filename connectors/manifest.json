@@ -3,5 +3,5 @@
   "version": "2026.11.22.1",
   "sites_url": "https://raw.githubusercontent.com/GabbCamilo/mam/main/connectors/default_sites.json",
   "sha256": null,
-  "notas": "Conectores declarativos oficiais do MAM (MangaDex, MangaFire, MangaLivre, nHentai, WeebCentral e catálogo TBCPL)."
+  "notas": "Conectores declarativos oficiais do MAM (MangaDex, MangaFire, MangaLivre, Manga Alternativo, WeebCentral e catálogo TBCPL)."
 }

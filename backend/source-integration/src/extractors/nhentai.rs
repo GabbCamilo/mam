@@ -70,7 +70,7 @@ fn detectar_idioma_tags(tags: &[NHentaiTag]) -> Option<String> {
 /// Consulta a API v2 do nHentai e retorna os metadados da obra única + capítulo único.
 pub async fn obter_obra_galeria(url_galeria: &str) -> Result<ObraExtraidaPorLink, SourceError> {
     let id = extrair_gallery_id(url_galeria)
-        .ok_or_else(|| SourceError::Operacao("ID de galeria nHentai inválido na URL".to_string()))?;
+        .ok_or_else(|| SourceError::Operacao("ID de galeria Manga Alternativo inválido na URL".to_string()))?;
 
     let api_url = format!("https://nhentai.net/api/v2/galleries/{}", id);
     let client = reqwest::Client::builder()
@@ -82,7 +82,7 @@ pub async fn obter_obra_galeria(url_galeria: &str) -> Result<ObraExtraidaPorLink
     let resp = client.get(&api_url).send().await?;
     if !resp.status().is_success() {
         return Err(SourceError::Operacao(format!(
-            "HTTP {} ao consultar API v2 do nHentai ({})",
+            "HTTP {} ao consultar API v2 do Manga Alternativo ({})",
             resp.status(),
             api_url
         )));
@@ -94,7 +94,7 @@ pub async fn obter_obra_galeria(url_galeria: &str) -> Result<ObraExtraidaPorLink
         .filter(|s| !s.trim().is_empty())
         .or(data.title.english.filter(|s| !s.trim().is_empty()))
         .or(data.title.japanese.filter(|s| !s.trim().is_empty()))
-        .unwrap_or_else(|| format!("nHentai #{}", data.id));
+        .unwrap_or_else(|| format!("Manga Alternativo #{}", data.id));
 
     let capa_url = data
         .cover
@@ -217,11 +217,11 @@ pub fn extrair_colecao_html(url_pagina: &str, html: &str) -> ObraExtraidaPorLink
         .split('/')
         .last()
         .filter(|s| !s.is_empty())
-        .unwrap_or("Coleção nHentai")
+        .unwrap_or("Coleção Manga Alternativo")
         .replace('-', " ");
 
     ObraExtraidaPorLink {
-        titulo: format!("nHentai — {}", titulo_pagina),
+        titulo: format!("Manga Alternativo — {}", titulo_pagina),
         capa_url: primeira_capa,
         url_obra: url_pagina.to_string(),
         capitulos,
@@ -265,7 +265,7 @@ impl ExtratorSite for NHentaiExtractor {
     }
 
     fn descricao(&self) -> &str {
-        "nHentai (API v2 oficial para obras/capítulos únicos)"
+        "Manga Alternativo (API v2 oficial para obras/capítulos únicos)"
     }
 
     fn suporta_url(&self, url: &str) -> bool {
@@ -281,16 +281,16 @@ impl ExtratorSite for NHentaiExtractor {
             .url
             .as_deref()
             .filter(|u| !u.trim().is_empty())
-            .ok_or_else(|| SourceError::Operacao("Informe o link da galeria nHentai".to_string()))?;
+            .ok_or_else(|| SourceError::Operacao("Informe o link da galeria Manga Alternativo".to_string()))?;
 
         let id = extrair_gallery_id(url)
-            .ok_or_else(|| SourceError::Operacao("URL do nHentai sem ID de galeria (/g/<id>/)".to_string()))?;
+            .ok_or_else(|| SourceError::Operacao("URL do Manga Alternativo sem ID de galeria (/g/<id>/)".to_string()))?;
 
         let api_url = format!("https://nhentai.net/api/v2/galleries/{}", id);
         let resp = self.client.get(&api_url).send().await?;
         if !resp.status().is_success() {
             return Err(SourceError::Operacao(format!(
-                "HTTP {} ao consultar API v2 do nHentai",
+                "HTTP {} ao consultar API v2 do Manga Alternativo",
                 resp.status()
             )));
         }
@@ -305,7 +305,7 @@ impl ExtratorSite for NHentaiExtractor {
 
         if urls.is_empty() {
             return Err(SourceError::Operacao(
-                "Nenhuma página retornada pela API v2 do nHentai".to_string(),
+                "Nenhuma página retornada pela API v2 do Manga Alternativo".to_string(),
             ));
         }
 

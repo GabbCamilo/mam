@@ -451,15 +451,20 @@ button {
   padding: 1rem;
 }
 
+[data-theme='light'] .mam-modal-backdrop {
+  background: rgba(15, 23, 42, 0.42);
+}
+
 .mam-modal {
   width: 100%;
   max-width: 440px;
-  background: #121a28;
-  border: 1px solid #24324a;
+  background: var(--bg-surface);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--border-subtle);
   border-radius: 14px;
   padding: 1.1rem;
   box-shadow: var(--shadow-modal);
-  color: #f1f5f9;
+  color: var(--text-primary);
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
@@ -480,9 +485,9 @@ button {
 .mam-layout-card {
   padding: 0.7rem 0.5rem;
   border-radius: 9px;
-  border: 1px solid #24324a;
-  background: #0d1420;
-  color: #cbd5e1;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text-secondary);
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
@@ -493,17 +498,17 @@ button {
 }
 
 .mam-layout-card.active {
-  background: rgba(14, 165, 233, 0.16);
-  border-color: #0ea5e9;
-  color: #38bdf8;
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .mam-stepper {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #0d1420;
-  border: 1px solid #24324a;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
   border-radius: 9px;
   padding: 0.3rem 0.5rem;
 }

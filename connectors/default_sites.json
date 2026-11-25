@@ -49,7 +49,7 @@
     },
     {
       "id": "nhentai",
-      "nome": "nHentai (Obras Únicas API v2)",
+      "nome": "Manga Alternativo (Obras Únicas API v2)",
       "versao": "1.0.0",
       "tipo": "api",
       "dominios": ["nhentai.net"],
