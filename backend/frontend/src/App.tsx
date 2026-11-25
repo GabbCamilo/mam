@@ -105,6 +105,12 @@ function App() {
   const [exclusoesLog, setExclusoesLog] = useState<DownloadLogItem[]>([])
   const [renomeacoesLog, setRenomeacoesLog] = useState<DownloadLogItem[]>([])
   const [subAbaLogs, setSubAbaLogs] = useState<'downloads' | 'exclusoes' | 'renomeacoes'>('downloads')
+
+  useEffect(() => {
+    if (abaAtiva === 'downloads') {
+      setSubAbaLogs('downloads')
+    }
+  }, [abaAtiva])
   const [gruposLogAbertos, setGruposLogAbertos] = useState<Record<string, boolean>>({})
   const [volNumero, setVolNumero] = useState('1')
   const [volTitulo, setVolTitulo] = useState('')
@@ -1848,7 +1854,7 @@ function App() {
                 <div style={{ display: 'grid', gap: '0.5rem' }}>
                   {renomeacoesLog.map((item) => (
                     <div key={item.id} className="mam-row-card">
-                      <div>
+                      <div style={{ minWidth: 0, flex: 1, overflowWrap: 'anywhere' }}>
                         <strong>✏️ {item.nome}</strong>
                         <div className="mam-brand-sub">Caminho: {item.pasta_destino}</div>
                       </div>
@@ -1864,7 +1870,7 @@ function App() {
                 <div style={{ display: 'grid', gap: '0.5rem' }}>
                   {exclusoesLog.map((item) => (
                     <div key={item.id} className="mam-row-card">
-                      <div>
+                      <div style={{ minWidth: 0, flex: 1, overflowWrap: 'anywhere' }}>
                         <strong>🗑 {item.nome}</strong>
                         <div className="mam-brand-sub">Caminho: {item.pasta_destino}</div>
                       </div>
@@ -2467,7 +2473,17 @@ function App() {
               </div>
               <div>
                 <strong>3. Conectores ativos (v{conectoresCatalogo?.version ?? 'padrão'}):</strong>
-                <ul style={{ margin: '0.35rem 0 0 1.2rem', padding: 0 }}>
+                <ul
+                  style={{
+                    margin: '0.4rem 0 0 0',
+                    padding: '0.55rem 0.75rem 0.55rem 1.5rem',
+                    maxHeight: 165,
+                    overflowY: 'auto',
+                    borderRadius: 8,
+                    border: '1px solid var(--border-subtle)',
+                    background: 'var(--bg-card)',
+                  }}
+                >
                   {(conectoresCatalogo?.sites ?? []).map((s) => (
                     <li key={s.id}>
                       <strong>{s.nome}</strong> (<code>{s.dominios.join(', ')}</code> — modo{' '}

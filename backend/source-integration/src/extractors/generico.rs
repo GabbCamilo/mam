@@ -13,7 +13,7 @@ pub struct GenericoExtractor {
 impl GenericoExtractor {
     pub fn nova() -> Self {
         let client = reqwest::Client::builder()
-            .user_agent("MAM-MangaArchiveManager/0.1.0")
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         Self { client }
@@ -96,11 +96,15 @@ impl ExtratorSite for GenericoExtractor {
                     }
                 }
             }
-            if let Ok(paginas_cdp) =
-                crate::extractors::smart_extract_pages_via_ai_engine(url).await
-            {
-                if paginas_cdp.len() > paginas_estaticas.len() {
-                    return Ok(paginas_cdp);
+            let mut erro_cdp: Option<SourceError> = None;
+            match crate::extractors::smart_extract_pages_via_ai_engine(url).await {
+                Ok(paginas_cdp) => {
+                    if paginas_cdp.len() > paginas_estaticas.len() {
+                        return Ok(paginas_cdp);
+                    }
+                }
+                Err(e) => {
+                    erro_cdp = Some(e);
                 }
             }
             if let Ok(dom) = crate::extractors::renderizar_html_com_navegador(url).await {
@@ -111,6 +115,11 @@ impl ExtratorSite for GenericoExtractor {
             }
             if !paginas_estaticas.is_empty() {
                 return Ok(paginas_estaticas);
+            }
+            if let Some(e) = erro_cdp {
+                if e.to_string().contains("CLOUDFLARE_CHALLENGE") {
+                    return Err(e);
+                }
             }
         }
 
