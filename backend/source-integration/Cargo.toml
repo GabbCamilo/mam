@@ -18,7 +18,6 @@ zip = "0.6"
 sha2 = "0.10"
 mam-core = { path = "../core" }
 mam-database = { path = "../database" }
-mam-archive = { path = "../archive" }
 mam-ai-engine = { path = "../ai-engine" }
 
 [dev-dependencies]

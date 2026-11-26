@@ -59,7 +59,7 @@ export function CbzReader({
   const pendingScrollRatioRef = useRef<{ x: number; y: number } | null>(null)
   const [marcadores, setMarcadores] = useState<MarcadorPagina[]>([])
   const [erro, setErro] = useState<string | null>(null)
-  const [carregando, setCarregando] = useState(false)
+  const [_carregando, setCarregando] = useState(false)
 
   const [modalLayoutAberto, setModalLayoutAberto] = useState(false)
   const [modalCapitulosAberto, setModalCapitulosAberto] = useState(false)

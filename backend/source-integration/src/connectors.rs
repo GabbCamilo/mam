@@ -203,18 +203,8 @@ impl GerenciadorConectores {
             .join("sites.json")
     }
 
-    /// Carrega o catálogo ativo respeitando a precedência:
-    /// `System/connectors/sites.json` > `<exe_dir>/connectors/default_sites.json` > embutido.
-    pub fn carregar(raiz_biblioteca: Option<&Path>) -> CatalogoConectores {
-        if let Some(raiz) = raiz_biblioteca {
-            let user_path = Self::caminho_usuario(raiz);
-            if let Ok(raw) = std::fs::read_to_string(&user_path) {
-                if let Ok(cat) = Self::validar_catalogo_json(&raw) {
-                    return cat;
-                }
-            }
-        }
-
+    /// Carrega o catálogo padrão (arquivo ao lado do executável ou embutido no binário).
+    pub fn carregar_padrao() -> CatalogoConectores {
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 let pkg_path = dir.join("connectors").join("default_sites.json");
@@ -225,8 +215,63 @@ impl GerenciadorConectores {
                 }
             }
         }
-
         Self::validar_catalogo_json(DEFAULT_SITES_EMBEDDED).expect("default_sites.json embutido válido")
+    }
+
+    /// Mescla conectores do usuário com o catálogo padrão sem sobrescrever aprendizados/APIs sintetizadas.
+    pub fn mesclar_com_padrao(
+        mut user_cat: CatalogoConectores,
+        base_cat: CatalogoConectores,
+    ) -> CatalogoConectores {
+        let base_mais_novo = base_cat.version > user_cat.version;
+        for base_site in base_cat.sites {
+            if let Some(user_site) = user_cat
+                .sites
+                .iter_mut()
+                .find(|u| u.id.eq_ignore_ascii_case(&base_site.id))
+            {
+                if user_site.url_busca.is_none() && base_site.url_busca.is_some() {
+                    user_site.url_busca = base_site.url_busca.clone();
+                }
+                for p in &base_site.padroes_url_capitulo {
+                    if !user_site.padroes_url_capitulo.contains(p) {
+                        user_site.padroes_url_capitulo.push(p.clone());
+                    }
+                }
+                for s in &base_site.seletores_imagem {
+                    if !user_site.seletores_imagem.contains(s) {
+                        user_site.seletores_imagem.push(s.clone());
+                    }
+                }
+                if base_mais_novo {
+                    user_site.nome = base_site.nome;
+                    if base_site.url_busca.is_some() {
+                        user_site.url_busca = base_site.url_busca;
+                    }
+                    if user_site.api_busca.is_none() {
+                        user_site.api_busca = base_site.api_busca;
+                    }
+                }
+            } else {
+                user_cat.sites.push(base_site);
+            }
+        }
+        user_cat
+    }
+
+    /// Carrega o catálogo ativo aplicando merge não-destrutivo:
+    /// `System/connectors/sites.json` mesclado com `<exe_dir>/connectors/default_sites.json` / embutido.
+    pub fn carregar(raiz_biblioteca: Option<&Path>) -> CatalogoConectores {
+        let base_cat = Self::carregar_padrao();
+        if let Some(raiz) = raiz_biblioteca {
+            let user_path = Self::caminho_usuario(raiz);
+            if let Ok(raw) = std::fs::read_to_string(&user_path) {
+                if let Ok(cat) = Self::validar_catalogo_json(&raw) {
+                    return Self::mesclar_com_padrao(cat, base_cat);
+                }
+            }
+        }
+        base_cat
     }
 
     /// Valida estrutura JSON do catálogo de conectores.
@@ -820,5 +865,59 @@ mod tests {
         assert_eq!(cfg_query.padroes_url_capitulo[0], "episode_no=");
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn mescla_preserva_aprendidos_e_atualiza_url_busca_padrao() {
+        let user_cat = CatalogoConectores {
+            schema_version: 1,
+            version: "2026.11.20.1".to_string(),
+            sites: vec![
+                ConectorSiteConfig {
+                    id: "nhentai".to_string(),
+                    nome: "Manga Alternativo".to_string(),
+                    versao: "1.0.0".to_string(),
+                    tipo: "api".to_string(),
+                    dominios: vec!["nhentai.net".to_string()],
+                    url_busca: None,
+                    api_busca: None,
+                    padroes_url_capitulo: vec!["/g/".to_string()],
+                    seletor_link: None,
+                    seletor_idioma_linha: None,
+                    seletor_paginacao: None,
+                    requer_cdp: "false".to_string(),
+                    seletores_imagem: vec![],
+                    rejeitar_tokens_imagem: vec![],
+                    headers_imagem: None,
+                    estrategia_descoberta: None,
+                },
+                ConectorSiteConfig {
+                    id: "learned-custom".to_string(),
+                    nome: "Custom (Aprendido)".to_string(),
+                    versao: "1.0.0".to_string(),
+                    tipo: "web-cdp".to_string(),
+                    dominios: vec!["custom.example".to_string()],
+                    url_busca: None,
+                    api_busca: None,
+                    padroes_url_capitulo: vec!["/ler/".to_string()],
+                    seletor_link: None,
+                    seletor_idioma_linha: None,
+                    seletor_paginacao: None,
+                    requer_cdp: "auto".to_string(),
+                    seletores_imagem: vec![],
+                    rejeitar_tokens_imagem: vec![],
+                    headers_imagem: None,
+                    estrategia_descoberta: None,
+                },
+            ],
+        };
+
+        let merged = GerenciadorConectores::mesclar_com_padrao(
+            user_cat,
+            GerenciadorConectores::carregar_padrao(),
+        );
+        let nh = merged.sites.iter().find(|s| s.id == "nhentai").unwrap();
+        assert!(nh.url_busca.is_some());
+        assert!(merged.sites.iter().any(|s| s.id == "learned-custom"));
     }
 }

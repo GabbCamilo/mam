@@ -34,5 +34,5 @@
 
 ## Supervisão e Consolidação
 
-- [ ] **MAM-AMP-006 — Revisão de segurança, qualidade e sincronização OpenSpec**
+- [x] **MAM-AMP-006 — Revisão de segurança, qualidade e sincronização OpenSpec**
   - **Critério de aceitação:** `git diff` revisado, nenhum segredo/bypass anti-bot introduzido, `cargo test`, `unittest` e `npm run build` verdes, e delta-specs sincronizadas em `openspec/specs/`.

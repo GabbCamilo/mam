@@ -131,6 +131,67 @@ fn validar_url_http_segura(url: &str) -> Result<(), SourceError> {
     }
 }
 
+/// Baixa e valida (URL HTTP/HTTPS, Content-Length <= 50 MB, magic bytes) uma lista ordenada de páginas.
+async fn baixar_e_validar_paginas<F>(
+    urls: &[String],
+    referer_fallback: Option<&str>,
+    usar_headers_conector: bool,
+    mut on_progress: F,
+) -> Result<Vec<(&'static str, Vec<u8>)>, SourceError>
+where
+    F: FnMut(usize, usize) + Send,
+{
+    const MAX_IMAGEM_BYTES: u64 = 50 * 1024 * 1024;
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+        .http1_only()
+        .pool_max_idle_per_host(0)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let total = urls.len();
+    let mut paginas_bytes: Vec<(&'static str, Vec<u8>)> = Vec::with_capacity(total);
+    for (idx, url_img) in urls.iter().enumerate() {
+        validar_url_http_segura(url_img)?;
+        let mut req = client.get(url_img);
+        if usar_headers_conector {
+            let headers_cfg = crate::connectors::GerenciadorConectores::headers_para_url(url_img, None);
+            if headers_cfg.is_empty() {
+                if let Some(ref_url) = referer_fallback {
+                    req = req.header(reqwest::header::REFERER, ref_url);
+                }
+            } else {
+                for (k, v) in headers_cfg {
+                    req = req.header(&k, &v);
+                }
+            }
+        } else if let Some(ref_url) = referer_fallback {
+            req = req.header(reqwest::header::REFERER, ref_url);
+        }
+
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            return Err(SourceError::Operacao(format!(
+                "Falha ao baixar imagem '{}': HTTP {}",
+                url_img,
+                resp.status()
+            )));
+        }
+        if let Some(len) = resp.content_length() {
+            if len > MAX_IMAGEM_BYTES {
+                return Err(SourceError::Operacao(
+                    "Arquivo de imagem excede o limite de segurança (50 MB)".to_string(),
+                ));
+            }
+        }
+        let bytes = resp.bytes().await?.to_vec();
+        let ext = validar_bytes_imagem(&bytes)?;
+        paginas_bytes.push((ext, bytes));
+        on_progress(idx + 1, total);
+    }
+    Ok(paginas_bytes)
+}
+
 /// Valida os magic bytes de uma imagem baixada para impedir gravação de executáveis/HTML maliciosos no CBZ.
 pub fn validar_bytes_imagem(bytes: &[u8]) -> Result<&'static str, SourceError> {
     const MAX_IMAGEM_BYTES: usize = 50 * 1024 * 1024;
@@ -228,13 +289,6 @@ impl RegistroExtratores {
             ));
         }
 
-        let client = reqwest::Client::builder()
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-            .http1_only()
-            .pool_max_idle_per_host(0)
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-
         let origem_ref = entrada
             .url
             .as_deref()
@@ -242,25 +296,7 @@ impl RegistroExtratores {
             .filter(|o| !o.is_empty())
             .map(|o| format!("{}/", o));
 
-        let mut paginas_bytes = Vec::with_capacity(urls.len());
-        for url_img in &urls {
-            validar_url_http_segura(url_img)?;
-            let mut req = client.get(url_img);
-            if let Some(ref ref_url) = origem_ref {
-                req = req.header(reqwest::header::REFERER, ref_url);
-            }
-            let resp = req.send().await?;
-            if !resp.status().is_success() {
-                return Err(SourceError::Operacao(format!(
-                    "Falha ao baixar imagem '{}': HTTP {}",
-                    url_img,
-                    resp.status()
-                )));
-            }
-            let bytes = resp.bytes().await?.to_vec();
-            let ext = validar_bytes_imagem(&bytes)?;
-            paginas_bytes.push((ext, bytes));
-        }
+        let paginas_bytes = baixar_e_validar_paginas(&urls, origem_ref.as_deref(), false, |_, _| {}).await?;
 
         let cbz_bytes = empacotar_paginas_em_cbz(&paginas_bytes)?;
         let hash = format!("{:x}", Sha256::digest(&cbz_bytes));
@@ -394,13 +430,6 @@ impl RegistroExtratores {
             ));
         }
 
-        let client = reqwest::Client::builder()
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-            .http1_only()
-            .pool_max_idle_per_host(0)
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-
         let origem_capitulo = extrair_origem(url_capitulo);
         let referer_padrao = if origem_capitulo.is_empty() {
             url_capitulo.to_string()
@@ -408,33 +437,13 @@ impl RegistroExtratores {
             format!("{}/", origem_capitulo)
         };
 
-        let total = urls_paginas.len();
-        let mut paginas_bytes: Vec<(&'static str, Vec<u8>)> = Vec::with_capacity(total);
-        for (idx, url) in urls_paginas.iter().enumerate() {
-            validar_url_http_segura(url)?;
-            let mut req = client.get(url);
-            let headers_cfg = crate::connectors::GerenciadorConectores::headers_para_url(url, None);
-            if headers_cfg.is_empty() {
-                req = req.header(reqwest::header::REFERER, &referer_padrao);
-            } else {
-                for (k, v) in headers_cfg {
-                    req = req.header(&k, &v);
-                }
-            }
-            let resp = req.send().await?;
-            if !resp.status().is_success() {
-                return Err(SourceError::Operacao(format!(
-                    "Falha ao baixar imagem {}: HTTP {}",
-                    url,
-                    resp.status()
-                )));
-            }
-            let bytes = resp.bytes().await?.to_vec();
-            let ext = validar_bytes_imagem(&bytes).unwrap_or_else(|_| extrair_extensao_url(url));
-            validar_bytes_imagem(&bytes)?;
-            paginas_bytes.push((ext, bytes));
-            on_progress(idx + 1, total);
-        }
+        let paginas_bytes = baixar_e_validar_paginas(
+            &urls_paginas,
+            Some(&referer_padrao),
+            true,
+            on_progress,
+        )
+        .await?;
 
         empacotar_paginas_em_cbz(&paginas_bytes)
     }

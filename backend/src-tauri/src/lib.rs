@@ -566,6 +566,7 @@ async fn capturar_janela_assistida_do_webview(
             .map_err(|e| format!("Nenhuma resposta recebida da janela: {}", e))?;
         let _ = stream.set_read_timeout(Some(Duration::from_secs(6)));
 
+        const MAX_CAPTURA_BYTES: usize = 32 * 1024 * 1024;
         let mut buf = Vec::new();
         let mut tmp = [0u8; 8192];
         let mut header_end: Option<usize> = None;
@@ -575,6 +576,9 @@ async fn capturar_janela_assistida_do_webview(
             let n = stream.read(&mut tmp).unwrap_or(0);
             if n == 0 {
                 break;
+            }
+            if buf.len() + n > MAX_CAPTURA_BYTES {
+                return Err("Captura excedeu o limite de segurança (32 MB)".to_string());
             }
             buf.extend_from_slice(&tmp[..n]);
             if header_end.is_none() {

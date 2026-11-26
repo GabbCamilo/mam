@@ -23,6 +23,7 @@ import {
   mamApi,
 } from './api'
 import { CbzReader } from './components/CbzReader'
+import { ConfirmModal, ConfirmModalData } from './components/ConfirmModal'
 import { ThemeModal } from './components/ThemeModal'
 import {
   ConfigAparencia,
@@ -91,7 +92,6 @@ function App() {
     Array<{ capitulo: Capitulo; pagina: number; nota: string }>
   >([])
   const [tituloNovaObra, setTituloNovaObra] = useState('')
-  const [caminhoNovaObra, setCaminhoNovaObra] = useState('')
   const [mensagem, setMensagem] = useState<string | null>(null)
 
   const [origemTransfer, setOrigemTransfer] = useState('')
@@ -142,13 +142,7 @@ function App() {
   const [opcoesAvancadasImportacao, setOpcoesAvancadasImportacao] = useState(false)
   const [importandoLink, setImportandoLink] = useState(false)
   const [modalInfoImportacaoAberto, setModalInfoImportacaoAberto] = useState(false)
-  const [modalConfirmacao, setModalConfirmacao] = useState<{
-    titulo: string
-    mensagem: string
-    textoConfirmar: string
-    perigo?: boolean
-    onConfirm: () => Promise<void> | void
-  } | null>(null)
+  const [modalConfirmacao, setModalConfirmacao] = useState<ConfirmModalData | null>(null)
   const [conectoresCatalogo, setConectoresCatalogo] = useState<CatalogoConectores | null>(null)
   const [conectorBuscaAtivo, setConectorBuscaAtivo] = useState('universal')
   const [buscandoFonte, setBuscandoFonte] = useState(false)
@@ -353,7 +347,6 @@ function App() {
     try {
       const criada = await mamApi.criarObra(tituloNovaObra.trim(), '', 'manual')
       setTituloNovaObra('')
-      setCaminhoNovaObra('')
       setMensagem(`Obra "${criada.titulo}" cadastrada em ${criada.caminho_relativo}.`)
       await carregarObras()
     } catch (err) {
@@ -674,7 +667,7 @@ function App() {
       if (res.capa_url && !capasCache[res.capa_url]) {
         mamApi
           .sourceObterCapa(res.capa_url)
-          .then((dataUrl) => {
+          .then((dataUrl: string) => {
             setCapasCache((prev) => ({ ...prev, [res.capa_url!]: dataUrl }))
           })
           .catch(() => {})
@@ -787,7 +780,7 @@ function App() {
         if (item.capa_url && !capasCache[item.capa_url]) {
           mamApi
             .sourceObterCapa(item.capa_url)
-            .then((dataUrl) => {
+            .then((dataUrl: string) => {
               setCapasCache((prev) => ({ ...prev, [item.capa_url!]: dataUrl }))
             })
             .catch(() => {})
@@ -874,8 +867,8 @@ function App() {
       try {
         const ops = await mamApi.sourceListarOperacoes()
         setOperacoesDownload(ops)
-        const totalProcessado = ops.reduce((acc, op) => acc + op.capitulos_processados, 0)
-        const todasConcluidas = ops.length > 0 && ops.every((op) => op.concluida)
+        const totalProcessado = ops.reduce((acc: number, op: StatusOperacao) => acc + op.capitulos_processados, 0)
+        const todasConcluidas = ops.length > 0 && ops.every((op: StatusOperacao) => op.concluida)
         if (totalProcessado !== ultimoTotalProcessado || todasConcluidas) {
           ultimoTotalProcessado = totalProcessado
           const logs = await mamApi.sourceListarHistoricoDownloads()
@@ -942,7 +935,7 @@ function App() {
       }
       const d = await mamApi.obterDetalhesObra(obraId)
       setDetalhes(d)
-      const caps = [...d.volumes.flatMap((v) => v.capitulos), ...d.capitulos_avulsos]
+      const caps = [...d.volumes.flatMap((v: any) => v.capitulos), ...d.capitulos_avulsos]
       const cap =
         caps.find((c) => item.capitulo_id && c.id === item.capitulo_id) ??
         caps.find((c) => item.caminho_relativo && c.caminho_relativo === item.caminho_relativo)
@@ -2641,52 +2634,7 @@ function App() {
       </main>
 
       {/* Modal de confirmação estilizado (substitui notificações nativas do WebView) */}
-      {modalConfirmacao && (
-        <div
-          className="mam-modal-backdrop"
-          onClick={() => setModalConfirmacao(null)}
-        >
-          <div
-            className="mam-modal"
-            style={{ maxWidth: 460 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mam-modal-header">
-              <strong>{modalConfirmacao.titulo}</strong>
-              <button
-                type="button"
-                className="mam-btn"
-                onClick={() => setModalConfirmacao(null)}
-              >
-                ✕
-              </button>
-            </div>
-            <p className="mam-section-desc" style={{ margin: 0 }}>
-              {modalConfirmacao.mensagem}
-            </p>
-            <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                className="mam-btn"
-                onClick={() => setModalConfirmacao(null)}
-              >
-                Voltar
-              </button>
-              <button
-                type="button"
-                className={`mam-btn ${modalConfirmacao.perigo ? 'mam-btn-danger' : 'mam-btn-primary'}`}
-                onClick={async () => {
-                  const fn = modalConfirmacao.onConfirm
-                  setModalConfirmacao(null)
-                  await fn()
-                }}
-              >
-                {modalConfirmacao.textoConfirmar}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmModal modal={modalConfirmacao} onClose={() => setModalConfirmacao(null)} />
 
       {/* Modal informativo de Como Usar o Importar por Link e Sites Suportados */}
       {modalInfoImportacaoAberto && (
