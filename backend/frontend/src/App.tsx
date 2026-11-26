@@ -1076,13 +1076,13 @@ function App() {
       <header className="mam-topbar">
         <div className="mam-brand">
           <div className="mam-logo">MAM</div>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div className="mam-brand-title">MANGA ARCHIVE MANAGER</div>
-            <div className="mam-brand-sub">
+            <div className="mam-brand-sub" title={raizBiblioteca || '...'}>
               {tx('Biblioteca Portátil • Raiz:', 'Portable Library • Root:')} {raizBiblioteca || '...'}
             </div>
           </div>
-          <span className="mam-pill-badge">
+          <span className="mam-pill-badge" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
             {obrasResumo.length} {tx('obra(s)', 'series')}
           </span>
         </div>

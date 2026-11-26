@@ -96,18 +96,41 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.85rem;
   padding: 0.75rem 1.25rem;
   background: var(--bg-surface);
   backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--border-subtle);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.mam-topbar > .mam-toolbar-row {
+  flex-shrink: 0;
+  flex-wrap: nowrap;
 }
 
 .mam-brand {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.mam-topbar .mam-brand-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .mam-topbar {
+    flex-wrap: wrap;
+  }
+
+  .mam-topbar > .mam-toolbar-row {
+    flex-wrap: wrap;
+  }
 }
 
 .mam-logo {
