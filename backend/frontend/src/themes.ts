@@ -5,6 +5,7 @@ export type FonteId = 'sistema' | 'moderna' | 'editorial' | 'mono' | 'suave'
 export interface OpcaoFonte {
   id: FonteId
   nome: string
+  nomeEn: string
   family: string
 }
 
@@ -12,26 +13,31 @@ export const OPCOES_FONTES: OpcaoFonte[] = [
   {
     id: 'sistema',
     nome: 'Padrão do Sistema',
+    nomeEn: 'System Default',
     family: "'Segoe UI', system-ui, -apple-system, sans-serif",
   },
   {
     id: 'moderna',
     nome: 'Moderna (Clean Sans)',
+    nomeEn: 'Modern (Clean Sans)',
     family: "'Inter', 'Segoe UI Variable', 'Segoe UI', 'Roboto', sans-serif",
   },
   {
     id: 'suave',
     nome: 'Suave (Leitura)',
+    nomeEn: 'Soft (Reading)',
     family: "'Trebuchet MS', 'Segoe UI', sans-serif",
   },
   {
     id: 'editorial',
     nome: 'Editorial (Clássica)',
+    nomeEn: 'Editorial (Classic)',
     family: "'Georgia', 'Cambria', 'Times New Roman', serif",
   },
   {
     id: 'mono',
     nome: 'Técnica (Monoespaçada)',
+    nomeEn: 'Technical (Monospace)',
     family: "'Cascadia Code', 'Consolas', 'Courier New', monospace",
   },
 ]
@@ -39,6 +45,7 @@ export const OPCOES_FONTES: OpcaoFonte[] = [
 export interface TemaPreset {
   id: string
   nome: string
+  nomeEn: string
   base: TemaBase
   preview: string
   bgApp: string
@@ -56,6 +63,7 @@ export const TEMAS_PRESET: TemaPreset[] = [
   {
     id: 'dark-padrao',
     nome: 'Dark Padrão',
+    nomeEn: 'Default Dark',
     base: 'dark',
     preview: 'linear-gradient(135deg, #0a0e17, #19253c)',
     bgApp: '#0a0e17',
@@ -71,6 +79,7 @@ export const TEMAS_PRESET: TemaPreset[] = [
   {
     id: 'light-padrao',
     nome: 'Light Padrão',
+    nomeEn: 'Default Light',
     base: 'light',
     preview: 'linear-gradient(135deg, #f1f5f9, #dbeafe)',
     bgApp: '#f1f5f9',
@@ -86,6 +95,7 @@ export const TEMAS_PRESET: TemaPreset[] = [
   {
     id: 'menta-suave',
     nome: 'Menta Suave',
+    nomeEn: 'Soft Mint',
     base: 'light',
     preview: 'linear-gradient(135deg, #bbf7d0, #a7f3d0)',
     bgApp: 'linear-gradient(135deg, #dcfce7 0%, #cffafe 100%)',
@@ -101,6 +111,7 @@ export const TEMAS_PRESET: TemaPreset[] = [
   {
     id: 'pessego-dourado',
     nome: 'Pêssego Dourado',
+    nomeEn: 'Golden Peach',
     base: 'light',
     preview: 'linear-gradient(135deg, #fde68a, #fecaca)',
     bgApp: 'linear-gradient(135deg, #fef3c7 0%, #ffe4e6 100%)',
@@ -116,6 +127,7 @@ export const TEMAS_PRESET: TemaPreset[] = [
   {
     id: 'lavanda-celeste',
     nome: 'Lavanda Celeste',
+    nomeEn: 'Sky Lavender',
     base: 'light',
     preview: 'linear-gradient(135deg, #c7d2fe, #bae6fd)',
     bgApp: 'linear-gradient(135deg, #e0e7ff 0%, #e0f2fe 100%)',
@@ -131,6 +143,7 @@ export const TEMAS_PRESET: TemaPreset[] = [
   {
     id: 'rosa-nevoa',
     nome: 'Rosa Névoa',
+    nomeEn: 'Misty Rose',
     base: 'light',
     preview: 'linear-gradient(135deg, #fbcfe8, #e9d5ff)',
     bgApp: 'linear-gradient(135deg, #fce7f3 0%, #f3e8ff 100%)',
@@ -146,6 +159,7 @@ export const TEMAS_PRESET: TemaPreset[] = [
   {
     id: 'cyber-neon',
     nome: 'Cyber Neon',
+    nomeEn: 'Cyber Neon',
     base: 'dark',
     preview: 'linear-gradient(135deg, #7e22ce, #2563eb, #06b6d4)',
     bgApp: 'linear-gradient(135deg, #1e1b4b 0%, #4c1d95 50%, #0c4a6e 100%)',
@@ -161,6 +175,7 @@ export const TEMAS_PRESET: TemaPreset[] = [
   {
     id: 'carmim-sombrio',
     nome: 'Carmim Sombrio',
+    nomeEn: 'Dark Crimson',
     base: 'dark',
     preview: 'linear-gradient(135deg, #7f1d1d, #09090b)',
     bgApp: 'linear-gradient(135deg, #450a0a 0%, #09090b 75%)',
@@ -176,6 +191,7 @@ export const TEMAS_PRESET: TemaPreset[] = [
   {
     id: 'meia-noite-indigo',
     nome: 'Meia-Noite Índigo',
+    nomeEn: 'Midnight Indigo',
     base: 'dark',
     preview: 'linear-gradient(135deg, #1e1b4b, #020617)',
     bgApp: 'linear-gradient(135deg, #1e1b4b 0%, #0f172a 55%, #020617 100%)',
@@ -191,6 +207,7 @@ export const TEMAS_PRESET: TemaPreset[] = [
   {
     id: 'floresta-esmeralda',
     nome: 'Floresta Esmeralda',
+    nomeEn: 'Emerald Forest',
     base: 'dark',
     preview: 'linear-gradient(135deg, #064e3b, #111827)',
     bgApp: 'linear-gradient(135deg, #022c22 0%, #064e3b 45%, #0f172a 100%)',
@@ -206,6 +223,7 @@ export const TEMAS_PRESET: TemaPreset[] = [
   {
     id: 'crepusculo-ambar',
     nome: 'Crepúsculo Âmbar',
+    nomeEn: 'Amber Twilight',
     base: 'dark',
     preview: 'linear-gradient(135deg, #701a75, #b45309)',
     bgApp: 'linear-gradient(135deg, #4a044e 0%, #78350f 100%)',
@@ -221,6 +239,7 @@ export const TEMAS_PRESET: TemaPreset[] = [
   {
     id: 'aurora-abissal',
     nome: 'Aurora Abissal',
+    nomeEn: 'Abyssal Aurora',
     base: 'dark',
     preview: 'linear-gradient(135deg, #0f766e, #1d4ed8, #090d16)',
     bgApp: 'linear-gradient(135deg, #134e4a 0%, #1e3a8a 50%, #090d16 100%)',

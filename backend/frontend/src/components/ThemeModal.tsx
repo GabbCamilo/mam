@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n'
 import {
   APARENCIA_PADRAO,
   ConfigAparencia,
@@ -15,6 +16,7 @@ interface ThemeModalProps {
 }
 
 export function ThemeModal({ aberto, config, onChange, onFechar }: ThemeModalProps) {
+  const { idioma, tx } = useI18n()
   if (!aberto) return null
 
   const selecionandoCustom = config.presetId === 'custom'
@@ -46,9 +48,12 @@ export function ThemeModal({ aberto, config, onChange, onFechar }: ThemeModalPro
       >
         <div className="mam-section-header">
           <div>
-            <h3 className="mam-modal-title">🎨 Aparência e Temas</h3>
+            <h3 className="mam-modal-title">🎨 {tx('Aparência e Temas', 'Appearance & Themes')}</h3>
             <p className="mam-section-desc">
-              Personalize gradientes de fundo, contornos, cores de destaque e fonte da interface.
+              {tx(
+                'Personalize gradientes de fundo, contornos, cores de destaque e fonte da interface.',
+                'Customize background gradients, borders, accent colors, and UI font.',
+              )}
             </p>
           </div>
           <button className="mam-btn" type="button" onClick={onFechar}>
@@ -59,24 +64,25 @@ export function ThemeModal({ aberto, config, onChange, onFechar }: ThemeModalPro
         <div style={{ display: 'grid', gap: '1rem' }}>
           <div>
             <div style={{ fontWeight: 600, fontSize: '0.88rem', marginBottom: '0.5rem' }}>
-              Temas Coloridos &amp; Degradês
+              {tx('Temas Coloridos & Degradês', 'Color Themes & Gradients')}
             </div>
             <div className="mam-theme-swatch-grid">
               <button
                 type="button"
                 className={`mam-theme-swatch mam-theme-swatch-custom ${selecionandoCustom ? 'active' : ''}`}
                 onClick={() => selecionarPreset('custom')}
-                title="Criar degradê e contornos personalizados"
+                title={tx('Criar degradê e contornos personalizados', 'Create custom gradient and borders')}
                 style={{
                   background: `linear-gradient(${config.custom.angulo}deg, ${config.custom.cor1}, ${config.custom.cor2})`,
                 }}
               >
-                <span className="mam-theme-swatch-badge">Personalizado</span>
+                <span className="mam-theme-swatch-badge">{tx('Personalizado', 'Custom')}</span>
                 <span style={{ fontSize: '1.15rem' }}>🎨</span>
               </button>
 
               {TEMAS_PRESET.map((t) => {
                 const ativo = config.presetId === t.id
+                const nomeTema = idioma === 'en' ? t.nomeEn : t.nome
                 return (
                   <button
                     key={t.id}
@@ -84,9 +90,9 @@ export function ThemeModal({ aberto, config, onChange, onFechar }: ThemeModalPro
                     className={`mam-theme-swatch ${ativo ? 'active' : ''}`}
                     style={{ background: t.preview }}
                     onClick={() => selecionarPreset(t.id)}
-                    title={`${t.nome} (${t.base === 'dark' ? 'Dark' : 'Light'})`}
+                    title={`${nomeTema} (${t.base === 'dark' ? 'Dark' : 'Light'})`}
                   >
-                    <span className="mam-theme-swatch-label">{t.nome}</span>
+                    <span className="mam-theme-swatch-label">{nomeTema}</span>
                   </button>
                 )
               })}
@@ -96,28 +102,28 @@ export function ThemeModal({ aberto, config, onChange, onFechar }: ThemeModalPro
           {selecionandoCustom && (
             <div className="mam-panel" style={{ padding: '0.85rem', display: 'grid', gap: '0.75rem' }}>
               <div className="mam-section-header">
-                <strong style={{ fontSize: '0.88rem' }}>Editor de Degradê &amp; Contorno</strong>
+                <strong style={{ fontSize: '0.88rem' }}>{tx('Editor de Degradê & Contorno', 'Gradient & Border Editor')}</strong>
                 <div className="mam-segmented">
                   <button
                     type="button"
                     className={`mam-segmented-btn ${config.custom.base === 'dark' ? 'active' : ''}`}
                     onClick={() => atualizarCustom({ base: 'dark' as TemaBase })}
                   >
-                    🌙 Base Dark
+                    🌙 {tx('Base Dark', 'Dark Base')}
                   </button>
                   <button
                     type="button"
                     className={`mam-segmented-btn ${config.custom.base === 'light' ? 'active' : ''}`}
                     onClick={() => atualizarCustom({ base: 'light' as TemaBase })}
                   >
-                    ☀️ Base Light
+                    ☀️ {tx('Base Light', 'Light Base')}
                   </button>
                 </div>
               </div>
 
               <div className="mam-toolbar-row" style={{ gap: '0.9rem' }}>
                 <label className="mam-color-field">
-                  <span>Fundo 1</span>
+                  <span>{tx('Fundo 1', 'Bg 1')}</span>
                   <input
                     type="color"
                     value={config.custom.cor1}
@@ -125,7 +131,7 @@ export function ThemeModal({ aberto, config, onChange, onFechar }: ThemeModalPro
                   />
                 </label>
                 <label className="mam-color-field">
-                  <span>Fundo 2</span>
+                  <span>{tx('Fundo 2', 'Bg 2')}</span>
                   <input
                     type="color"
                     value={config.custom.cor2}
@@ -133,7 +139,7 @@ export function ThemeModal({ aberto, config, onChange, onFechar }: ThemeModalPro
                   />
                 </label>
                 <label className="mam-color-field">
-                  <span>Contorno</span>
+                  <span>{tx('Contorno', 'Border')}</span>
                   <input
                     type="color"
                     value={config.custom.corContorno}
@@ -141,7 +147,7 @@ export function ThemeModal({ aberto, config, onChange, onFechar }: ThemeModalPro
                   />
                 </label>
                 <label className="mam-color-field">
-                  <span>Destaque</span>
+                  <span>{tx('Destaque', 'Accent')}</span>
                   <input
                     type="color"
                     value={config.custom.corAcento}
@@ -149,7 +155,7 @@ export function ThemeModal({ aberto, config, onChange, onFechar }: ThemeModalPro
                   />
                 </label>
                 <label className="mam-color-field" style={{ flex: 1, minWidth: 110 }}>
-                  <span>Ângulo ({config.custom.angulo}°)</span>
+                  <span>{tx('Ângulo', 'Angle')} ({config.custom.angulo}°)</span>
                   <input
                     type="range"
                     min={0}
@@ -165,7 +171,7 @@ export function ThemeModal({ aberto, config, onChange, onFechar }: ThemeModalPro
 
           <div>
             <div style={{ fontWeight: 600, fontSize: '0.88rem', marginBottom: '0.45rem' }}>
-              Fonte da Interface
+              {tx('Fonte da Interface', 'UI Font')}
             </div>
             <select
               className="mam-select"
@@ -180,7 +186,7 @@ export function ThemeModal({ aberto, config, onChange, onFechar }: ThemeModalPro
             >
               {OPCOES_FONTES.map((f) => (
                 <option key={f.id} value={f.id}>
-                  {f.nome}
+                  {idioma === 'en' ? f.nomeEn : f.nome}
                 </option>
               ))}
             </select>
@@ -193,10 +199,10 @@ export function ThemeModal({ aberto, config, onChange, onFechar }: ThemeModalPro
             className="mam-btn"
             onClick={() => onChange(APARENCIA_PADRAO)}
           >
-            Restaurar Padrão
+            {tx('Restaurar Padrão', 'Reset Default')}
           </button>
           <button type="button" className="mam-btn mam-btn-primary" onClick={onFechar}>
-            Concluir
+            {tx('Concluir', 'Done')}
           </button>
         </div>
       </div>

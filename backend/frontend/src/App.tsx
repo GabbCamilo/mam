@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
+import { useI18n } from './i18n'
 import {
   CapturaJanelaAssistida,
   ConectorSiteConfig,
@@ -53,21 +54,22 @@ function obterDiretorioCapitulo(cap: Capitulo): string {
   return idx > 0 ? cap.caminho_relativo.slice(0, idx) : cap.caminho_relativo
 }
 
-function formatarOrigemFonte(origem?: string | null): string {
+function formatarOrigemFonte(origem: string | null | undefined, tx: (pt: string, en: string) => string): string {
   const raw = (origem ?? '').trim().toLowerCase()
-  if (!raw || raw === 'local') return 'Biblioteca Local'
-  if (raw === 'manual') return 'Cadastro Manual'
+  if (!raw || raw === 'local') return tx('Biblioteca Local', 'Local Library')
+  if (raw === 'manual') return tx('Cadastro Manual', 'Manual Entry')
   if (raw === 'mangadex') return 'MangaDex'
   if (raw === 'mangafire') return 'MangaFire'
   if (raw === 'weebcentral') return 'WeebCentral'
   if (raw === 'mangaball') return 'MangaBall'
   if (raw === 'mangalivre') return 'MangaLivre'
-  if (raw === 'nhentai') return 'Manga Alternativo'
-  if (raw === 'extrator-link' || raw === 'generico') return 'Extrator Web (IA)'
+  if (raw === 'nhentai') return tx('Manga Alternativo', 'Alternative Manga')
+  if (raw === 'extrator-link' || raw === 'generico') return tx('Extrator Web (IA)', 'Web Extractor (AI)')
   return origem!.trim()
 }
 
 function App() {
+  const { idioma, setIdioma, tx } = useI18n()
   const [aparencia, setAparencia] = useState<ConfigAparencia>(() => carregarAparencia())
   const [modalTemaAberto, setModalTemaAberto] = useState(false)
   const tema =
@@ -1076,18 +1078,43 @@ function App() {
           <div className="mam-logo">MAM</div>
           <div>
             <div className="mam-brand-title">MANGA ARCHIVE MANAGER</div>
-            <div className="mam-brand-sub">Biblioteca Portátil • Raiz: {raizBiblioteca || '...'}</div>
+            <div className="mam-brand-sub">
+              {tx('Biblioteca Portátil • Raiz:', 'Portable Library • Root:')} {raizBiblioteca || '...'}
+            </div>
           </div>
-          <span className="mam-pill-badge">{obrasResumo.length} obra(s)</span>
+          <span className="mam-pill-badge">
+            {obrasResumo.length} {tx('obra(s)', 'series')}
+          </span>
         </div>
 
         <div className="mam-toolbar-row">
+          <div
+            className="mam-segmented"
+            role="group"
+            aria-label={tx('Idioma da interface', 'Interface language')}
+            title={tx('Alternar idioma entre Português e Inglês', 'Switch language between Portuguese and English')}
+          >
+            <button
+              type="button"
+              className={`mam-segmented-btn ${idioma === 'pt-BR' ? 'active' : ''}`}
+              onClick={() => setIdioma('pt-BR')}
+            >
+              🌐 PT
+            </button>
+            <button
+              type="button"
+              className={`mam-segmented-btn ${idioma === 'en' ? 'active' : ''}`}
+              onClick={() => setIdioma('en')}
+            >
+              EN
+            </button>
+          </div>
           <button
             className="mam-btn"
             onClick={() => setModalTemaAberto(true)}
-            title="Personalizar temas, degradês, contornos e fonte"
+            title={tx('Personalizar temas, degradês, contornos e fonte', 'Customize themes, gradients, borders, and font')}
           >
-            🎨 Temas
+            🎨 {tx('Temas', 'Themes')}
           </button>
           <button
             className="mam-btn"
@@ -1097,7 +1124,7 @@ function App() {
                 presetId: tema === 'dark' ? 'light-padrao' : 'dark-padrao',
               }))
             }
-            title="Alternar rapidamente entre Dark e Light"
+            title={tx('Alternar rapidamente entre Dark e Light', 'Quickly toggle between Dark and Light')}
           >
             {tema === 'dark' ? '🌙 Dark' : '☀️ Light'}
           </button>
@@ -1112,7 +1139,7 @@ function App() {
             setModalImportarUrlAberto(true)
           }}
         >
-          + Importar URL
+          + {tx('Importar URL', 'Import URL')}
         </button>
         <button
           className={`mam-btn ${abaAtiva === 'biblioteca' ? 'mam-btn-active' : ''}`}
@@ -1121,7 +1148,7 @@ function App() {
             carregarObras()
           }}
         >
-          Biblioteca
+          {tx('Biblioteca', 'Library')}
         </button>
         <button
           className={`mam-btn ${abaAtiva === 'fontes' ? 'mam-btn-active' : ''}`}
@@ -1130,7 +1157,7 @@ function App() {
             handleCarregarFontes()
           }}
         >
-          Fontes & Importação
+          {tx('Fontes & Importação', 'Sources & Import')}
         </button>
         <button
           className={`mam-btn ${abaAtiva === 'downloads' ? 'mam-btn-active' : ''}`}
@@ -1139,13 +1166,13 @@ function App() {
             carregarObras()
           }}
         >
-          Log de Downloads ({downloadsLog.length + operacoesDownload.filter((o) => !o.concluida && !o.cancelada).length})
+          {tx('Log de Downloads', 'Download Log')} ({downloadsLog.length + operacoesDownload.filter((o) => !o.concluida && !o.cancelada).length})
         </button>
         <button
           className={`mam-btn ${abaAtiva === 'transferencia' ? 'mam-btn-active' : ''}`}
           onClick={() => setAbaAtiva('transferencia')}
         >
-          Transferência & Sync
+          {tx('Transferência & Sync', 'Transfer & Sync')}
         </button>
         <button
           className={`mam-btn ${abaAtiva === 'ai' ? 'mam-btn-active' : ''}`}
@@ -1160,9 +1187,12 @@ function App() {
           <>
             <div className="mam-section-header">
               <div>
-                <h1 className="mam-section-title">BIBLIOTECA</h1>
+                <h1 className="mam-section-title">{tx('BIBLIOTECA', 'LIBRARY')}</h1>
                 <p className="mam-section-desc">
-                  Obras carregadas automaticamente — ordene por nome ou quantidade de capítulos.
+                  {tx(
+                    'Obras carregadas automaticamente — ordene por nome ou quantidade de capítulos.',
+                    'Series loaded automatically — sort by name or chapter count.',
+                  )}
                 </p>
               </div>
               <div className="mam-toolbar-row">
@@ -1170,10 +1200,10 @@ function App() {
                   className="mam-btn"
                   onClick={() => setModalImportarLocalAberto(true)}
                 >
-                  📂 Importar .CBZ / .CBR
+                  📂 {tx('Importar .CBZ / .CBR', 'Import .CBZ / .CBR')}
                 </button>
                 <button className="mam-btn" onClick={handleDetectarCapitulos}>
-                  Detectar Capítulos CBZ
+                  {tx('Detectar Capítulos CBZ', 'Detect CBZ Chapters')}
                 </button>
               </div>
             </div>
@@ -1182,12 +1212,15 @@ function App() {
               <div className="mam-toolbar-row">
                 <input
                   className="mam-input mam-search-input"
-                  placeholder="Título da nova obra (cria pasta automaticamente na biblioteca)..."
+                  placeholder={tx(
+                    'Título da nova obra (cria pasta automaticamente na biblioteca)...',
+                    'New series title (creates library folder automatically)...',
+                  )}
                   value={tituloNovaObra}
                   onChange={(e) => setTituloNovaObra(e.target.value)}
                 />
                 <button className="mam-btn mam-btn-primary" type="submit">
-                  + Cadastrar Obra
+                  + {tx('Cadastrar Obra', 'Add Series')}
                 </button>
               </div>
             </form>
@@ -1196,7 +1229,7 @@ function App() {
               <section className="mam-panel">
                 <input
                   className="mam-input"
-                  placeholder="🔍 Buscar obra na biblioteca..."
+                  placeholder={tx('🔍 Buscar obra na biblioteca...', '🔍 Search series in library...')}
                   value={buscaObra}
                   onChange={(e) => setBuscaObra(e.target.value)}
                 />
@@ -1205,14 +1238,14 @@ function App() {
                   value={ordemBiblioteca}
                   onChange={(e) => setOrdemBiblioteca(e.target.value as OrdemBiblioteca)}
                 >
-                  <option value="nome-asc">Ordenar: A/Z</option>
-                  <option value="nome-desc">Ordenar: Z/A</option>
-                  <option value="recente">Ordenar: Mais recente</option>
-                  <option value="antigo">Ordenar: Mais antigo</option>
+                  <option value="nome-asc">{tx('Ordenar: A/Z', 'Sort: A/Z')}</option>
+                  <option value="nome-desc">{tx('Ordenar: Z/A', 'Sort: Z/A')}</option>
+                  <option value="recente">{tx('Ordenar: Mais recente', 'Sort: Newest')}</option>
+                  <option value="antigo">{tx('Ordenar: Mais antigo', 'Sort: Oldest')}</option>
                 </select>
 
                 {obrasFiltradas.length === 0 ? (
-                  <p className="mam-section-desc">Nenhuma obra encontrada.</p>
+                  <p className="mam-section-desc">{tx('Nenhuma obra encontrada.', 'No series found.')}</p>
                 ) : (
                   obrasFiltradas.map((item) => (
                     <div
@@ -1237,13 +1270,13 @@ function App() {
                             className="mam-brand-sub"
                             style={{ fontSize: '0.74rem', opacity: 0.78, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                           >
-                            Fonte: {formatarOrigemFonte(item.obra.origem)}
+                            Fonte: {formatarOrigemFonte(item.obra.origem, tx)}
                           </div>
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexShrink: 0, flexWrap: 'nowrap' }}>
                         <span className="mam-pill-badge" style={{ whiteSpace: 'nowrap' }}>
-                          {item.total_capitulos} cap(s)
+                          {item.total_capitulos} {tx('cap(s)', 'ch(s)')}
                         </span>
                       </div>
                     </div>
@@ -1280,7 +1313,7 @@ function App() {
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <h2 className="mam-section-title">{detalhes.obra.titulo}</h2>
                           <p className="mam-section-desc" style={{ marginBottom: 0 }}>
-                            Fonte: {formatarOrigemFonte(detalhes.obra.origem)} • {detalhes.obra.caminho_relativo}
+                            {tx('Fonte:', 'Source:')} {formatarOrigemFonte(detalhes.obra.origem, tx)} • {detalhes.obra.caminho_relativo}
                           </p>
                         </div>
                       </div>
@@ -1308,7 +1341,7 @@ function App() {
                               className="mam-btn mam-btn-primary"
                               onClick={() => abrirCapituloParaLeitura(ultimoCap!)}
                             >
-                              ▶ Continuar Leitura (Cap. {ultimoCap.numero})
+                              ▶ {tx('Continuar Leitura', 'Continue Reading')} ({tx('Cap.', 'Ch.')} {ultimoCap.numero})
                             </button>
                           ) : null
                         })()}
@@ -1317,7 +1350,7 @@ function App() {
                             className={`mam-segmented-btn ${subAbaObra === 'capitulos' ? 'active' : ''}`}
                             onClick={() => setSubAbaObra('capitulos')}
                           >
-                            Capítulos ({capitulosFiltrados.length})
+                            {tx('Capítulos', 'Chapters')} ({capitulosFiltrados.length})
                           </button>
                           <button
                             className={`mam-segmented-btn ${subAbaObra === 'volumes' ? 'active' : ''}`}
@@ -1329,7 +1362,7 @@ function App() {
                             className={`mam-segmented-btn ${subAbaObra === 'marcados' ? 'active' : ''}`}
                             onClick={() => setSubAbaObra('marcados')}
                           >
-                            Marcados (
+                            {tx('Marcados', 'Bookmarked')} (
                             {
                               marcadoresObra.filter(
                                 (m) =>
@@ -1343,11 +1376,11 @@ function App() {
                         {idiomasBibliotecaDisponiveis.length > 0 && (
                           <select
                             className="mam-select"
-                            aria-label="Filtrar capítulos por idioma"
+                            aria-label={tx('Filtrar capítulos por idioma', 'Filter chapters by language')}
                             value={filtroIdiomaBiblioteca}
                             onChange={(e) => setFiltroIdiomaBiblioteca(e.target.value)}
                           >
-                            <option value="TODOS">LANG: Todos</option>
+                            <option value="TODOS">{tx('LANG: Todos', 'LANG: All')}</option>
                             {idiomasBibliotecaDisponiveis.map((lang) => (
                               <option key={lang} value={lang}>
                                 LANG: {lang}
@@ -1737,9 +1770,9 @@ function App() {
           <>
             <div className="mam-section-header">
               <div>
-                <h1 className="mam-section-title">FONTES & IMPORTAÇÃO</h1>
+                <h1 className="mam-section-title">{tx('FONTES & IMPORTAÇÃO', 'SOURCES & IMPORT')}</h1>
                 <p className="mam-section-desc">
-                  Fontes ativas: {fontes.map((f) => f.nome).join(', ') || 'nenhuma'} • Extratores:{' '}
+                  {tx('Fontes ativas:', 'Active sources:')} {fontes.map((f) => f.nome).join(', ') || tx('nenhuma', 'none')} • {tx('Extratores:', 'Extractors:')}{' '}
                   {extratores.map((e) => e.id).join(', ') || '...'}
                 </p>
               </div>
@@ -1749,7 +1782,7 @@ function App() {
                     type="button"
                     className="mam-pill-badge"
                     style={{ cursor: 'pointer', border: '1px solid var(--accent-primary)' }}
-                    title={statusAtualizacaoConectores.notas ?? 'Nova versão de conectores disponível'}
+                    title={statusAtualizacaoConectores.notas ?? tx('Nova versão de conectores disponível', 'New connector version available')}
                     onClick={async () => {
                       try {
                         const cat = await mamApi.sourceAtualizarConectoresRemoto()
@@ -1766,22 +1799,22 @@ function App() {
                       }
                     }}
                   >
-                    🔄 Atualização de sites disponível (v{statusAtualizacaoConectores.versao_remota})
+                    🔄 {tx('Atualização de sites disponível', 'Site update available')} (v{statusAtualizacaoConectores.versao_remota})
                   </button>
                 )}
                 <button
                   type="button"
                   className="mam-btn"
-                  title="Como usar o Importar por Link, conectores ativos e atualização segura"
+                  title={tx('Como usar o Importar por Link, conectores ativos e atualização segura', 'How to use Import by Link, active connectors, and safe updates')}
                   onClick={() => setModalInfoImportacaoAberto(true)}
                 >
-                  ⓘ Guia / Conectores
+                  ⓘ {tx('Guia / Conectores', 'Guide / Connectors')}
                 </button>
                 <button
                   className="mam-btn mam-btn-primary"
                   onClick={() => setModalImportarUrlAberto(true)}
                 >
-                  + Importar por Link / HTML
+                  + {tx('Importar por Link / HTML', 'Import via Link / HTML')}
                 </button>
               </div>
             </div>
@@ -1790,21 +1823,26 @@ function App() {
               <div className="mam-toolbar-row">
                 <select
                   className="mam-select"
-                  aria-label="Mecanismo de busca nativo"
+                  aria-label={tx('Mecanismo de busca nativo', 'Native search engine')}
                   value={conectorBuscaAtivo === 'mangadex' ? 'mangadex' : 'universal'}
                   onChange={(e) => setConectorBuscaAtivo(e.target.value)}
                 >
-                  <option value="universal">🌐 Universal (IA Portátil)</option>
-                  <option value="mangadex">MangaDex (API Pública)</option>
+                  <option value="universal">🌐 {tx('Universal (IA Portátil)', 'Universal (Portable AI)')}</option>
+                  <option value="mangadex">MangaDex ({tx('API Pública', 'Public API')})</option>
                 </select>
                 <input
                   className="mam-input mam-search-input"
-                  placeholder={`🔍 Pesquisar obra por título em ${
-                    conectorBuscaAtivo === 'universal'
-                      ? 'Universal (IA Portátil)'
-                      : conectoresCatalogo?.sites.find((s) => s.id === conectorBuscaAtivo)?.nome ??
-                        conectorBuscaAtivo
-                  }...`}
+                  placeholder={tx(
+                    '🔍 Pesquisar obra por título em {fonte}...',
+                    '🔍 Search series by title on {fonte}...',
+                    {
+                      fonte:
+                        conectorBuscaAtivo === 'universal'
+                          ? tx('Universal (IA Portátil)', 'Universal (Portable AI)')
+                          : conectoresCatalogo?.sites.find((s) => s.id === conectorBuscaAtivo)?.nome ??
+                            conectorBuscaAtivo,
+                    },
+                  )}
                   value={consultaFonte}
                   onChange={(e) => {
                     const v = e.target.value
@@ -1818,7 +1856,7 @@ function App() {
                   }}
                 />
                 <button className="mam-btn mam-btn-primary" type="submit">
-                  Pesquisar
+                  {tx('Pesquisar', 'Search')}
                 </button>
               </div>
             </form>
@@ -1890,7 +1928,7 @@ function App() {
                                     setFiltroFontesAtivas(prox.length === fontesDisponiveis.length ? null : prox)
                                   }}
                                 />
-                                <span>{formatarOrigemFonte(f)}</span>
+                                <span>{formatarOrigemFonte(f, tx)}</span>
                               </label>
                             )
                           })}
@@ -2039,17 +2077,26 @@ function App() {
               <div>
                 <h1 className="mam-section-title">
                   {subAbaLogs === 'downloads'
-                    ? 'LOG DE DOWNLOADS'
+                    ? tx('LOG DE DOWNLOADS', 'DOWNLOAD LOG')
                     : subAbaLogs === 'exclusoes'
-                      ? 'LOG DE EXCLUSÕES'
-                      : 'LOG DE RENOMEAÇÕES'}
+                      ? tx('LOG DE EXCLUSÕES', 'DELETION LOG')
+                      : tx('LOG DE RENOMEAÇÕES', 'RENAME LOG')}
                 </h1>
                 <p className="mam-section-desc">
                   {subAbaLogs === 'downloads'
-                    ? 'Clique em qualquer conjunto para expandir ou recolher os capítulos baixados e abrir a leitura diretamente.'
+                    ? tx(
+                        'Clique em qualquer conjunto para expandir ou recolher os capítulos baixados e abrir a leitura diretamente.',
+                        'Click any group to expand or collapse downloaded chapters and open reading directly.',
+                      )
                     : subAbaLogs === 'exclusoes'
-                      ? 'Histórico de capítulos, volumes e obras removidos da biblioteca com nome, pasta e data/hora.'
-                      : 'Histórico de renomeações de capítulos e volumes realizadas na biblioteca.'}
+                      ? tx(
+                          'Histórico de capítulos, volumes e obras removidos da biblioteca com nome, pasta e data/hora.',
+                          'History of chapters, volumes, and series removed from the library with name, folder, and timestamp.',
+                        )
+                      : tx(
+                          'Histórico de renomeações de capítulos e volumes realizadas na biblioteca.',
+                          'History of chapter and volume renames performed in the library.',
+                        )}
                 </p>
               </div>
               <div className="mam-toolbar-row">
@@ -2064,13 +2111,13 @@ function App() {
                     className={`mam-segmented-btn ${subAbaLogs === 'exclusoes' ? 'active' : ''}`}
                     onClick={() => setSubAbaLogs('exclusoes')}
                   >
-                    Exclusões ({exclusoesLog.length})
+                    {tx('Exclusões', 'Deletions')} ({exclusoesLog.length})
                   </button>
                   <button
                     className={`mam-segmented-btn ${subAbaLogs === 'renomeacoes' ? 'active' : ''}`}
                     onClick={() => setSubAbaLogs('renomeacoes')}
                   >
-                    Renomeações ({renomeacoesLog.length})
+                    {tx('Renomeações', 'Renames')} ({renomeacoesLog.length})
                   </button>
                 </div>
                 <button
@@ -2083,10 +2130,10 @@ function App() {
                     setOperacoesDownload(ops)
                   }}
                 >
-                  Atualizar Log
+                  {tx('Atualizar Log', 'Refresh Log')}
                 </button>
                 <button className="mam-btn" onClick={handleLimparLog}>
-                  🗑 Limpar Log
+                  🗑 {tx('Limpar Log', 'Clear Log')}
                 </button>
               </div>
             </div>
@@ -2395,9 +2442,12 @@ function App() {
 
         {abaAtiva === 'transferencia' && (
           <section className="mam-panel">
-            <h1 className="mam-section-title">TRANSFERÊNCIA & SINCRONIZAÇÃO</h1>
+            <h1 className="mam-section-title">{tx('TRANSFERÊNCIA & SINCRONIZAÇÃO', 'TRANSFER & SYNC')}</h1>
             <p className="mam-section-desc">
-              Compare bibliotecas (ou containers <code>.zip</code>), sincronize sem sobrescritas inesperadas e valide integridade SHA-256.
+              {tx(
+                'Compare bibliotecas (ou containers .zip), sincronize sem sobrescritas inesperadas e valide integridade SHA-256.',
+                'Compare libraries (or .zip containers), sync without unexpected overwrites, and verify SHA-256 integrity.',
+              )}
             </p>
 
             <div
@@ -2411,21 +2461,24 @@ function App() {
                 marginBottom: '0.5rem',
               }}
             >
-              <strong>📦 Container Portátil de Distribuição (.zip)</strong>
+              <strong>📦 {tx('Container Portátil de Distribuição (.zip)', 'Portable Distribution Container (.zip)')}</strong>
               <span className="mam-brand-sub">
-                Comprime toda a biblioteca atual (<code>Manga/</code> + <code>System/</code>) em um único arquivo <code>.zip</code> nomeável para envio ou importação em outro computador.
-                Destino padrão: <code>{raizBiblioteca ? `${raizBiblioteca}/Exports` : 'Exports'}</code>
+                {tx(
+                  'Comprime toda a biblioteca atual (Manga/ + System/) em um único arquivo .zip nomeável para envio ou importação em outro computador. Destino padrão:',
+                  'Compresses the entire current library (Manga/ + System/) into a single named .zip file for sharing or importing on another computer. Default destination:',
+                )}{' '}
+                <code>{raizBiblioteca ? `${raizBiblioteca}/Exports` : 'Exports'}</code>
               </span>
               <div className="mam-toolbar-row">
                 <input
                   className="mam-input mam-search-input"
-                  placeholder="Nome do container (ex: MinhaColecao_2026)"
+                  placeholder={tx('Nome do container (ex: MinhaColecao_2026)', 'Container name (e.g. MyCollection_2026)')}
                   value={nomeContainer}
                   onChange={(e) => setNomeContainer(e.target.value)}
                 />
                 <input
                   className="mam-input mam-search-input"
-                  placeholder="Pasta de saída (opcional; vazio usa Exports)"
+                  placeholder={tx('Pasta de saída (opcional; vazio usa Exports)', 'Output folder (optional; empty uses Exports)')}
                   value={pastaSaidaContainer}
                   onChange={(e) => setPastaSaidaContainer(e.target.value)}
                 />
@@ -2434,7 +2487,9 @@ function App() {
                   disabled={empacotandoContainer}
                   onClick={handleEmpacotarContainer}
                 >
-                  {empacotandoContainer ? 'Comprimindo...' : 'Comprimir Biblioteca em Container'}
+                  {empacotandoContainer
+                    ? tx('Comprimindo...', 'Compressing...')
+                    : tx('Comprimir Biblioteca em Container', 'Compress Library to Container')}
                 </button>
               </div>
               {relatorioContainer && (
@@ -2453,11 +2508,11 @@ function App() {
                 >
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: '0.84rem' }}>
-                      <strong>Container gerado:</strong>{' '}
+                      <strong>{tx('Container gerado:', 'Container created:')}</strong>{' '}
                       <code style={{ wordBreak: 'break-all' }}>{relatorioContainer.caminho_arquivo}</code>
                     </div>
                     <div className="mam-brand-sub">
-                      {relatorioContainer.quantidade_arquivos} arquivo(s) •{' '}
+                      {relatorioContainer.quantidade_arquivos} {tx('arquivo(s)', 'file(s)')} •{' '}
                       {(relatorioContainer.bytes_totais / (1024 * 1024)).toFixed(2)} MB
                     </div>
                   </div>
@@ -2465,7 +2520,7 @@ function App() {
                     className="mam-btn"
                     onClick={() => setOrigemTransfer(relatorioContainer.caminho_arquivo)}
                   >
-                    Usar como Origem
+                    {tx('Usar como Origem', 'Use as Source')}
                   </button>
                 </div>
               )}
@@ -2474,26 +2529,30 @@ function App() {
             <div className="mam-toolbar-row">
               <input
                 className="mam-input mam-search-input"
-                placeholder="Caminho da biblioteca origem ou container (.zip)"
+                placeholder={tx('Caminho da biblioteca origem ou container (.zip)', 'Source library or container (.zip) path')}
                 value={origemTransfer}
                 onChange={(e) => setOrigemTransfer(e.target.value)}
               />
               <input
                 className="mam-input mam-search-input"
-                placeholder={`Caminho da biblioteca destino${raizBiblioteca ? ` (ex: ${raizBiblioteca})` : ''}`}
+                placeholder={tx(
+                  'Caminho da biblioteca destino{ex}',
+                  'Destination library path{ex}',
+                  { ex: raizBiblioteca ? ` (ex: ${raizBiblioteca})` : '' },
+                )}
                 value={destinoTransfer}
                 onChange={(e) => setDestinoTransfer(e.target.value)}
               />
             </div>
             <div className="mam-toolbar-row">
               <button className="mam-btn" onClick={handleCompararBibliotecas}>
-                Comparar Bibliotecas
+                {tx('Comparar Bibliotecas', 'Compare Libraries')}
               </button>
               <button className="mam-btn" onClick={() => handleSincronizar(false)}>
-                Sincronizar (Sem Sobrescrita)
+                {tx('Sincronizar (Sem Sobrescrita)', 'Sync (No Overwrite)')}
               </button>
               <button className="mam-btn mam-btn-primary" onClick={handleCopiaIntegral}>
-                Cópia Integral (SHA-256)
+                {tx('Cópia Integral (SHA-256)', 'Full Copy (SHA-256)')}
               </button>
             </div>
             {diferenca && (
@@ -2604,20 +2663,23 @@ function App() {
           <section className="mam-panel">
             <h1 className="mam-section-title">MANGA AI ENGINE</h1>
             <p className="mam-section-desc">
-              Processo auxiliar Python local (JSON-RPC 2.0 stdio) — sem downloads automáticos.
+              {tx(
+                'Processo auxiliar Python local (JSON-RPC 2.0 stdio) — sem downloads automáticos.',
+                'Local Python auxiliary process (JSON-RPC 2.0 stdio) — no automatic downloads.',
+              )}
             </p>
             <div className="mam-toolbar-row">
               <button className="mam-btn mam-btn-primary" onClick={handleVerificarAi}>
-                Verificar Status do AI Engine
+                {tx('Verificar Status do AI Engine', 'Check AI Engine Status')}
               </button>
               <input
                 className="mam-input mam-search-input"
-                placeholder="Diretório de modelos locais (.onnx / .pt)"
+                placeholder={tx('Diretório de modelos locais (.onnx / .pt)', 'Local models directory (.onnx / .pt)')}
                 value={diretorioModelos}
                 onChange={(e) => setDiretorioModelos(e.target.value)}
               />
               <button className="mam-btn" onClick={handleListarModelos}>
-                Listar Modelos Locais
+                {tx('Listar Modelos Locais', 'List Local Models')}
               </button>
             </div>
             {aiStatus && <pre className="mam-pre">{JSON.stringify(aiStatus, null, 2)}</pre>}
@@ -2648,7 +2710,7 @@ function App() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mam-modal-header">
-              <strong>ⓘ Como usar o Importar por Link & Sites Suportados</strong>
+              <strong>ⓘ {tx('Como usar o Importar por Link & Sites Suportados', 'How to use Import by Link & Supported Sites')}</strong>
               <button
                 type="button"
                 className="mam-btn"
@@ -2777,7 +2839,7 @@ function App() {
             }}
           >
             <div className="mam-modal-header">
-              <strong>Importar por Link / Página da Obra</strong>
+              <strong>{tx('Importar por Link / Página da Obra', 'Import via Link / Series Page')}</strong>
               <button
                 type="button"
                 className="mam-btn"
@@ -2792,20 +2854,23 @@ function App() {
                 className={`mam-segmented-btn ${modoImportacao === 'obra' ? 'active' : ''}`}
                 onClick={() => setModoImportacao('obra')}
               >
-                Página Central da Obra (Lote)
+                {tx('Página Central da Obra (Lote)', 'Series Main Page (Batch)')}
               </button>
               <button
                 type="button"
                 className={`mam-segmented-btn ${modoImportacao === 'capitulo' ? 'active' : ''}`}
                 onClick={() => setModoImportacao('capitulo')}
               >
-                Capítulo Único / URLs Manuais
+                {tx('Capítulo Único / URLs Manuais', 'Single Chapter / Manual URLs')}
               </button>
             </div>
             <p className="mam-section-desc">
               {modoImportacao === 'obra'
-                ? 'Cole o link principal da obra (ex.: mangafire.to/title/... ou mangalivre.to/manga/...) para listar e selecionar todos os capítulos.'
-                : `Extratores ativos: ${extratores.map((e) => e.id).join(', ') || 'mangadex, mangafire, generico'}`}
+                ? tx(
+                    'Cole o link principal da obra (ex.: mangafire.to/title/... ou mangalivre.to/manga/...) para listar e selecionar todos os capítulos.',
+                    'Paste the main series link (e.g. mangafire.to/title/... or weebcentral.com/series/...) to list and select all chapters.',
+                  )
+                : `${tx('Extratores ativos:', 'Active extractors:')} ${extratores.map((e) => e.id).join(', ') || 'mangadex, mangafire, generico'}`}
             </p>
 
             {modoImportacao === 'obra' ? (
@@ -3280,7 +3345,7 @@ function App() {
               <div className="mam-toolbar-row">
                 <input
                   className="mam-input mam-search-input"
-                  placeholder="Caminho do arquivo (ex: C:\Users\Gabriel\Downloads\Red Sonja.cbr)"
+                  placeholder={tx('Caminho do arquivo (ex: C:\\Users\\Gabriel\\Downloads\\Red Sonja.cbr)', 'File path (e.g. C:\\Downloads\\Manga.cbr)')}
                   value={localArquivoPath}
                   onChange={(e) => setLocalArquivoPath(e.target.value)}
                   required
@@ -3299,20 +3364,20 @@ function App() {
                     }
                   }}
                 >
-                  📁 Procurar no PC...
+                  📁 {tx('Procurar no PC...', 'Browse PC...')}
                 </button>
               </div>
               <div className="mam-toolbar-row">
                 <input
                   className="mam-input mam-search-input"
-                  placeholder="Título da obra (opcional — detectado pelo nome do arquivo)"
+                  placeholder={tx('Título da obra (opcional — detectado pelo nome do arquivo)', 'Series title (optional — detected from filename)')}
                   value={localObraTitulo}
                   onChange={(e) => setLocalObraTitulo(e.target.value)}
                 />
                 <input
                   className="mam-input"
                   type="number"
-                  placeholder="Cap. (opcional)"
+                  placeholder={tx('Cap. (opcional)', 'Ch. (optional)')}
                   value={localNumeroCap}
                   onChange={(e) => setLocalNumeroCap(e.target.value)}
                   style={{ width: 120 }}
@@ -3324,10 +3389,12 @@ function App() {
                   className="mam-btn"
                   onClick={() => setModalImportarLocalAberto(false)}
                 >
-                  Cancelar
+                  {tx('Cancelar', 'Cancel')}
                 </button>
                 <button className="mam-btn mam-btn-primary" type="submit" disabled={importandoLocal}>
-                  {importandoLocal ? '⏳ Convertendo e importando...' : 'Importar para Biblioteca'}
+                  {importandoLocal
+                    ? tx('⏳ Convertendo e importando...', '⏳ Converting and importing...')
+                    : tx('Importar para Biblioteca', 'Import to Library')}
                 </button>
               </div>
             </form>
@@ -3336,10 +3403,10 @@ function App() {
       )}
 
       <footer className="mam-statusbar">
-        <span>MAM v0.1.0 • Portátil</span>
+        <span>MAM v0.1.0 • {tx('Portátil', 'Portable')}</span>
         <span className="mam-status-ready">
           <span className="mam-status-dot" />
-          System Ready
+          {tx('Sistema Pronto', 'System Ready')}
         </span>
       </footer>
     </div>

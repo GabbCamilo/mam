@@ -1,3 +1,5 @@
+import { useI18n } from '../i18n'
+
 export interface ConfirmModalData {
   titulo: string
   mensagem: string
@@ -12,6 +14,7 @@ interface ConfirmModalProps {
 }
 
 export function ConfirmModal({ modal, onClose }: ConfirmModalProps) {
+  const { tx } = useI18n()
   if (!modal) return null
 
   return (
@@ -32,7 +35,7 @@ export function ConfirmModal({ modal, onClose }: ConfirmModalProps) {
         </p>
         <div className="mam-toolbar-row" style={{ justifyContent: 'flex-end' }}>
           <button type="button" className="mam-btn" onClick={onClose}>
-            Voltar
+            {tx('Voltar', 'Back')}
           </button>
           <button
             type="button"

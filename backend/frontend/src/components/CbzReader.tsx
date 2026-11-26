@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useI18n } from '../i18n'
 import {
   Capitulo,
   MarcadorPagina,
@@ -34,6 +35,7 @@ export function CbzReader({
   extraToolbarActions,
   renderOverlayPagina,
 }: CbzReaderProps) {
+  const { tx } = useI18n()
   const [indiceAtual, setIndiceAtual] = useState(0)
   const [paginaPrincipal, setPaginaPrincipal] = useState<PaginaExtraida | null>(null)
   const [paginaSecundaria, setPaginaSecundaria] = useState<PaginaExtraida | null>(null)
@@ -380,35 +382,35 @@ export function CbzReader({
       <div className="mam-reader-toolbar">
         <div className="mam-toolbar-row">
           <button className="mam-btn" onClick={onFechar}>
-            ← Biblioteca
+            ← {tx('Biblioteca', 'Library')}
           </button>
           <button className="mam-btn" onClick={() => setModalCapitulosAberto(true)}>
-            Cap. {capitulo.numero} ({indiceAtual + 1}/{Math.max(totalPaginas, 1)}) ▾
+            {tx('Cap.', 'Ch.')} {capitulo.numero} ({indiceAtual + 1}/{Math.max(totalPaginas, 1)}) ▾
           </button>
           <button className="mam-btn" onClick={voltarPagina}>
-            ◀ Anterior
+            ◀ {tx('Anterior', 'Previous')}
           </button>
           <button className="mam-btn mam-btn-primary" onClick={avancarPagina}>
-            Próxima ▶
+            {tx('Próxima', 'Next')} ▶
           </button>
         </div>
 
         <div className="mam-toolbar-row">
           <button className="mam-btn" onClick={() => setModalLayoutAberto(true)}>
-            ⚙ Layout
+            ⚙ {tx('Layout', 'Layout')}
           </button>
           <button
             className={`mam-btn ${telaCheia ? 'mam-btn-active' : ''}`}
             onClick={alternarTelaCheia}
-            title="Tela Cheia (F11)"
+            title={tx('Tela Cheia (F11)', 'Fullscreen (F11)')}
           >
-            {telaCheia ? '⤢ Sair Tela Cheia' : '⛶ Tela Cheia'}
+            {telaCheia ? `⤢ ${tx('Sair Tela Cheia', 'Exit Fullscreen')}` : `⛶ ${tx('Tela Cheia', 'Fullscreen')}`}
           </button>
           <button
             className={`mam-btn ${paginaAtualMarcada ? 'mam-btn-active' : ''}`}
             onClick={handleAlternarMarcador}
           >
-            {paginaAtualMarcada ? '🔖 Desmarcar' : '🔖 Marcar'}
+            {paginaAtualMarcada ? `🔖 ${tx('Desmarcar', 'Unbookmark')}` : `🔖 ${tx('Marcar', 'Bookmark')}`}
           </button>
           {extraToolbarActions}
         </div>
@@ -428,7 +430,7 @@ export function CbzReader({
             fontSize: '0.8rem',
           }}
         >
-          <span style={{ color: '#94a3b8' }}>Marcadores:</span>
+          <span style={{ color: '#94a3b8' }}>{tx('Marcadores:', 'Bookmarks:')}</span>
           {marcadores.map((m) => (
             <button key={m.pagina} className="mam-btn" onClick={() => irParaPagina(m.pagina)}>
               {m.nota}
@@ -447,7 +449,7 @@ export function CbzReader({
             borderRadius: 8,
           }}
         >
-          Erro ao carregar página: {erro}
+          {tx('Erro ao carregar página:', 'Error loading page:')} {erro}
         </div>
       )}
 
@@ -553,7 +555,7 @@ export function CbzReader({
                   flexShrink: 0,
                 }}
               >
-                Página {idx + 1}
+                {tx('Página', 'Page')} {idx + 1}
               </div>
             )
           })
@@ -571,7 +573,7 @@ export function CbzReader({
               justifyItems: 'center',
               cursor: 'pointer',
             }}
-            title="Clique na esquerda para voltar ou na direita para avançar"
+            title={tx('Clique na esquerda para voltar ou na direita para avançar', 'Click left to go back or right to advance')}
           >
             {paginaPrincipal && (
               <div
@@ -654,7 +656,7 @@ export function CbzReader({
                   alt={paginaPrincipal.nome}
                   decoding="async"
                   onClick={handleClickNavegacaoImagem}
-                  title="Clique na esquerda para voltar ou na direita para avançar"
+                  title={tx('Clique na esquerda para voltar ou na direita para avançar', 'Click left to go back or right to advance')}
                   style={{
                     ...estiloImagem,
                     width: ajuste === 'fit-width' ? '100%' : 'auto',
@@ -741,7 +743,7 @@ export function CbzReader({
         <div className="mam-modal-backdrop" onClick={() => setModalLayoutAberto(false)}>
           <div className="mam-modal" onClick={(e) => e.stopPropagation()}>
             <div className="mam-modal-header">
-              <strong>Layout & Visualização</strong>
+              <strong>{tx('Layout & Visualização', 'Layout & View')}</strong>
               <button className="mam-btn" onClick={() => setModalLayoutAberto(false)}>
                 ✕
               </button>
@@ -800,15 +802,15 @@ export function CbzReader({
             </div>
 
             <div>
-              <small style={{ color: '#94a3b8' }}>ZOOM PADRÃO</small>
+              <small style={{ color: '#94a3b8' }}>{tx('ZOOM PADRÃO', 'DEFAULT ZOOM')}</small>
               <div className="mam-toolbar-row" style={{ marginTop: '0.35rem' }}>
                 <button
                   className={`mam-btn ${usarZoomPadrao ? 'mam-btn-active' : ''}`}
                   onClick={() => setUsarZoomPadrao((v) => !v)}
                 >
                   {usarZoomPadrao
-                    ? `✓ Zoom Padrão (${zoomPadraoPorModo[modo]}%)`
-                    : 'Zoom Padrão: OFF'}
+                    ? `✓ ${tx('Zoom Padrão', 'Default Zoom')} (${zoomPadraoPorModo[modo]}%)`
+                    : tx('Zoom Padrão: OFF', 'Default Zoom: OFF')}
                 </button>
                 <button
                   className="mam-btn"
@@ -817,22 +819,22 @@ export function CbzReader({
                     setUsarZoomPadrao(true)
                   }}
                 >
-                  Usar {zoom}% como padrão
+                  {tx('Usar {zoom}% como padrão', 'Use {zoom}% as default', { zoom })}
                 </button>
               </div>
             </div>
 
             <div>
-              <small style={{ color: '#94a3b8' }}>AJUSTE À TELA</small>
+              <small style={{ color: '#94a3b8' }}>{tx('AJUSTE À TELA', 'FIT TO SCREEN')}</small>
               <select
                 className="mam-select"
                 style={{ width: '100%', marginTop: '0.35rem' }}
                 value={ajuste}
                 onChange={(e) => setAjuste(e.target.value as AjusteTela)}
               >
-                <option value="fit-width">Ajustar à Largura</option>
-                <option value="fit-height">Ajustar à Altura</option>
-                <option value="original">Tamanho Original</option>
+                <option value="fit-width">{tx('Ajustar à Largura', 'Fit Width')}</option>
+                <option value="fit-height">{tx('Ajustar à Altura', 'Fit Height')}</option>
+                <option value="original">{tx('Tamanho Original', 'Original Size')}</option>
               </select>
             </div>
           </div>
@@ -849,13 +851,13 @@ export function CbzReader({
                   className={`mam-segmented-btn ${abaModalCap === 'capitulos' ? 'active' : ''}`}
                   onClick={() => setAbaModalCap('capitulos')}
                 >
-                  Capítulos
+                  {tx('Capítulos', 'Chapters')}
                 </button>
                 <button
                   className={`mam-segmented-btn ${abaModalCap === 'volumes' ? 'active' : ''}`}
                   onClick={() => setAbaModalCap('volumes')}
                 >
-                  Volumes
+                  {tx('Volumes', 'Volumes')}
                 </button>
               </div>
               <button className="mam-btn" onClick={() => setModalCapitulosAberto(false)}>
@@ -868,7 +870,7 @@ export function CbzReader({
                 <div className="mam-toolbar-row">
                   <input
                     className="mam-input mam-search-input"
-                    placeholder="🔍 Buscar capítulo..."
+                    placeholder={tx('🔍 Buscar capítulo...', '🔍 Search chapter...')}
                     value={buscaModalCap}
                     onChange={(e) => setBuscaModalCap(e.target.value)}
                   />
@@ -876,7 +878,7 @@ export function CbzReader({
                     className="mam-btn mam-btn-primary"
                     onClick={() => setOrdemModalCap((o) => (o === 'desc' ? 'asc' : 'desc'))}
                   >
-                    Cap {ordemModalCap === 'desc' ? '↓' : '↑'}
+                    {tx('Cap', 'Ch')} {ordemModalCap === 'desc' ? '↓' : '↑'}
                   </button>
                 </div>
 
@@ -890,8 +892,8 @@ export function CbzReader({
                         setModalCapitulosAberto(false)
                       }}
                     >
-                      <span>Cap. {c.numero}</span>
-                      <span className="mam-brand-sub">{c.quantidade_paginas} págs</span>
+                      <span>{tx('Cap.', 'Ch.')} {c.numero}</span>
+                      <span className="mam-brand-sub">{c.quantidade_paginas} {tx('págs', 'pgs')}</span>
                     </div>
                   ))}
                 </div>
@@ -910,13 +912,13 @@ export function CbzReader({
                           setModalCapitulosAberto(false)
                         }}
                       >
-                        <span>Cap. {c.numero}</span>
+                        <span>{tx('Cap.', 'Ch.')} {c.numero}</span>
                       </div>
                     ))}
                   </div>
                 ))}
                 {volumesDisponiveis.length === 0 && (
-                  <p className="mam-section-desc">Nenhum volume cadastrado para esta obra.</p>
+                  <p className="mam-section-desc">{tx('Nenhum volume cadastrado para esta obra.', 'No volumes registered for this series.')}</p>
                 )}
               </div>
             )}
