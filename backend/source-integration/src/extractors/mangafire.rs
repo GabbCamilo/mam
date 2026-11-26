@@ -61,17 +61,19 @@ impl ExtratorSite for MangaFireExtractor {
             if let Ok(resp) = self.client.get(url).send().await {
                 if resp.status().is_success() {
                     if let Ok(html) = resp.text().await {
-                        paginas_estaticas = extrair_urls_imagens_html(&html);
-                        if paginas_estaticas.len() > 1 {
-                            return Ok(paginas_estaticas);
+                        if let Some(paginas_container) =
+                            crate::extractors::extrair_urls_imagens_de_container_leitor(&html)
+                        {
+                            return Ok(paginas_container);
                         }
+                        paginas_estaticas = extrair_urls_imagens_html(&html);
                     }
                 }
             }
             if let Ok(paginas_cdp) =
                 crate::extractors::smart_extract_pages_via_ai_engine(url).await
             {
-                if paginas_cdp.len() > paginas_estaticas.len() {
+                if !paginas_cdp.is_empty() {
                     return Ok(paginas_cdp);
                 }
             }

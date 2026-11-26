@@ -1146,7 +1146,7 @@ function App() {
             carregarObras()
           }}
         >
-          Log de Downloads ({downloadsLog.length + operacoes.filter((o) => !o.concluida && !o.cancelada).length})
+          Log de Downloads ({downloadsLog.length + operacoesDownload.filter((o) => !o.concluida && !o.cancelada).length})
         </button>
         <button
           className={`mam-btn ${abaAtiva === 'transferencia' ? 'mam-btn-active' : ''}`}
@@ -1798,23 +1798,11 @@ function App() {
                 <select
                   className="mam-select"
                   aria-label="Mecanismo de busca nativo"
-                  value={conectorBuscaAtivo}
+                  value={conectorBuscaAtivo === 'mangadex' ? 'mangadex' : 'universal'}
                   onChange={(e) => setConectorBuscaAtivo(e.target.value)}
                 >
                   <option value="universal">🌐 Universal (IA Portátil)</option>
-                  {(conectoresCatalogo?.sites ?? [])
-                    .filter((s) => s.id === 'mangadex' || Boolean(s.url_busca))
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.nome}
-                      </option>
-                    ))}
-                  {!conectoresCatalogo && (
-                    <>
-                      <option value="mangadex">MangaDex (API Pública)</option>
-                      <option value="mangafire">MangaFire (Web Inteligente)</option>
-                    </>
-                  )}
+                  <option value="mangadex">MangaDex (API Pública)</option>
                 </select>
                 <input
                   className="mam-input mam-search-input"
@@ -2077,7 +2065,7 @@ function App() {
                     className={`mam-segmented-btn ${subAbaLogs === 'downloads' ? 'active' : ''}`}
                     onClick={() => setSubAbaLogs('downloads')}
                   >
-                    Downloads ({downloadsLog.length + operacoes.filter((o) => !o.concluida && !o.cancelada).length})
+                    Downloads ({downloadsLog.length + operacoesDownload.filter((o) => !o.concluida && !o.cancelada).length})
                   </button>
                   <button
                     className={`mam-segmented-btn ${subAbaLogs === 'exclusoes' ? 'active' : ''}`}

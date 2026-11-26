@@ -882,14 +882,26 @@ def extract_chapter_pages(
     url: str,
     memory_hints: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Extrai todas as URLs de imagens reais de um capítulo via CDP (scroll + avanço single-page)."""
+    """Extrai todas as URLs de imagens reais de um capítulo via CDP (Network JSON + scroll)."""
     with _BrowserSession() as cdp:
+        cdp.call("Network.enable")
         cdp.call("Page.navigate", {"url": url})
         _wait_spa_settle(
             cdp,
-            "document.querySelectorAll('img').length > 0",
+            "document.querySelectorAll('img, canvas').length > 0",
             max_wait_s=9.0,
         )
+
+        # Se a página carregou as URLs do capítulo via JSON/AJAX (ex.: MangaFire), extrai direto
+        json_bodies_init = _collect_json_network_bodies(cdp) + _collect_inline_script_json_bodies(cdp)
+        if json_bodies_init:
+            imgs_json = _extract_images_from_json_bodies(json_bodies_init)
+            if len(imgs_json) >= 3:
+                return {
+                    "url": url,
+                    "total_paginas": len(imgs_json),
+                    "urls_imagens": imgs_json,
+                }
 
         # Tenta alternar para Long Strip caso o leitor tenha botão visível
         cdp.eval_js(
@@ -910,20 +922,26 @@ def extract_chapter_pages(
             or url.split("?")[0].split("#")[0].rstrip("/")
         )
 
-        for _ in range(120):
+        for _ in range(180):
             snap = cdp.eval_js(
                 """
                 const imgs = Array.from(document.querySelectorAll('img')).map(img => ({
-                  src: img.getAttribute('data-src') || img.currentSrc || img.src || '',
+                  src: img.getAttribute('data-url') || img.getAttribute('data-original') || img.getAttribute('data-lazy-src') || img.getAttribute('data-src') || img.currentSrc || img.src || '',
                   w: img.naturalWidth || 0,
                   h: img.naturalHeight || 0,
                   inReader: Boolean(img.closest('[class*="reader"], [class*="chapter"], [class*="page"], main'))
                 }));
                 const text = document.body ? document.body.innerText : '';
                 const m = text.match(/\\b(\\d+)\\s*\\/\\s*(\\d+)\\b/);
+                const docH = Math.max(
+                  document.body ? document.body.scrollHeight : 0,
+                  document.documentElement ? document.documentElement.scrollHeight : 0
+                );
+                const atBottom = (window.scrollY + window.innerHeight) >= (docH - 60);
                 return {
                   curUrl: location.href.split('?')[0].split('#')[0].replace(/\\/+$/, ''),
                   imgs,
+                  atBottom,
                   curPage: m ? parseInt(m[1], 10) : null,
                   totalPages: m ? parseInt(m[2], 10) : null
                 };
@@ -955,17 +973,18 @@ def extract_chapter_pages(
             if total_pages and len(urls_ordenadas) >= int(total_pages):
                 break
 
-            if novas == 0:
+            at_bottom = bool(snap.get("atBottom"))
+            if novas == 0 and at_bottom:
                 idle_steps += 1
-            else:
+            elif novas > 0:
                 idle_steps = 0
-            if idle_steps >= 3:
+            if idle_steps >= 5:
                 break
 
             # Faz scroll; só aciona botão Next se NÃO for um link <a> para outro capítulo
             cdp.eval_js(
                 """
-                window.scrollBy(0, window.innerHeight * 0.9);
+                window.scrollBy(0, Math.max(400, window.innerHeight * 0.85));
                 const nextBtn = document.querySelector('[aria-label*="Next" i], [title*="Next" i], .reader-next, .next-page');
                 if (nextBtn && nextBtn.tagName !== 'A') {
                   nextBtn.click();
@@ -974,7 +993,7 @@ def extract_chapter_pages(
                 }
                 """
             )
-            time.sleep(0.45)
+            time.sleep(0.55)
 
         if not urls_ordenadas:
             json_bodies = _collect_json_network_bodies(cdp) + _collect_inline_script_json_bodies(cdp)

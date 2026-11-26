@@ -118,6 +118,19 @@ pub struct RegistroExtratores {
     extratores: Vec<Arc<dyn ExtratorSite>>,
 }
 
+/// Garante que apenas URLs HTTP/HTTPS sejam requisitadas pelo downloader (bloqueia `file://`, etc.).
+fn validar_url_http_segura(url: &str) -> Result<(), SourceError> {
+    let lower = url.trim().to_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        Ok(())
+    } else {
+        Err(SourceError::Operacao(format!(
+            "Esquema de URL bloqueado por segurança: {}",
+            url
+        )))
+    }
+}
+
 /// Valida os magic bytes de uma imagem baixada para impedir gravação de executáveis/HTML maliciosos no CBZ.
 pub fn validar_bytes_imagem(bytes: &[u8]) -> Result<&'static str, SourceError> {
     const MAX_IMAGEM_BYTES: usize = 50 * 1024 * 1024;
@@ -231,6 +244,7 @@ impl RegistroExtratores {
 
         let mut paginas_bytes = Vec::with_capacity(urls.len());
         for url_img in &urls {
+            validar_url_http_segura(url_img)?;
             let mut req = client.get(url_img);
             if let Some(ref ref_url) = origem_ref {
                 req = req.header(reqwest::header::REFERER, ref_url);
@@ -243,8 +257,8 @@ impl RegistroExtratores {
                     resp.status()
                 )));
             }
-            let ext = extrair_extensao_url(url_img);
             let bytes = resp.bytes().await?.to_vec();
+            let ext = validar_bytes_imagem(&bytes)?;
             paginas_bytes.push((ext, bytes));
         }
 
@@ -397,6 +411,7 @@ impl RegistroExtratores {
         let total = urls_paginas.len();
         let mut paginas_bytes: Vec<(&'static str, Vec<u8>)> = Vec::with_capacity(total);
         for (idx, url) in urls_paginas.iter().enumerate() {
+            validar_url_http_segura(url)?;
             let mut req = client.get(url);
             let headers_cfg = crate::connectors::GerenciadorConectores::headers_para_url(url, None);
             if headers_cfg.is_empty() {
@@ -737,7 +752,8 @@ pub async fn smart_extract_pages_via_ai_engine(
         .await
         .map_err(|e| SourceError::Operacao(e.to_string()))?;
     let paginas = val
-        .get("paginas")
+        .get("urls_imagens")
+        .or_else(|| val.get("paginas"))
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
@@ -1575,7 +1591,9 @@ pub fn empacotar_paginas_em_cbz(paginas: &[(&str, Vec<u8>)]) -> Result<Vec<u8>, 
 /// Extrai URLs de imagens (`data-url`, `data-original`, `data-lazy-src`, `data-src` ou `src`)
 /// de um HTML preservando a ordem de aparição e deduplicando.
 /// Prioriza contêineres de leitura quando presentes para evitar baixar capas de recomendações/sidebar.
-pub fn extrair_urls_imagens_html(html: &str) -> Vec<String> {
+/// Extrai imagens apenas se o HTML contiver um container explícito de leitor de páginas.
+/// Retorna `None` para páginas SPA/JS onde o conteúdo do leitor não está no HTML estático.
+pub fn extrair_urls_imagens_de_container_leitor(html: &str) -> Option<Vec<String>> {
     let lower = html.to_lowercase();
     for marker in [
         "id=\"_imagelist\"",
@@ -1590,6 +1608,7 @@ pub fn extrair_urls_imagens_html(html: &str) -> Vec<String> {
         "reader-area",
         "pages-list",
         "id=\"readerarea\"",
+        "class=\"container-chapter-reader\"",
     ] {
         if let Some(start) = lower.find(marker) {
             let max_end = (start + 250_000).min(html.len());
@@ -1608,9 +1627,16 @@ pub fn extrair_urls_imagens_html(html: &str) -> Vec<String> {
             let end = stop_rel.map_or(max_end, |rel| start + rel);
             let recorte = extrair_urls_imagens_trecho(&html[start..end]);
             if recorte.len() >= 2 {
-                return recorte;
+                return Some(recorte);
             }
         }
+    }
+    None
+}
+
+pub fn extrair_urls_imagens_html(html: &str) -> Vec<String> {
+    if let Some(recorte) = extrair_urls_imagens_de_container_leitor(html) {
+        return recorte;
     }
     extrair_urls_imagens_trecho(html)
 }
@@ -2037,6 +2063,8 @@ mod tests {
         );
         assert!(validar_bytes_imagem(b"MZ\x90\x00\x03\x00\x00\x00").is_err());
         assert!(validar_bytes_imagem(b"<!DOCTYPE html><html></html>").is_err());
+        assert!(validar_url_http_segura("https://cdn.exemplo.com/1.jpg").is_ok());
+        assert!(validar_url_http_segura("file:///C:/Windows/System32/cmd.exe").is_err());
     }
 
     #[test]
